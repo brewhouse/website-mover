@@ -18,4 +18,4 @@ Internal tool that migrates a website into a blank WordPress "seed" site: scans 
 ## Local setup
 - Node 22+, pnpm, Docker (for the test WordPress and Postgres).
 - Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` (never commit `.env`).
-- Client inputs (style guide PDFs, sitemaps, framework theme) go under `inputs/` — gitignored, may be confidential.
+- Client inputs (framework theme, style guide PDFs, sitemaps) go under `inputs/`. Everything there is gitignored except `inputs/README.md`, which lists exactly what's needed and where it goes.

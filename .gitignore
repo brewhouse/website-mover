@@ -8,5 +8,6 @@ coverage/
 .DS_Store
 
 # Client inputs (style guides, sitemaps, framework theme) and scan output
-inputs/
+inputs/*
+!inputs/README.md
 snapshots/
