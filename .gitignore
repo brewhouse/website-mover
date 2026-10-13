@@ -1,0 +1,12 @@
+node_modules/
+.next/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Client inputs (style guides, sitemaps, framework theme) and scan output
+inputs/
+snapshots/
