@@ -40,10 +40,10 @@ export class WpClient {
   }
 
   /** Uploads a file to the media library. */
-  upload<T = unknown>(data: Uint8Array<ArrayBuffer>, filename: string, contentType: string) {
+  upload<T = unknown>(data: Uint8Array<ArrayBuffer>, filename: string, contentType: string, query?: Record<string, string | number>) {
     // Header values must be ASCII; WordPress sanitizes the name again anyway.
     const ascii = filename.normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\]/g, '') || 'file';
-    return this.send<T>('POST', '/wp/v2/media', undefined, data, {
+    return this.send<T>('POST', '/wp/v2/media', query, data, {
       'Content-Type': contentType,
       'Content-Disposition': `attachment; filename="${ascii}"`,
     });

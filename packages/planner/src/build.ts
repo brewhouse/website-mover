@@ -21,6 +21,7 @@ export interface BuildPlanInput {
   jobId: string;
   version: number;
   source: { origin: string; profile: string };
+  inputs: { extractSha256: string };
   target: TargetInfo;
   pages: ExtractedPage[];
   snapshotPages: SnapshotPage[];
@@ -179,6 +180,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     version: input.version,
     createdAt: new Date().toISOString(),
     source: input.source,
+    inputs: input.inputs,
     target,
     items,
     media,

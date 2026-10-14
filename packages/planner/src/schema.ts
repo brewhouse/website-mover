@@ -74,6 +74,8 @@ export const Plan = z.object({
   version: z.number().int().positive(),
   createdAt: z.string(),
   source: z.object({ origin: z.string(), profile: z.string() }),
+  /** sha256 of extract/pages.jsonl: execution refuses content other than what was planned and approved. */
+  inputs: z.object({ extractSha256: z.string() }),
   target: TargetInfo,
   items: z.array(PlanItem),
   media: z.array(PlanMedia),

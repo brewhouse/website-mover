@@ -8,6 +8,8 @@
  *   pnpm --filter @wm/worker wm execute --job jha [--target local]
  *   pnpm --filter @wm/worker wm report  --job jha [--target local]
  */
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { jobPath, readJson, readJsonl, type ExtractedPage, type JobInfo, type SnapshotFile, type SnapshotPage } from '@wm/core';
@@ -57,6 +59,7 @@ switch (command) {
       jobId,
       version: (await latestPlanVersion(jobId)) + 1,
       source: { origin: job.origin, profile: job.profile },
+      inputs: { extractSha256: createHash('sha256').update(await readFile(jobPath(jobId, 'extract', 'pages.jsonl'))).digest('hex') },
       target: info,
       pages: await readJsonl<ExtractedPage>(jobPath(jobId, 'extract', 'pages.jsonl')),
       snapshotPages: await readJsonl<SnapshotPage>(jobPath(jobId, 'snapshot', 'pages.jsonl')),

@@ -65,6 +65,7 @@ function plan(pages: ExtractedPage[], extra: { snapshotPages?: SnapshotPage[]; f
     jobId: 'test',
     version: 1,
     source: { origin, profile: 'bjm' },
+    inputs: { extractSha256: 'test' },
     target,
     pages,
     snapshotPages: extra.snapshotPages ?? [],

@@ -35,6 +35,8 @@ export class LinkMap {
 
   static forPlan(plan: Plan): LinkMap {
     const map = new LinkMap(plan.source.origin);
+    // The target keeps its own front page.
+    map.set(new URL('/', plan.source.origin).href, '/');
     for (const item of plan.items) map.add(item, item.targetPath);
     return map;
   }

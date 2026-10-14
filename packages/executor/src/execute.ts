@@ -1,8 +1,9 @@
 import { createWriteStream } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { htmlToBlocks, loadWordPress, restrictBlocks, serializeBlocks } from '@wm/blocks';
 import { jobPath, readJson, readJsonl, sourceKey, writeJson, type ExtractedPage } from '@wm/core';
-import { loadApprovedPlan, type Plan, type PlanItem, type PlanMedia } from '@wm/planner';
+import { loadApprovedPlan, wpSlug, type Plan, type PlanItem, type PlanMedia } from '@wm/planner';
 import { WpError, type WpClient } from '@wm/wp-client';
 import { LinkMap, rewriteLinks } from './links.js';
 import { probeTarget } from './target.js';
@@ -27,9 +28,9 @@ export interface RunState {
   cleanup: Record<string, string>;
   categories: Record<string, number>;
   entities: Record<string, RunEntity>;
-  failures: { sourceKey: string; kind: EntityKind; step: string; error: string }[];
+  failures: { sourceKey: string; kind: EntityKind | 'redirects'; step: string; error: string }[];
   redirects: { from: string; to: string }[];
-  redirectImport: { imported: number; skipped: number; failed: number } | null;
+  redirectImport: { imported: number; updated: number; skipped: number; failed: number } | null;
 }
 
 type Post = { id: number; slug: string; link: string; status: string };
@@ -50,7 +51,12 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   // Loading the block library blocks the event loop for seconds. Do it before any request, or
   // pooled connections the server closes meanwhile get reused and writes fail ("other side closed").
   loadWordPress();
-  const pages = new Map((await readJsonl<ExtractedPage>(jobPath(jobId, 'extract', 'pages.jsonl'))).map((p) => [p.sourceKey, p]));
+  // The approval covers the plan, and the plan records the hash of the content it was built from.
+  const extractFile = jobPath(jobId, 'extract', 'pages.jsonl');
+  if ((await fileSha256(extractFile)) !== plan.inputs.extractSha256) {
+    throw new Error('The extracted content changed after this plan was made: run "wm plan" and approve again');
+  }
+  const pages = new Map((await readJsonl<ExtractedPage>(extractFile)).map((p) => [p.sourceKey, p]));
   await mkdir(jobPath(jobId, 'run'), { recursive: true });
   const events = createWriteStream(jobPath(jobId, 'run', 'events.jsonl'), { flags: 'a' });
   const event = (type: string, data: object = {}) => events.write(`${JSON.stringify({ at: new Date().toISOString(), type, ...data })}\n`);
@@ -69,7 +75,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     redirectImport: null,
   };
   const save = () => writeJson(stateFile(jobId), state);
-  const fail = (key: string, kind: EntityKind, step: string, err: unknown) => {
+  const fail = (key: string, kind: EntityKind | 'redirects', step: string, err: unknown) => {
     const cause = (err as { cause?: { code?: string; message?: string } }).cause;
     const error = (err instanceof Error ? err.message : String(err)) + (cause ? ` (${cause.code ?? ''} ${cause.message ?? ''})`.replace('( ', '(') : '');
     state.failures.push({ sourceKey: key, kind, step, error });
@@ -174,7 +180,23 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   });
   await save();
 
-  // 6. If WordPress gave anything a different slug than planned, fix links to it.
+  // 6. Publish.
+  const drafts = plan.items.filter((i) => posts.get(i.sourceKey)?.status === 'draft');
+  log(`Publish: ${drafts.length} items`);
+  await mapLimit(drafts, 4, async (item) => {
+    try {
+      const route = item.type === 'post' ? '/wp/v2/posts' : '/wp/v2/pages';
+      const post = await client.post<Post>(`${route}/${posts.get(item.sourceKey)!.id}`, { status: 'publish' });
+      posts.set(item.sourceKey, post);
+      state.entities[item.sourceKey]!.path = new URL(post.link).pathname;
+    } catch (err) {
+      fail(item.sourceKey, item.type, 'publish', err);
+    }
+  });
+  await save();
+
+  // 7. WordPress makes slugs unique only on publish: if anything got a different slug than
+  //    planned, point links (and redirects, below) at its real URL.
   const moved = plan.items.filter((i) => posts.has(i.sourceKey) && posts.get(i.sourceKey)!.slug !== i.slug);
   if (moved.length) {
     log(`Links: ${moved.length} items got a different slug; updating links to them`);
@@ -188,20 +210,6 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     await mapLimit(affected, 4, (item) => save1(item).catch((err) => fail(item.sourceKey, item.type, 'relink', err)));
   }
 
-  // 7. Publish.
-  const drafts = plan.items.filter((i) => posts.get(i.sourceKey)?.status === 'draft');
-  log(`Publish: ${drafts.length} items`);
-  await mapLimit(drafts, 4, async (item) => {
-    try {
-      const route = item.type === 'post' ? '/wp/v2/posts' : '/wp/v2/pages';
-      const post = await client.post<Post>(`${route}/${posts.get(item.sourceKey)!.id}`, { status: 'publish' });
-      state.entities[item.sourceKey]!.path = new URL(post.link).pathname;
-    } catch (err) {
-      fail(item.sourceKey, item.type, 'publish', err);
-    }
-  });
-  await save();
-
   // 8. Redirects: every changed source URL → its new path.
   for (const entry of [...plan.items, ...plan.media]) {
     const entity = state.entities[entry.sourceKey];
@@ -213,7 +221,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
       state.redirectImport = await importRedirects(client, state.redirects, log);
     } catch (err) {
       // Redirects are still in the report's redirects.csv.
-      fail('redirects', 'page', 'redirect-import', err);
+      fail('redirects', 'redirects', 'redirect-import', err);
     }
   }
   state.finishedAt = new Date().toISOString();
@@ -250,12 +258,17 @@ async function uploadMedia(
   let url = previous?.link;
   if (!id) {
     const data = new Uint8Array(await readFile(jobPath(jobId, m.path)));
-    const media = await client.upload<Media>(data, m.filename, m.contentType);
+    // Tag it in the upload request itself, so a failure before the update below can't leave an
+    // untagged attachment that a re-run would upload again.
+    const media = await client.upload<Media>(data, m.filename, m.contentType, { 'meta[_wm_source_key]': meta._wm_source_key!, 'meta[_wm_job_id]': meta._wm_job_id! });
     id = media.id;
     url = media.source_url;
   }
+  const title = m.filename.replace(/\.[a-z0-9]+$/i, '');
   await client.post(`/wp/v2/media/${id}`, {
-    title: m.filename.replace(/\.[a-z0-9]+$/i, ''),
+    title,
+    // Attachments and pages share one slug namespace in WordPress; keep files out of the pages' way.
+    slug: `${wpSlug(title, 80) || 'file'}-file`,
     ...(m.type === 'image' ? { alt_text: alt } : {}),
     meta,
     acf: {
@@ -275,24 +288,27 @@ async function importRedirects(client: WpClient, redirects: RunState['redirects'
     (await client.post<{ items: { id: number; name: string }[] }>('/redirection/v1/group', { name: 'Website Mover', moduleId: 1 })).items.find(
       (g) => g.name === 'Website Mover',
     )!;
-  const existing = new Set<string>();
+  type Existing = { id: number; url: string; action_data: string | { url?: string } };
+  const existing = new Map<string, Existing>();
   for (let page = 0; ; page++) {
-    const res = await client.get<{ items: { url: string }[]; total: number }>('/redirection/v1/redirect', {
+    const res = await client.get<{ items: Existing[]; total: number }>('/redirection/v1/redirect', {
       'filterBy[group]': group.id,
       per_page: 200,
       page,
     });
-    for (const r of res.items) existing.add(r.url);
+    for (const r of res.items) existing.set(r.url, r);
     if (res.items.length < 200) break;
   }
-  const result = { imported: 0, skipped: 0, failed: 0 };
+  const result = { imported: 0, updated: 0, skipped: 0, failed: 0 };
   for (const r of redirects) {
-    if (existing.has(r.from)) {
+    const found = existing.get(r.from);
+    const target = found && (typeof found.action_data === 'string' ? found.action_data : found.action_data?.url);
+    if (found && target === r.to) {
       result.skipped++;
       continue;
     }
     try {
-      await client.post('/redirection/v1/redirect', {
+      await client.post(found ? `/redirection/v1/redirect/${found.id}` : '/redirection/v1/redirect', {
         status: 'enabled',
         url: r.from,
         match_type: 'url',
@@ -302,12 +318,12 @@ async function importRedirects(client: WpClient, redirects: RunState['redirects'
         group_id: group.id,
         match_data: { source: { flag_query: 'exact', flag_case: true, flag_trailing: true, flag_regex: false } },
       });
-      result.imported++;
+      result[found ? 'updated' : 'imported']++;
     } catch {
       result.failed++;
     }
   }
-  log(`Redirects: ${result.imported} imported, ${result.skipped} already there, ${result.failed} failed`);
+  log(`Redirects: ${result.imported} imported, ${result.updated} updated, ${result.skipped} unchanged, ${result.failed} failed`);
   return result;
 }
 
@@ -333,6 +349,10 @@ function postDate(date: string | null): { date?: string; date_gmt?: string } {
   const now = new Date();
   // An explicit current date also publishes a post an earlier run left scheduled.
   return new Date(`${date}T00:00:00`) > now ? { date_gmt: now.toISOString().slice(0, 19) } : { date: `${date}T00:00:00` };
+}
+
+async function fileSha256(file: string): Promise<string> {
+  return createHash('sha256').update(await readFile(file)).digest('hex');
 }
 
 function safeKey(url: string): string {

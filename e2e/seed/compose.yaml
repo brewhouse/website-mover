@@ -29,6 +29,8 @@ services:
       WM_HOME: "http://localhost:${SEED_LOCAL_PORT:-8088}"
     volumes:
       - ../../.local/seed:/var/www/html
+      # If the bridge's routes 404 after switching git branches, the bind mount went stale:
+      # docker compose -f e2e/seed/compose.yaml up -d --force-recreate wordpress
       - ../../wp/bridge:/var/www/html/wp-content/plugins/website-mover-bridge
       - ./php.ini:/usr/local/etc/php/conf.d/zz-wm.ini:ro
 

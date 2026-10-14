@@ -110,9 +110,10 @@ export async function scanSite(options: ScanOptions): Promise<ScanSummary> {
   let done = 0;
   const files: SnapshotFile[] = await Promise.all(
     referenced.map(async (url) => {
+      // A file that can't be fetched is recorded with status 0 (the plan lists it); it doesn't stop the scan.
       const res = await fetcher.download(url, filesDir).catch((err) => {
-        if (err instanceof RobotsDisallowedError) return undefined;
-        throw err;
+        if (!(err instanceof RobotsDisallowedError)) log(`  ! ${url}: ${err instanceof Error ? err.message : String(err)}`);
+        return undefined;
       });
       if (++done % 50 === 0) log(`  …${done}/${referenced.length} files (${fetcher.networkRequests} network requests so far)`);
       const filename = dispositionFilename(res?.headers['content-disposition']) ?? pathFilename(url);

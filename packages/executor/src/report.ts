@@ -42,7 +42,11 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
   counts.post.planned = plan.expected.posts;
   counts.document.planned = plan.expected.documents;
   counts.image.planned = plan.expected.images;
-  for (const f of state.failures) counts[f.kind].failed++;
+  // An item failed if the run left nothing for it; later-step failures (relink, publish, redirect
+  // import) are listed in the report but don't make an existing object count as failed.
+  for (const key of new Set(state.failures.filter((f) => f.kind in counts && !state.entities[f.sourceKey]).map((f) => f.sourceKey))) {
+    counts[state.failures.find((f) => f.sourceKey === key)!.kind as EntityKind].failed++;
+  }
 
   const notLive: Report['notLive'] = [];
   const invalid: Report['invalid'] = [];
@@ -89,7 +93,12 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
     target: client.baseUrl,
     counts,
     cleanup: { planned: plan.cleanup.length, trashed: Object.values(state.cleanup).filter((s) => s === 'trashed' || s === 'already-trashed').length },
-    redirects: { total: state.redirects.length, imported: state.redirectImport ? state.redirectImport.imported + state.redirectImport.skipped : null, working, broken },
+    redirects: {
+      total: state.redirects.length,
+      imported: state.redirectImport ? state.redirectImport.imported + state.redirectImport.updated + state.redirectImport.skipped : null,
+      working,
+      broken,
+    },
     failures: state.failures,
     notLive,
     invalid,
