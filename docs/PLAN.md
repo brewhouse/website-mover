@@ -30,19 +30,21 @@ Optional advanced inputs: approved sitemap (CSV/XLSX), project profile + brief, 
 | URLs | Keep slugs and hierarchy where they're WordPress-safe, unless the approved sitemap moves a page. Every legacy URL that changes, including id/query-string page and file URLs, gets a 301 (§6.14). |
 | Language/stack | TypeScript end to end (pnpm workspaces). |
 | Template strategy *(M0)* | PlaneteriaWeb is a **classic PHP child theme of a block theme** (TT2), i.e. a hybrid, so we use the **classic/hybrid path** (§6.7). Design, header, footer and homepage go through the framework's own ACF options, named menus, page templates and ACF fields. See `docs/m0/framework-assessment.md`. |
-| Content model *(M0)* | **Target the framework's own types and field names** (`post`, `events` + `meeting_event_type`, `people`, `resource_library` and library attachments, `departments`, `faqs`, `alert`). Create new ACF types only when nothing fits (§6.4). Field definitions are read from the seed through the bridge (`GET /schema`), never guessed. |
+| Content model *(M0)* | **Target the seed's own types and field names** (checked against the seed DB): `post`; **The Events Calendar** for events and board meetings (category "Board Meetings"); `people`; attachments with the "Media Library" fields; `departments`, `faqs`, `alert`. Create new ACF types only when nothing fits (§6.4). Field definitions are read from the seed through the bridge (`GET /schema`), never guessed. |
 | Block conversion *(M0)* | `@wordpress/blocks` + `@wordpress/block-library` **pinned to the seed's WordPress release** (`wp-X.Y` dist-tags, every `@wordpress/*` package pinned via pnpm overrides) under jsdom. Pipeline: our normalize → `rawHandler` → our tidy → `createBlock` builders. Validated in Node, plus a real-editor check with Playwright. See `docs/m0/blocks-spike.md`. |
 | OpenAI model *(M0)* | **`gpt-6-astra`**, OpenAI's top tier. It passed a Responses API + strict JSON schema + PDF input test. `gpt-6.1-sol` (≈5× cheaper, "near-Astra") is the fallback for bulk/Batch work if cost matters. |
 
 ## 3. Open items / inputs needed
 
-1. ~~Planeteria framework~~: **resolved in M0** (hybrid; see §2). **New: we need the seed's database** (a Pantheon backup) **or an ACF export** (field groups, post types and taxonomies), plus its menus and options. The framework keeps all post types, field groups, options and menus in the DB, not in git (blocks M1).
-2. **JHA style guide PDF**: still needed (M0 spike 6 is waiting on it).
-3. **JHA approved sitemap**, and its format. More important now: the source's tree is odd (582 of 597 nodes sit under "About Us").
-4. **Seed site** URL + Application Password (needed from M1).
-5. ~~Seed plugin stack~~: **resolved.** ACF Pro 6.3.8, Gravity Forms 3.1, Redirection 5.5, Yoast 24, Ajax Search Pro 4.27 (search; PDF indexing still to be checked), The Events Calendar (installed but **unused** by the theme).
-6. ~~OpenAI model~~: **resolved** (`gpt-6-astra`).
-7. **From the JHA inventory.** Decided 2026-10-13:
+1. ~~Planeteria framework~~: **resolved in M0** (hybrid; see §2). ~~Seed database~~: **received** (Pantheon Dev backup in `inputs/framework/`) and imported locally (`e2e/seed/setup.sh --db`). See `docs/m0/framework-assessment.md` §0.
+2. **JHA style guide PDF**: expected the week of 2026-10-13. Needed for M3 only; M1 and M2 don't wait on it.
+3. ~~JHA approved sitemap~~: **decided, there is no separate one.** The goal is a lift-and-shift, so the sitemap *is* the existing site's structure (§6.6).
+4. ~~Seed site URL + Application Password~~: **in `.env` and checked** (administrator, `unfiltered_html`, not password-locked). **Still to do:** the team adds `wp/bridge` to the seed's Pantheon codebase, and activates Redirection (inactive on the seed) before M1 writes to it.
+5. **New, blocks the seed disables.** The seed turns off `core/cover`, `core/button`, `core/separator`, `core/preformatted`, `core/code`, `core/details`, `core/gallery`, `core/file`, `core/video`, `core/audio` and more in the editor. Content using them shows as "not supported" there. Either the team re-enables the ones we need, or the converter avoids them (§6.9). Waiting on a decision.
+6. **New, demo content in the seed.** The seed holds city-seed demo/test content: 4 posts, 13 pages, 5 events, 4 alerts, 4 forms, placeholder options. Default: the migration lists it in the plan and removes it on approval.
+7. ~~Seed plugin stack~~: **resolved.** ACF Pro 6.3.8, Gravity Forms 3.1, Redirection 5.5, Yoast 24, Ajax Search Pro 4.27 (search; PDF indexing still to be checked), The Events Calendar (installed but **unused** by the theme).
+8. ~~OpenAI model~~: **resolved** (`gpt-6-astra`).
+9. **From the JHA inventory.** Decided 2026-10-13:
    - **No BJM export.** The crawl is the source of truth.
    - **Skip the 720 files nothing links to.** They stay listed in the plan, so a reviewer can still include them.
    - **Rebuild all public forms in Gravity Forms**, including direct deposit and the vendor application. The direct-deposit form collects SSN and bank details, so it is built with short entry retention and notifications that leave those fields out. JHA signs off on how it's handled. The SMS/email alerts sign-up is a subscription service, not just a form, so it needs a tool behind it.
@@ -50,8 +52,8 @@ Optional advanced inputs: approved sitemap (CSV/XLSX), project profile + brief, 
    
    Still open:
    - **Quick links.** Default: build them from the portals the current site links to (Rent Café applicant/resident and landlord, e-procurement, careers, Help Center, Customer Service Survey), for JHA to adjust.
-   - **GA4.** Keep the current measurement ID if JHA, not BJM, controls that Google Analytics account.
-8. **New, theme code changes for the team** (T1–T7 in `docs/m0/framework-assessment.md` §6): placeholder logo text, homepage lorem ipsum, missing `index.php`/archives, a Pantheon-only call, hard-coded fonts, two meeting models, broken patterns.
+   - **GA4: keep `G-ZHVZNQBLZ8`** (set in `.env`). Confirm JHA, not BJM, can log into that Google Analytics account.
+10. **Theme code changes for the team** (T1–T7 in `docs/m0/framework-assessment.md` §6): placeholder logo text, homepage lorem ipsum, missing `index.php`/archives, a Pantheon-only call, hard-coded fonts, two meeting models, broken patterns.
 
 ## 4. Pipeline
 
@@ -115,10 +117,10 @@ Sources are never WordPress, so the HTML crawl is the only path:
 | Preset | Framework target |
 |---|---|
 | News | `post` + `category`. Listing page uses the News template |
-| Events | Framework `events` + `event_type`, **not** The Events Calendar (installed but unused by the theme) |
-| Board meetings | Provisionally `events` tagged `meeting_event_type`="Meetings". It has a full single template with agenda, packet, minutes, video and supplemental files. Kind and committee go into `event_type` terms. Final choice between this and the framework's separate `meetings` type waits for the seed DB (theme change T6) |
-| Board members | `people` (`first_name`, `last_name`, `title`, `biography`, photo), shown on a page through a people-grid ACF block. Term dates need a small extra field group |
-| Documents | Library **attachments** (`index_for_library`, `publication_date`, `resource_type`, `related_depts`) for single files. `resource_library` posts for multi-file or external resources |
+| Events | **The Events Calendar** (`tribe_events`, venues, organizers, `tribe_events_cat`), created through its REST API (`tribe/events/v1`). The framework's own `events` templates are unused leftovers; the seed DB has no such type |
+| Board meetings | **Events Calendar events in the seed's "Board Meetings" category.** Kind and committee go into more `tribe_events_cat` terms. Agenda, minutes, packet and recording links go in the event content (events have no ACF fields) |
+| Board members | `people`: name = post title, `title` (role), `phone` and `email` repeaters, `biography`, photo = featured image. Shown on a page through the Contact Cards / Expandable Image Grid block |
+| Documents | **Attachments** with the seed's "Media Library" fields (`index_for_library`, `publication_date`, `library_select`, `related_departments`, `resource_summary`, `keywords`) and `resource_type` terms. `resource_library` has no active fields in the seed |
 | Forms | Gravity Forms, plus the framework's Forms directory (`resource_type` form/application) |
 | Quick links | Homepage `banner_icon` repeater and Buttons List / Icon Button blocks. External portals → `resource_library` with external links. **No `resource_link` type** |
 
@@ -140,6 +142,12 @@ Inference then proposes **extra** types for review (e.g. properties/communities,
 - Report counts documents by type; flags untagged (inaccessible) PDFs; reviewer can mark old documents as **Archive**.
 
 ### 6.6 Approved sitemap (optional input)
+**JHA: no separate sitemap.** The new site keeps the existing site's structure (decided 2026-10-13):
+- **Menus:** copy the current main nav, utility bar and footer links.
+- **Page hierarchy:** comes from the current nav and HTML site map.
+- **URLs:** keep the source's flat `/{slug}` URLs. Parent/child relationships are expressed in menus and breadcrumbs rather than in nested URLs, so slug pages keep their exact URLs. Only id-based (`upages.php?id=N`, `news-view?id=N`) and unsafe slugs get new URLs plus 301s.
+
+The general mechanism below stays for clients who do bring an approved sitemap:
 - CSV/XLSX: title, parent, path.
 - Auto-map source pages → sitemap nodes (path/title similarity + AI); reviewer confirms in the **Sitemap mapping** tab.
 - Matched, same path → keep slug. Matched, moved → new URL + 301. Sitemap node with no source → draft placeholder "needs content". Source page not in sitemap → migrated, left out of menus, flagged.
@@ -154,7 +162,7 @@ Inference then proposes **extra** types for review (e.g. properties/communities,
   - **Content:** Gutenberg.
   - **Colours and heading sizes:** ACF options on "Theme Settings" (`primary_color`… `h6_font_size`), written by the bridge, which then calls the theme's `generate_options_css()`. Mirror the same `:root` variables into Global Styles custom CSS, because the CSS file is written into the theme directory, which is read-only on Pantheon test/live.
   - **Fonts:** Global Styles custom CSS + Font Library. The theme hard-codes Open Sans/Ubuntu.
-  - **Header/footer menus:** named menus "Main Menu", "Top Menu", "Explore Menu", "Footer Menu", "Social Menu" via `/wp/v2/menus` + `/wp/v2/menu-items`. The item description is a Font Awesome class.
+  - **Header/footer menus:** named menus "Main Menu", "Top Menu", "Explore Menu" (missing in the seed, so create it), "Footer Menu", "Social Menu" via `/wp/v2/menus` + `/wp/v2/menu-items`. The item description is a Font Awesome class.
   - **Footer contact:** `footer_*` ACF options.
   - **Logo:** `site_logo`. It needs theme change T1 to be displayed.
   - **Listing pages:** framework page templates set via the REST `template` field (News, Events, Meetings, Document Directory, Forms & Application, Department Directory).
@@ -212,7 +220,7 @@ Extract fields (label, type, required, options) → recreate via per-plugin adap
 Tabs: **Summary** (expected counts, warnings) · **Content** (every URL → type/slug/parent, include toggle, reclassify) · **Sitemap mapping** · **Post types & fields** (rename/merge/split, sample values, coverage %) · **Templates** · **Design** (swatches, fonts, logo, header/footer preview) · **Forms** · **Menus** · **Warnings**. **Approve & run** records approver, time, plan version.
 
 ### 6.12 Execution order
-1. **Preflight:** auth, WP version, required plugins active, theme, upload limits, `Authorization` header not stripped, environment lock (e.g. Pantheon basic-auth lock conflicts with App Passwords).
+1. **Preflight:** auth, WP version, required plugins active, theme, upload limits, `Authorization` header not stripped, environment lock (e.g. Pantheon basic-auth lock conflicts with App Passwords). Also: bridge installed, blocks the seed disables (`dubeb_disabled_blocks`) checked against the blocks we emit, and "Show in REST" switched on for the field groups we write.
 2. **Design:** tokens, fonts, logo, site title/icon.
 3. **Schema:** CPTs, taxonomies, field groups, forms, permalink structure (match source to avoid redirects).
 4. **Terms → media & documents** (dedupe by hash, record each file's legacy URL for redirects).

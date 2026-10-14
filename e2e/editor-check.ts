@@ -36,7 +36,7 @@ const consoleErrors: string[] = [];
 page.on('console', (msg) => msg.type() === 'error' && consoleErrors.push(msg.text()));
 
 await page.goto(`${base}/wp-login.php`);
-await page.fill('#user_login', 'admin');
+await page.fill('#user_login', 'wm-local');
 await page.fill('#user_pass', password);
 // Don't wait for the dashboard's load event: it pulls in external assets.
 await Promise.all([page.waitForURL(/wp-admin/, { waitUntil: 'commit' }), page.click('#wp-submit')]);

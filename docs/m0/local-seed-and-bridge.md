@@ -30,6 +30,17 @@ Notes:
 - The fresh database has **none of the framework's ACF post types, field groups, menus or options**. Those live only in the seed DB (framework-assessment §7.1). The local seed is "framework code + empty DB" until we get a DB export.
 - PHP deprecation notices from older plugins (Add Admin CSS, WP Sheet Editor) are harmless. WP-CLI needs `memory_limit=512M`, which is set in `e2e/seed/php.ini`.
 
+### Update: seed database imported
+
+`e2e/seed/setup.sh --db inputs/framework/<backup>.sql.gz` replaces the local DB with the seed's Pantheon backup:
+- It rewrites the seed's own URL to `http://localhost:8088`.
+- It keeps the seed's plugin selection, switching off only the locally skipped plugins.
+- It adds a separate local admin, `wm-local`, with an Application Password written to `.env`.
+
+The real content model is in framework-assessment §0.
+
+**Hosted seed (read-only checks).** With `SEED_URL`/`SEED_USER`/`SEED_APP_PASSWORD`, `GET /wp/v2/users/me` returns 200. The account is an administrator with `unfiltered_html` and `upload_files`, and the environment isn't password-locked. The bridge isn't installed there yet: it has to be added to the seed's Pantheon codebase (by the team) before M1 can write to it.
+
 ## Spike 3: Bridge plugin skeleton. **Result: PASS**
 
 `wp/bridge` (plugin "Website Mover Bridge" 0.1.0). REST namespace `website-mover/v1`, admin only (`manage_options`):
@@ -45,7 +56,29 @@ Notes:
 
 All three ACF endpoints call ACF's own import (`acf_import_internal_post_type`), so the items look exactly like ones made in the ACF UI.
 
-**Test** (`pnpm exec tsx --env-file=.env packages/wp-client/scripts/bridge-spike.ts`, Application Password auth). It uses the framework's own model: meetings are `events` tagged with the `meeting_event_type` term "Meetings", with the field names `single-events.php` reads.
+**Re-run against the real seed definitions** (seed DB imported; `packages/wp-client/scripts/bridge-spike.ts`, second run shown, all `created: false`):
+
+```
+taxonomy:    {"key":"taxonomy_wm_community_type","id":36607,"type":"acf-taxonomy","created":false}
+post type:   {"key":"post_type_wm_community","id":36608,"type":"acf-post-type","created":false}
+field group: {"key":"group_wm_community_details","id":36609,"type":"acf-field-group","created":false}
+community ACF round trip: OK (9 fields)
+show in rest: {"key":"group_5f35f63c1a6e1","title":"Person Details","changed":false}
+people ACF round trip: OK (4 fields)
+meeting (TEC): {"id":36624,"url":"http://localhost:8088/event/wm-spike-board-meeting/","created":false,"start":"2026-10-21 17:30:00","categories":["Board Meetings"],"venue":"JHA Central Office (spike)"}
+TEC single renders: {"title":true,"agendaLink":true,"frameworkHeader":false}
+form renders: {"page":"http://localhost:8088/wm-spike-help-center/","gformWrapper":true,"fields":6}
+```
+
+What this covers:
+- **New type via ACF:** `community`, with a taxonomy and a 10-field group.
+- **The seed's own `people` type:** "Show in REST" was switched on for its group, then a person was written with text and two repeaters.
+- **A board meeting** created through The Events Calendar's REST API in the seed's "Board Meetings" category, with a venue.
+- **A Gravity Forms form.**
+
+`frameworkHeader: false` is theme change T3: Events Calendar pages use the TT2 header.
+
+**First version of the test** (before the seed DB, on reconstructed definitions). It used the framework's template-implied model: meetings are `events` tagged with the `meeting_event_type` term "Meetings", with the field names `single-events.php` reads.
 
 ```
 taxonomy:    {"key":"taxonomy_wm_meeting_event_type","id":6,"type":"acf-taxonomy","created":false}
@@ -80,4 +113,4 @@ form page: 2 gform wrapper line(s)
 
 **Lesson for M1:** in the first run, `location_address` was guessed as a textarea. The framework template expects a google_map array and crashed (`Cannot access offset of type string on string`, single-events.php:134). M1 must read the hosted seed's real definitions with `GET /schema` instead of recreating them. For local tests, the definitions should come from an ACF export of the seed.
 
-**Next for the bridge (M1–M3):** ACF options write (Theme Settings + footer fields, then `generate_options_css()`), Yoast meta, legacy-URL redirects for id/query-string URLs (PLAN §6.14), and Redirection import.
+**Next for the bridge (M1–M3):** install it on the hosted seed (team, via the Pantheon repo), ACF options write (Theme Settings + footer fields, then `generate_options_css()`), Yoast meta, legacy-URL redirects for id/query-string URLs (PLAN §6.14), and Redirection import.

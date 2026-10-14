@@ -1,11 +1,12 @@
 /**
- * M0 spike: prove the bridge can set up the content model natively, and that a post with ACF
- * values can be written over the REST API with an Application Password.
+ * M0 spike: prove the bridge and the REST API can set up and fill the JHA seed's content model,
+ * using the seed's real definitions (local copy with the seed database imported).
  *
- * Targets the framework's own model: meetings are the `events` post type tagged with the
- * `meeting_event_type` term "meetings", using the field names the PlaneteriaWeb templates read
- * (single-events.php, functions.php meeting AJAX). Those definitions live in the seed's database,
- * not in git, so they are recreated here with the same slugs and field names.
+ * 1. A new type through ACF (stored natively): `community`, for JHA's 29 community pages.
+ * 2. The seed's own `people` type (board members): its "Person Details" field group is switched to
+ *    "Show in REST", then a person is written with ACF values over core REST.
+ * 3. A board meeting as an Events Calendar event in the seed's "Board Meetings" category.
+ * 4. A Gravity Forms form, placed on a page with its block.
  *
  * Run: pnpm exec tsx --env-file=.env packages/wp-client/scripts/bridge-spike.ts
  */
@@ -15,183 +16,172 @@ import { localSeedClient } from '../src/index.ts';
 const wp = localSeedClient();
 const log = (label: string, value: unknown) => console.log(`${label}:`, JSON.stringify(value));
 
-const taxonomy = {
-  key: 'taxonomy_wm_meeting_event_type',
-  title: 'Event Types',
-  taxonomy: 'meeting_event_type',
-  object_type: ['events'],
-  hierarchical: true,
-  public: true,
-  show_in_rest: true,
-  labels: { name: 'Event Types', singular_name: 'Event Type' },
+type Upsert = { key: string; id: number; created: boolean };
+type Term = { id: number; slug: string; name: string };
+type Media = { id: number; source_url: string };
+type Post = { id: number; link: string; acf: Record<string, unknown> };
+type Schema = {
+  post_types: Record<string, { rest_base: string }>;
+  acf: { field_groups: { key: string; title: string; location: { param: string; value: string }[][] }[] };
 };
 
-const postType = {
-  key: 'post_type_wm_events',
-  title: 'Events & Meetings',
-  post_type: 'events',
-  public: true,
-  show_in_rest: true,
-  has_archive: false,
-  // TEC already uses /events/ for tribe_events, so the framework type gets its own slug.
-  rewrite: { permalink_rewrite: 'custom_permalink', slug: 'meetings-events', with_front: true },
-  supports: ['title', 'editor', 'thumbnail', 'excerpt', 'custom-fields'],
-  taxonomies: ['meeting_event_type'],
-  labels: { name: 'Events & Meetings', singular_name: 'Event' },
-  menu_icon: { type: 'dashicons', value: 'dashicons-calendar-alt' },
-};
-
-const field = (name: string, type: string, extra: Record<string, unknown> = {}) => ({
-  key: `field_wm_meeting_${name}`,
+const field = (prefix: string, name: string, type: string, extra: Record<string, unknown> = {}) => ({
+  key: `field_wm_${prefix}_${name}`,
   label: name.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()),
   name,
   type,
   ...extra,
 });
 
-const fieldGroup = {
-  key: 'group_wm_meeting_details',
-  title: 'Meeting details',
-  show_in_rest: 1,
-  location: [[{ param: 'post_type', operator: '==', value: 'events' }]],
-  fields: [
-    field('meeting_date_and_start_time', 'date_time_picker', {
-      display_format: 'F j, Y g:i a',
-      return_format: 'Y-m-d H:i:s',
-    }),
-    field('meeting_end_time', 'time_picker', { display_format: 'g:i a', return_format: 'H:i:s' }),
-    field('was_this_meeting_cancelled', 'true_false', { ui: 1 }),
-    field('location_name', 'text'),
-    // google_map: single-events.php reads ['street_number'], ['city'], ...
-    field('location_address', 'google_map'),
-    field('zoom_link', 'url'),
-    field('summary_desc', 'wysiwyg'),
-    field('agenda_link', 'link', { return_format: 'array' }),
-    field('agenda_packet', 'file', { return_format: 'array', library: 'all' }),
-    field('meeting_minutes', 'file', { return_format: 'array', library: 'all' }),
-    field('meeting_video_link', 'url'),
-    field('supplemental_downloads', 'repeater', {
-      layout: 'table',
-      sub_fields: [
-        field('link_label', 'text'),
-        field('file', 'file', { return_format: 'array' }),
-        field('file_link', 'link', { return_format: 'array' }),
-      ],
-    }),
-  ],
-};
-
-type Upsert = { key: string; id: number; created: boolean };
-type Term = { id: number; slug: string };
-type Media = { id: number; source_url: string };
-type Post = { id: number; link: string; acf: Record<string, unknown>; meeting_event_type: number[] };
-
 async function main() {
-  const status = await wp.get<{ wordpress: string; acf: unknown; forms: unknown; theme: unknown }>(
-    '/website-mover/v1/status',
-  );
-  log('status', { wordpress: status.wordpress, acf: status.acf, forms: status.forms, theme: status.theme });
+  const schema = await wp.get<Schema>('/website-mover/v1/schema');
 
-  // 1. Content model through ACF (stored as ACF items, not code).
-  log('taxonomy', await wp.post<Upsert>('/website-mover/v1/acf/taxonomies', taxonomy));
-  log('post type', await wp.post<Upsert>('/website-mover/v1/acf/post-types', postType));
-  log('field group', await wp.post<Upsert>('/website-mover/v1/acf/field-groups', fieldGroup));
+  // 1. New type through ACF ------------------------------------------------------------------
+  log('taxonomy', await wp.post<Upsert>('/website-mover/v1/acf/taxonomies', {
+    key: 'taxonomy_wm_community_type',
+    title: 'Community Types',
+    taxonomy: 'community_type',
+    object_type: ['community'],
+    hierarchical: true,
+    public: true,
+    show_in_rest: true,
+    labels: { name: 'Community Types', singular_name: 'Community Type' },
+  }));
+  log('post type', await wp.post<Upsert>('/website-mover/v1/acf/post-types', {
+    key: 'post_type_wm_community',
+    title: 'Communities',
+    post_type: 'community',
+    public: true,
+    show_in_rest: true,
+    has_archive: false,
+    rewrite: { permalink_rewrite: 'custom_permalink', slug: 'communities', with_front: true },
+    supports: ['title', 'editor', 'thumbnail', 'excerpt'],
+    taxonomies: ['community_type'],
+    labels: { name: 'Communities', singular_name: 'Community' },
+    menu_icon: { type: 'dashicons', value: 'dashicons-admin-multisite' },
+  }));
+  const c = (name: string, type: string, extra?: Record<string, unknown>) => field('community', name, type, extra);
+  log('field group', await wp.post<Upsert>('/website-mover/v1/acf/field-groups', {
+    key: 'group_wm_community_details',
+    title: 'Community details',
+    show_in_rest: 1,
+    location: [[{ param: 'post_type', operator: '==', value: 'community' }]],
+    fields: [
+      c('address', 'text'),
+      c('city', 'text'),
+      c('state', 'text'),
+      c('zip', 'text'),
+      c('county', 'text'),
+      c('office_phone', 'text'),
+      c('fax', 'text'),
+      c('bedrooms', 'text'),
+      c('activities', 'wysiwyg'),
+      c('map', 'google_map'),
+    ],
+  }));
 
-  // ACF registers post types on init, so routes exist from the next request on.
-  const types = await wp.get<Record<string, { rest_base: string }>>('/wp/v2/types');
-  if (!types.events) throw new Error('events post type is not registered');
-
-  // 2. A term, a document and a meeting with ACF values, all over core REST.
-  const terms = await wp.get<Term[]>('/wp/v2/meeting_event_type', { slug: 'meetings' });
-  const term = terms[0] ?? (await wp.post<Term>('/wp/v2/meeting_event_type', { name: 'Meetings', slug: 'meetings' }));
-
-  const agenda = await uploadPdf('wm-spike-agenda.pdf');
-  const minutes = await uploadPdf('wm-spike-minutes.pdf');
-
-  const acf = {
-    meeting_date_and_start_time: '2026-10-21 17:30:00',
-    meeting_end_time: '19:00:00',
-    was_this_meeting_cancelled: false,
-    location_name: 'JHA Central Office',
-    location_address: {
-      address: '1300 Broad Street, Jacksonville, FL 32202',
-      lat: 30.3393,
-      lng: -81.6646,
-      street_number: '1300',
-      street_name: 'Broad Street',
-      city: 'Jacksonville',
-      state_short: 'FL',
-      post_code: '32202',
-    },
-    zoom_link: 'https://example.com/zoom-spike',
-    summary_desc: '<p>Regular monthly meeting of the Board of Commissioners.</p>',
-    agenda_link: { title: 'Online agenda', url: 'https://example.com/agenda', target: '_blank' },
-    agenda_packet: agenda.id,
-    meeting_minutes: minutes.id,
-    meeting_video_link: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    supplemental_downloads: [{ link_label: 'Budget presentation', file: agenda.id, file_link: null }],
+  const types = await wp.get<Record<string, unknown>>('/wp/v2/types');
+  if (!types.community) throw new Error('community post type is not registered');
+  const termRows = await wp.get<Term[]>('/wp/v2/community_type', { slug: 'rental' });
+  const rental = termRows[0] ?? (await wp.post<Term>('/wp/v2/community_type', { name: 'Rental', slug: 'rental' }));
+  const communityAcf = {
+    address: '1300 Broad Street',
+    city: 'Jacksonville',
+    state: 'FL',
+    zip: '32202',
+    county: 'Duval',
+    office_phone: '(904) 555-0100',
+    fax: '(904) 555-0101',
+    bedrooms: '1, 2, 3',
+    activities: '<p>Monthly resident meeting.</p>',
   };
+  const community = await upsert('community', 'wm-spike-community', {
+    title: 'Sample Community (spike)',
+    content: para('Written by the M0 bridge spike.'),
+    community_type: [rental.id],
+    acf: communityAcf,
+  });
+  await checkAcf('community', community.id, communityAcf);
 
-  const existing = await wp.get<Post[]>('/wp/v2/events', { slug: 'wm-spike-board-meeting', status: 'any' });
-  const body = {
+  // 2. The seed's own `people` type ---------------------------------------------------------
+  if (!schema.post_types.people) throw new Error('the seed has no people post type');
+  const personGroup = schema.acf.field_groups.find((g) =>
+    g.location.some((rules) => rules.some((r) => r.param === 'post_type' && r.value === 'people')),
+  );
+  if (!personGroup) throw new Error('no field group on people');
+  log('show in rest', await wp.post(`/website-mover/v1/acf/field-groups/${personGroup.key}/show-in-rest`, {}));
+
+  const photo = await uploadFixture('wm-spike-portrait.pdf', 'application/pdf');
+  const personAcf = {
+    title: 'Chair',
+    phone: [{ phone_label: 'Office', phone_number: '(904) 555-0102' }],
+    email: [{ email_label: 'Work', email: 'commissioner@example.test' }],
+    biography: '<p>Sample biography.</p>',
+  };
+  const person = await upsert('people', 'wm-spike-commissioner', {
+    title: 'Sample Commissioner (spike)',
+    acf: personAcf,
+  });
+  await checkAcf('people', person.id, personAcf);
+
+  // 3. A board meeting in The Events Calendar ------------------------------------------------
+  type TecEvent = { id: number; url: string; categories: { name: string }[]; start_date: string; venue?: { venue: string } };
+  const boardCat = (await wp.get<Term[]>('/wp/v2/tribe_events_cat', { search: 'Board Meetings' }))[0];
+  if (!boardCat) throw new Error('the seed has no "Board Meetings" event category');
+  const meetingBody = {
     title: 'Board of Commissioners Regular Meeting (spike)',
     slug: 'wm-spike-board-meeting',
     status: 'publish',
-    content: '<!-- wp:paragraph -->\n<p>Written by the M0 bridge spike.</p>\n<!-- /wp:paragraph -->',
-    meeting_event_type: [term.id],
-    meta: {},
-    acf,
+    start_date: '2026-10-21 17:30:00',
+    end_date: '2026-10-21 19:00:00',
+    categories: [boardCat.id],
+    venue: { venue: 'JHA Central Office (spike)', address: '1300 Broad Street', city: 'Jacksonville', state: 'FL', zip: '32202' },
+    // Meeting documents live in the content: tribe_events has no ACF fields in the seed.
+    description: [
+      para('Regular monthly meeting of the Board of Commissioners.'),
+      para(`<a href="${photo.source_url}">Agenda (PDF)</a>`),
+    ].join('\n\n'),
   };
-  const post = existing[0]
-    ? await wp.post<Post>(`/wp/v2/events/${existing[0].id}`, body)
-    : await wp.post<Post>('/wp/v2/events', body);
-  log('meeting', { id: post.id, link: post.link, created: !existing[0] });
+  const [existingEvent] = await wp.get<{ id: number }[]>('/wp/v2/tribe_events', { slug: meetingBody.slug, status: 'any' });
+  const event = existingEvent
+    ? await wp.post<TecEvent>(`/tribe/events/v1/events/${existingEvent.id}`, meetingBody)
+    : await wp.post<TecEvent>('/tribe/events/v1/events', meetingBody);
+  log('meeting (TEC)', {
+    id: event.id,
+    url: event.url,
+    created: !existingEvent,
+    start: event.start_date,
+    categories: event.categories.map((cat) => cat.name),
+    venue: event.venue?.venue,
+  });
+  const eventHtml = await (await fetch(event.url)).text();
+  log('TEC single renders', {
+    title: eventHtml.includes('Board of Commissioners Regular Meeting (spike)'),
+    agendaLink: eventHtml.includes(photo.source_url),
+    frameworkHeader: eventHtml.includes('class="main_header"'),
+  });
 
-  // 3. Read back and compare.
-  const saved = await wp.get<Post>(`/wp/v2/events/${post.id}`, { context: 'edit' });
-  const mismatches = Object.entries(acf).filter(([k, v]) => !sameValue(saved.acf[k], v));
-  log('acf read back', saved.acf);
-  if (mismatches.length) throw new Error(`ACF values differ: ${JSON.stringify(mismatches)}`);
-  console.log('ACF round trip: OK');
-
-  // 4. The framework's own template renders the values.
-  const html = await (await fetch(post.link)).text();
-  const rendered = {
-    location: html.includes('JHA Central Office'),
-    agendaLink: html.includes('https://example.com/agenda'),
-    agendaPacket: html.includes(agenda.source_url),
-    minutes: html.includes(minutes.source_url),
-  };
-  log('single-events.php renders', rendered);
-
-  // 5. A form in Gravity Forms, placed on a page via its block.
+  // 4. Gravity Forms --------------------------------------------------------------------------
   const form = await wp.post<{ id: number; created: boolean; block: { name: string; attrs: { formId: string } } }>(
     '/website-mover/v1/forms',
     {
-      source_key: 'jaxha.org/contact-us#form-1',
-      title: 'Contact Us (spike)',
+      source_key: 'jaxha.org/help-center#form-1',
+      title: 'Help Center (spike)',
       fields: [
         { label: 'Name', type: 'name', required: true },
         { label: 'Email', type: 'email', required: true },
         { label: 'Phone', type: 'phone' },
-        { label: 'Topic', type: 'select', choices: ['Public Housing', 'Housing Choice Voucher', 'Other'] },
+        { label: 'Topic', type: 'select', choices: ['Public Record Request', 'Report Fraud', 'Other'] },
         { label: 'Preferred contact', type: 'checkbox', choices: ['Email', 'Phone'] },
         { label: 'Message', type: 'textarea', required: true },
       ],
     },
   );
   log('form', form);
-
-  const pages = await wp.get<Post[]>('/wp/v2/pages', { slug: 'wm-spike-contact', status: 'any' });
-  const pageBody = {
-    title: 'Contact (spike)',
-    slug: 'wm-spike-contact',
-    status: 'publish',
+  const page = await upsert('pages', 'wm-spike-help-center', {
+    title: 'Help Center (spike)',
     content: `<!-- wp:${form.block.name} ${JSON.stringify(form.block.attrs)} /-->`,
-  };
-  const page = pages[0]
-    ? await wp.post<Post>(`/wp/v2/pages/${pages[0].id}`, pageBody)
-    : await wp.post<Post>('/wp/v2/pages', pageBody);
+  });
   const pageHtml = await (await fetch(page.link)).text();
   log('form renders', {
     page: page.link,
@@ -200,11 +190,33 @@ async function main() {
   });
 }
 
-async function uploadPdf(filename: string): Promise<Media> {
-  const found = await wp.get<Media[]>('/wp/v2/media', { search: filename.replace('.pdf', '') });
+function para(html: string): string {
+  return `<!-- wp:paragraph -->\n<p>${html}</p>\n<!-- /wp:paragraph -->`;
+}
+
+/** Create or update a post (by slug) through core REST. */
+async function upsert(restBase: string, slug: string, body: Record<string, unknown>): Promise<Post> {
+  const [existing] = await wp.get<Post[]>(`/wp/v2/${restBase}`, { slug, status: 'any' });
+  const full = { slug, status: 'publish', ...body };
+  const post = existing
+    ? await wp.post<Post>(`/wp/v2/${restBase}/${existing.id}`, full)
+    : await wp.post<Post>(`/wp/v2/${restBase}`, full);
+  log(restBase, { id: post.id, link: post.link, created: !existing });
+  return post;
+}
+
+async function checkAcf(restBase: string, id: number, expected: Record<string, unknown>) {
+  const saved = await wp.get<Post>(`/wp/v2/${restBase}/${id}`, { context: 'edit' });
+  const mismatches = Object.entries(expected).filter(([k, v]) => !sameValue(saved.acf?.[k], v));
+  if (mismatches.length) throw new Error(`${restBase} ACF values differ: ${JSON.stringify(mismatches)}`);
+  console.log(`${restBase} ACF round trip: OK (${Object.keys(expected).length} fields)`);
+}
+
+async function uploadFixture(filename: string, contentType: string): Promise<Media> {
+  const found = await wp.get<Media[]>('/wp/v2/media', { search: filename.replace(/\.\w+$/, '') });
   if (found[0]) return found[0];
-  const pdf = await readFile(new URL('./fixtures/sample.pdf', import.meta.url));
-  return wp.upload<Media>(pdf, filename, 'application/pdf');
+  const data = await readFile(new URL('./fixtures/sample.pdf', import.meta.url));
+  return wp.upload<Media>(data, filename, contentType);
 }
 
 /** ACF returns files as IDs or arrays depending on context; compare on what we wrote. */

@@ -1,10 +1,43 @@
 # M0 spike 1: Planeteria framework assessment
 
+> **Update, same day: checked against the seed database** (Pantheon Dev backup, imported locally). The database **overrides §3–§5 wherever they disagree**, because those sections were inferred from templates. See [§0](#0-verified-against-the-seed-database).
+
 **Result: done. The framework is a classic PHP theme with a block parent, so it is a hybrid.** Its post types, field groups, menus and options live in the seed's **database**, not in git. Recommended template strategy: the **classic/hybrid path** of PLAN §6.7. Content stays Gutenberg. Design, header, footer and templates are driven through the framework's own settings: ACF options, named menus, page templates and ACF fields. Section 6 lists the theme code changes the team needs to make.
 
 - Source: the seed codebase at `SEED_CODE_PATH` (`bases/jha-lift-shift`), read on 2026-10-13. It is a plain copy, **not a git clone** (there is no `.git`). The ddev config names the project `city-seed-2024`.
 - Evidence: file:line references below are relative to `wp-content/themes/planeteriaweb/` unless stated otherwise. A full field-by-field reconstruction was made from the templates; its findings are summarised here.
 - Verified at runtime on the local Docker copy (spike 2): `wp_is_block_theme()` is true, there are no registered menu locations, and the page type → template results are listed in §2.
+
+## 0. Verified against the seed database
+
+Source: `inputs/framework/jha-lift-shift_dev_2026-10-14T01-49-57_UTC_database.sql.gz`. It's loaded with `e2e/seed/setup.sh --db <file>` and read through the bridge's `GET /schema`.
+
+**What the JHA seed actually has:**
+
+| Area | In the database |
+|---|---|
+| Theme | `planeteriaweb` active (as inferred). Site title is still "City Seed Site". Permalinks `/%postname%/`. Front page "Home" (`template-home.php`). No posts page |
+| Post types | `post`, `page`, **The Events Calendar** (`tribe_events`, `tribe_venue`, `tribe_organizer`, `tribe_event_series`), and these ACF types: `alert`, `departments`, `faqs`, `people`, `resource_library`. Inactive ACF types: `parks_facilities`, `projects`, `bid`. **There is no framework `events` or `meetings` type**: the templates that use them (`single-events.php`, Events/Meetings page templates) are leftovers from the city framework |
+| Taxonomies | `category`, `post_tag` (also on attachments), `tribe_events_cat` (terms: **Board Meetings**, Meetings, Events, Meeting category 2), `resource_type` (on attachments and `resource_library`; no terms), `faq_category`, plus city ones |
+| Field groups (active) | **Person Details** (`people`): `title`, `organization__company`, `phone` repeater (`phone_label`, `phone_number`), `email` repeater (`email_label`, `email`), `address` (google_map), `fax`, `biography`. The name is the post title; there's no `first_name`/`last_name`. **Media Library** (all attachments): `index_for_library`, `library_select` (Bills & Resolutions / Key Documents / Maps), `related_departments`, `related_service_or_program`, `resource_summary`, `keywords`, `publication_date`. **Homepage Details** (`template-home.php`), **Website Theme** and **Footer** options, **Department Details**, **Services / Programs** (default page template), **Alert Details**, and 12 ACF block groups |
+| Field groups (inactive) | Resource Details (so `resource_library` has no fields), News Page, Page Menu, Parks/Projects/Business ones |
+| REST | **No field group has "Show in REST" on.** Writing ACF values needs it turned on per group (bridge endpoint `POST /acf/field-groups/{key}/show-in-rest`; it changes only that setting) |
+| Menus | Main Menu (5 items), Top Menu (1), Footer Menu (2), Social Menu (4). **No "Explore Menu"**, although `footer.php` calls it |
+| Options | Theme colours are placeholders (`#202188` / `#327136` / `#f0ab2b`); footer is "123 Main Street, City, ST 00000" |
+| Demo content | 4 posts, 13 pages, 5 events, 1 department, 1 FAQ, 4 alerts, 8 attachments, 4 Gravity Forms forms (city-seed demo/test content) |
+| Plugins | Active as assumed, except these are **inactive** on the seed: Redirection, UberMenu, Menu Image, Accessibility Checker, Enable Media Replace and WP Sheet Editor (so the editor crash from spike 4 doesn't affect the seed), Intuitive Custom Post Order, and the WP All Import ACF add-on |
+| **Disabled blocks** | `dubeb_disabled_blocks` disables in the editor, among others: **`core/cover`, `core/button`** (while `core/buttons` stays enabled), **`core/separator`, `core/preformatted`, `core/code`, `core/details`, `core/gallery`, `core/file`, `core/video`, `core/audio`, `core/pullquote`**, `core/verse`, `core/social-links`, and many Kadence blocks. With these settings, 5 of the sample post's 47 blocks show as "Your site doesn't include support for this block" (`e2e/editor-check.ts`) |
+| Rendering | Events Calendar single and list views render with the **TT2 block header/footer**, not the framework's (theme change T3) |
+
+**Corrected mapping** (replaces §5's Events, Board meetings, Board members and Documents rows):
+
+| Preset | Target in the JHA seed | Notes |
+|---|---|---|
+| Events | **The Events Calendar** `tribe_events` (REST `tribe/events/v1`), venues, organizers, `tribe_events_cat` | JHA has 0 events today |
+| Board meetings | **Events Calendar events in the "Board Meetings" category.** Committee/kind → more `tribe_events_cat` terms (e.g. Finance & Audit Committee, Special Meeting) | `tribe_events` has no ACF fields, so agenda/minutes/packet/recording links go in the event content. Proved in the spike: create via `POST /tribe/events/v1/events` |
+| Board members | `people`: name → post title, role → `title`, contact → `phone`/`email` repeaters, bio → `biography`, photo → featured image | `organization__company` has one choice left over from another client. No term field |
+| Documents | Attachments + **Media Library** fields (`index_for_library`, `publication_date`, `library_select`, `related_departments`, `resource_summary`, `keywords`) + `resource_type` terms (need creating) | `resource_library` has no active fields, so use attachments |
+| Extra: communities | New ACF type `community` (+ `community_type`, "Community details" group) | Proved in the spike. Renders through `single.php` (content only) until the team adds a template |
 
 ## 1. Codebase layout
 
@@ -145,15 +178,15 @@ Rule: target the framework's types and field names. Create nothing new unless no
 |---|---|---|
 | T1 | Header/footer logo: use `the_custom_logo()` or `get_field('logo_name','option')`, and replace the hard-coded "CITY NAME / State" with `bloginfo('name')` or an option | Otherwise every page shows the framework's placeholder logo and text |
 | T2 | Homepage "Connect with us": replace the hard-coded lorem ipsum (`template-home.php:566-672`) with fields or remove it | Placeholder text on the live homepage |
-| T3 | Add `index.php` (and optionally `archive.php`) to the child theme using `get_header()` / `get_footer()` | Archives, the blog index and TEC views currently use TT2's block header/footer |
+| T3 | Add `index.php` (and optionally `archive.php`) to the child theme using `get_header()` / `get_footer()`, and make Events Calendar views use them (TEC setting "Events template" or a child-theme override) | Archives, the blog index and **all event pages** (`/events/`, `/event/…`) currently use TT2's block header/footer |
 | T4 | Guard `acf_clear_cache()` with `function_exists('pantheon_wp_clear_edge_all')` (`functions.php:1929`) | Fatal error on any non-Pantheon environment without the Pantheon mu-plugin |
 | T5 | Brand fonts: add a font option or switch `custom.css` to CSS variables | Fonts are hard-coded, so the brand needs a CSS override until then |
-| T6 | Pick one meeting model (`events`+term or `meetings`) and give it both a listing and a single template | The two models disagree on field types |
+| T6 | ~~Pick one meeting model~~. **Resolved by the seed DB:** meetings are Events Calendar events. Instead: remove or ignore the unused `events`/`meetings` templates, and make Events Calendar views use the framework header/footer (see T3) | Leftover city-framework templates |
 | T7 | Remove or replace patterns that use `advgb/*` and `acf/how-to-*` | They're broken in the editor |
 
 ## 7. Blockers and risks
 
-1. **Seed database needed (blocks M1).** The CPTs, taxonomies, field groups (with keys), options, menus and pages (e.g. post 342) exist only in the seed's DB. The local seed recreates what M0 needed from template usage. The spike hit a wrong guess (`location_address` is a google_map, not text) that crashed the framework's template. **Need either** a DB export of the seed (Pantheon backup) **or** ACF → Tools → Export (field groups + post types + taxonomies) JSON and a list of menus/options. In M1 the bridge's `GET /website-mover/v1/schema` reads the real definitions from the hosted seed.
+1. ~~**Seed database needed (blocks M1).**~~ **Resolved:** the database was provided and imported (§0). The CPTs, taxonomies, field groups (with keys), options, menus and pages (e.g. post 342) exist only in the seed's DB. The local seed recreates what M0 needed from template usage. The spike hit a wrong guess (`location_address` is a google_map, not text) that crashed the framework's template. **Need either** a DB export of the seed (Pantheon backup) **or** ACF → Tools → Export (field groups + post types + taxonomies) JSON and a list of menus/options. In M1 the bridge's `GET /website-mover/v1/schema` reads the real definitions from the hosted seed.
 2. **Secrets committed in the seed codebase** (seen while reading; not copied anywhere):
    - a Pantheon **Terminus machine token** in `.ddev/config.yaml`
    - `PSSO_JWT_SECRET` in `plugins/planeteria-sso/planeteria-sso.php`

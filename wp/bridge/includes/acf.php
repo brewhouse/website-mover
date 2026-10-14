@@ -58,6 +58,27 @@ function wm_bridge_acf_upsert( WP_REST_Request $request, string $type ) {
 }
 
 /**
+ * Turns on "Show in REST API" for an existing field group, so its values can be written through
+ * the core REST `acf` property. Changes only that setting; the seed's field definitions stay as
+ * they are.
+ */
+function wm_bridge_acf_show_in_rest( WP_REST_Request $request ) {
+	if ( ! function_exists( 'acf_get_field_group' ) ) {
+		return new WP_Error( 'wm_acf_missing', 'ACF is required.', array( 'status' => 424 ) );
+	}
+	$group = acf_get_field_group( $request['key'] );
+	if ( ! $group ) {
+		return new WP_Error( 'wm_not_found', 'No field group with that key.', array( 'status' => 404 ) );
+	}
+	$changed = empty( $group['show_in_rest'] );
+	if ( $changed ) {
+		$group['show_in_rest'] = 1;
+		acf_update_field_group( $group );
+	}
+	return array( 'key' => $group['key'], 'title' => $group['title'], 'changed' => $changed );
+}
+
+/**
  * The seed's existing content model: every registered post type and taxonomy (whoever registered
  * it), plus ACF's stored definitions and field groups. Lets the planner target what the framework
  * already has instead of creating duplicates.
@@ -93,7 +114,7 @@ function wm_bridge_schema() {
 			'post_types'   => array_values( acf_get_internal_post_type_posts( 'acf-post-type' ) ),
 			'taxonomies'   => array_values( acf_get_internal_post_type_posts( 'acf-taxonomy' ) ),
 			'field_groups' => array_map(
-				fn( $group ) => $group + array( 'fields' => acf_get_fields( $group ) ?: array() ),
+				fn( $group ) => array_merge( $group, array( 'fields' => acf_get_fields( $group ) ?: array() ) ),
 				acf_get_field_groups()
 			),
 		);

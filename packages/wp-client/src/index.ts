@@ -88,5 +88,5 @@ function safeJson(text: string): unknown {
 export function localSeedClient(env: NodeJS.ProcessEnv = process.env): WpClient {
   const port = env.SEED_LOCAL_PORT ?? '8088';
   if (!env.SEED_LOCAL_APP_PASSWORD) throw new Error('SEED_LOCAL_APP_PASSWORD is not set in .env');
-  return new WpClient({ baseUrl: `http://localhost:${port}`, user: 'admin', appPassword: env.SEED_LOCAL_APP_PASSWORD });
+  return new WpClient({ baseUrl: `http://localhost:${port}`, user: 'wm-local', appPassword: env.SEED_LOCAL_APP_PASSWORD });
 }
