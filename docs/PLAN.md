@@ -1,6 +1,6 @@
 # Website Mover — Technical Plan
 
-Status: **M0 done** (2026-10-13), except style guide extraction, which is waiting on the PDF (`docs/m0/`). **M1 thin end-to-end, M2 public-sector model and M3 site structure pass on the local seed** (`docs/m1/`, `docs/m2/`, `docs/m3/`). All still need a run on the hosted seed, once the bridge is installed there. **Next:** M3 branding (waiting on the style guide PDF) and M4 (review UI). First real job: Jacksonville Housing Authority (JHA), source `https://www.jaxha.org/`.
+Status: **M0 done** (2026-10-13), except style guide extraction, which is waiting on the PDF (`docs/m0/`). **M1 thin end-to-end, M2 public-sector model, M3 site structure and M4 review UI pass on the local seed** (`docs/m1/` … `docs/m4/`). All still need a run on the hosted seed, once the bridge is installed there. **Next:** M5, and M3 branding once the style guide PDF arrives. First real job: Jacksonville Housing Authority (JHA), source `https://www.jaxha.org/`.
 
 ## 1. What we're building
 
@@ -306,7 +306,7 @@ Encrypted credentials; SSRF guard; HTML sanitized before saving to WordPress; PD
 | M1 | M | **M–L** | The original estimate assumed sources with a WordPress REST API. All sources are HTML-crawled, so the HTML extractor (platform selectors, boilerplate removal, allowlist sanitizer) is core M1 work. Documents have no upload paths to keep: they become library attachments plus id-based redirects. 561 referenced files to upload. Blocked until we have the seed DB/ACF export and seed credentials. Less risk on conversion (done) and the bridge (done) |
 | M2 | M | **M–L** | Merging meetings is the hard part: 397 URLs (notice/agenda/minutes pages, notice news items, files) → ≈206 meetings, 87 with no date in the title. Lighter elsewhere: events 0, board 6, quick links come from the client, forms 7 (3 with parseable JSON). Communities (29) and the ZIP table are optional extras |
 | M3 | M | **M** | No block templates to build: the framework's PHP templates, ACF options, named menus and homepage ACF fields do it. New work: CSS overrides for hard-coded fonts and the Pantheon read-only CSS file. Depends on the style guide PDF and on the team making theme changes T1–T12 (T8–T12 in `docs/m3/`) |
-| M4 | S–M | **S–M** | Unchanged. The sitemap mapping tab matters more, since the source tree has almost everything under "About Us" |
+| M4 | S–M | **S–M** | Unchanged. The sitemap mapping tab matters more, since the source tree has almost everything under "About Us". *Done (2026-10-14):* review UI, approval gate, queue worker, SSRF guard, Docker Compose. Sitemap mapping and the design tab moved to M5/M3 (`docs/m4/results.md`) |
 | M5 | M | **M** | Redirects are bigger (≈1,800 id/query-string URLs). The homepage is ACF field mapping rather than patterns (smaller). GA4 property known (`G-ZHVZNQBLZ8`) |
 
 Net: about one size larger overall, mostly because every source is HTML-crawled rather than read from an API. Order unchanged.

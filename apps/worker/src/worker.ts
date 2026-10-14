@@ -45,7 +45,7 @@ async function handle(runId: number): Promise<void> {
     await finishRun(run.id, { summary });
     await queueNext(run);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describe(err);
     await written;
     await appendEvent(run.jobId, run.id, `${run.stage} failed: ${message}`, 'error');
     await finishRun(run.id, { error: message });
@@ -60,6 +60,17 @@ async function queueNext(run: StageRun): Promise<void> {
   const requestedBy = (await db().query<{ requested_by: number | null }>('select requested_by from stage_runs where id = $1', [run.id])).rows[0]?.requested_by ?? null;
   const nextRun = await createRun(db(), run.jobId, [next, ...rest], requestedBy);
   await boss.send(STAGE_QUEUE, { runId: nextRun.id } satisfies StageJobData);
+}
+
+/** The error and its causes: "fetch failed" alone doesn't say that the connection was refused. */
+function describe(err: unknown): string {
+  const parts: string[] = [];
+  for (let e: unknown = err; e && parts.length < 4; e = (e as { cause?: unknown }).cause) {
+    const message = e instanceof Error ? e.message : String(e);
+    const code = (e as { code?: string }).code;
+    parts.push(code && !message.includes(code) ? `${message} (${code})` : message);
+  }
+  return parts.join(': ');
 }
 
 function fail(message: string): never {

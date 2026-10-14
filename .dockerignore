@@ -1,0 +1,14 @@
+# Keep secrets, client data and build output out of the image build context.
+.git
+.env
+.env.*
+!.env.example
+**/node_modules
+**/.next
+data
+bases
+inputs
+snapshots
+.local
+.claude
+e2e

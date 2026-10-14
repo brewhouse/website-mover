@@ -2,6 +2,9 @@ import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/session';
 import { LoginForm } from './login-form';
 
+// Every page reads the session and the database per request: never prerendered at build time.
+export const dynamic = 'force-dynamic';
+
 export const metadata = { title: 'Log in' };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {

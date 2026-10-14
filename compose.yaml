@@ -20,5 +20,44 @@ services:
       timeout: 3s
       retries: 30
 
+  # The worker and the web app share the job files (WM_DATA_DIR) and read settings from .env;
+  # the database address is the compose service. Set WM_ALLOW_PRIVATE_HOSTS=host.docker.internal
+  # in .env to reach a WordPress running on this machine (e.g. the local seed on :8088).
+  worker:
+    profiles: [app]
+    build: { context: ., target: worker }
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://mover:mover@postgres:5432/mover
+      WM_DATA_DIR: /data
+    volumes:
+      - ${WM_DATA_HOST_DIR:-./data}:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  web:
+    profiles: [app]
+    build: { context: ., target: web }
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://mover:mover@postgres:5432/mover
+      WM_DATA_DIR: /data
+    volumes:
+      - ${WM_DATA_HOST_DIR:-./data}:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:3100:3100"
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
 volumes:
   pgdata:

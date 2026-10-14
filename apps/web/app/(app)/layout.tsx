@@ -4,6 +4,9 @@ import { Button } from '@/components/ui';
 import { logout } from '@/lib/actions';
 import { requireUser } from '@/lib/session';
 
+// Every page reads the session and the database per request: never prerendered at build time.
+export const dynamic = 'force-dynamic';
+
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
   return (
