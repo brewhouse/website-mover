@@ -9,6 +9,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@wm/core": "workspace:*",
     "cheerio": "^1.2.0",
     "robots-parser": "^3.0.1"
   }
