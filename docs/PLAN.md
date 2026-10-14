@@ -42,12 +42,15 @@ Optional advanced inputs: approved sitemap (CSV/XLSX), project profile + brief, 
 4. **Seed site** URL + Application Password (needed from M1).
 5. ~~Seed plugin stack~~: **resolved.** ACF Pro 6.3.8, Gravity Forms 3.1, Redirection 5.5, Yoast 24, Ajax Search Pro 4.27 (search; PDF indexing still to be checked), The Events Calendar (installed but **unused** by the theme).
 6. ~~OpenAI model~~: **resolved** (`gpt-6-astra`).
-7. **New, from the JHA inventory:**
-   - Ask Brooks Jeffrey Marketing (BJM) for a content export?
-   - Migrate the 720 files nothing links to?
-   - Rebuild the direct-deposit form (SSN and bank details)?
-   - Who supplies the quick links? (`/quick-links` is empty.)
-   - Confirm content ownership, given BJM's "proprietary" notice.
+7. **From the JHA inventory.** Decided 2026-10-13:
+   - **No BJM export.** The crawl is the source of truth.
+   - **Skip the 720 files nothing links to.** They stay listed in the plan, so a reviewer can still include them.
+   - **Rebuild all public forms in Gravity Forms**, including direct deposit and the vendor application. The direct-deposit form collects SSN and bank details, so it is built with short entry retention and notifications that leave those fields out. JHA signs off on how it's handled. The SMS/email alerts sign-up is a subscription service, not just a form, so it needs a tool behind it.
+   - **JHA owns the site content.**
+   
+   Still open:
+   - **Quick links.** Default: build them from the portals the current site links to (Rent Café applicant/resident and landlord, e-procurement, careers, Help Center, Customer Service Survey), for JHA to adjust.
+   - **GA4.** Keep the current measurement ID if JHA, not BJM, controls that Google Analytics account.
 8. **New, theme code changes for the team** (T1–T7 in `docs/m0/framework-assessment.md` §6): placeholder logo text, homepage lorem ipsum, missing `index.php`/archives, a Pantheon-only call, hard-coded fonts, two meeting models, broken patterns.
 
 ## 4. Pipeline
