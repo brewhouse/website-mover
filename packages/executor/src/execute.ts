@@ -33,14 +33,14 @@ export interface RunState {
   redirects: { from: string; to: string }[];
   redirectImport: { imported: number; updated: number; skipped: number; failed: number } | null;
   /** Site structure applied (M3): menu name → item count, options result, homepage slides set. */
-  site: { menus: Record<string, number>; options: Record<string, string>; homeSlides: number } | null;
+  site: { menus: Record<string, number>; options: Record<string, string>; homeSlides: number; warnings: string[] } | null;
 }
 
 type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
 type Media = { id: number; source_url: string };
 type Schema = {
   post_types: Record<string, { rest_base: string }>;
-  acf: { field_groups: { key: string; location: { param: string; value: string }[][]; fields: { name: string; choices?: Record<string, string> }[] }[] };
+  acf: { field_groups: { key: string; location: { param: string; value: string }[][]; fields: { name: string; choices?: Record<string, string>; max?: number | string }[] }[] };
 };
 
 /**
@@ -440,6 +440,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
       state.site = await applySite(client, plan, state, {
         frontPage: existing.find((e) => e.front_page)?.id ?? null,
         homeGroup: groupFor('page_template', 'template-home.php')?.key ?? null,
+        bannerMax: Number(groupFor('page_template', 'template-home.php')?.fields.find((f) => f.name === 'banner')?.max) || null,
         mediaId,
         postTypeOf: (key) => plan.records.find((r) => r.sourceKey === key)?.postType ?? (plan.items.find((i) => i.sourceKey === key)?.type === 'post' ? 'post' : 'page'),
         log,
@@ -531,6 +532,8 @@ async function applySite(
   ctx: {
     frontPage: number | null;
     homeGroup: string | null;
+    /** The homepage template's limit on slides (repeater max), if any. */
+    bannerMax: number | null;
     mediaId: (url: string | null) => number | undefined;
     postTypeOf: (key: string) => string;
     log: (msg: string) => void;
@@ -541,9 +544,14 @@ async function applySite(
   const options = await client.post<Record<string, string>>('/website-mover/v1/acf/options', { values: site.options });
 
   let homeSlides = 0;
+  const warnings: string[] = [];
   if (ctx.frontPage && ctx.homeGroup && site.home.banner.length) {
     await client.post(`/website-mover/v1/acf/field-groups/${ctx.homeGroup}/show-in-rest`, {});
-    const banner = site.home.banner.map((b) => ({
+    const slides = ctx.bannerMax ? site.home.banner.slice(0, ctx.bannerMax) : site.home.banner;
+    if (slides.length < site.home.banner.length) {
+      warnings.push(`The homepage template takes at most ${ctx.bannerMax} slides; left out: ${site.home.banner.slice(slides.length).map((b) => `"${b.title}"`).join(', ')}`);
+    }
+    const banner = slides.map((b) => ({
       select_image: ctx.mediaId(b.image) ?? '',
       title: b.title,
       link: { title: b.linkTitle ?? '', url: (b.linkKey && state.entities[b.linkKey]?.path) || b.linkUrl || '', target: '' },
@@ -581,7 +589,8 @@ async function applySite(
     menus[menu.name] = ids.length;
   }
   ctx.log(`Site: title, ${Object.keys(site.options).length} options, ${homeSlides} homepage slides, menus ${Object.entries(menus).map(([n, c]) => `${n} (${c})`).join(', ')}`);
-  return { menus, options, homeSlides };
+  for (const w of warnings) ctx.log(`  ! ${w}`);
+  return { menus, options, homeSlides, warnings };
 }
 
 function entryRedirects(plan: Plan, key: string): string[] {
