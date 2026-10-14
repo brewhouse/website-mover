@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import robotsParserModule from 'robots-parser';
 import { dispositionFilename, extensionForMime, extensionOf } from './urls.js';
+import { safeFetch } from '@wm/net';
 
 // robots-parser is CommonJS (module.exports = fn) but its types declare an ES
 // default export, so under NodeNext the default import is typed as the namespace.
@@ -212,7 +213,7 @@ export class PoliteFetcher {
     for (let attempt = 0; ; attempt++) {
       try {
         this.networkRequests++;
-        const res = await fetch(url, {
+        const res = await safeFetch(url, {
           method,
           redirect: 'follow',
           headers: { 'User-Agent': this.userAgent, Accept: '*/*' },
@@ -258,7 +259,7 @@ export class PoliteFetcher {
       const tmp = path.join(dir, `.tmp-${randomUUID()}`);
       try {
         this.networkRequests++;
-        const res = await fetch(url, {
+        const res = await safeFetch(url, {
           redirect: 'follow',
           headers: { 'User-Agent': this.userAgent, Accept: '*/*' },
           signal: AbortSignal.timeout(this.downloadTimeoutMs),

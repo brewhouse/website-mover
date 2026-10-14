@@ -74,6 +74,8 @@ beforeAll(async () => {
     res.writeHead(r.status, { 'content-type': r.type, ...r.headers });
     res.end(req.method === 'HEAD' ? undefined : r.body);
   });
+  // The test site is local: let the SSRF guard (@wm/net) connect to it.
+  process.env.WM_ALLOW_PRIVATE_HOSTS = '127.0.0.1';
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 

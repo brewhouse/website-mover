@@ -319,6 +319,9 @@ importers:
       '@wm/core':
         specifier: workspace:*
         version: link:../core
+      '@wm/net':
+        specifier: workspace:*
+        version: link:../net
       cheerio:
         specifier: ^1.2.0
         version: 1.2.0
@@ -365,6 +368,12 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
+  packages/net:
+    dependencies:
+      undici:
+        specifier: 8.11.2
+        version: 8.11.2
+
   packages/planner:
     dependencies:
       '@wm/analyzer':
@@ -386,7 +395,11 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
-  packages/wp-client: {}
+  packages/wp-client:
+    dependencies:
+      '@wm/net':
+        specifier: workspace:*
+        version: link:../net
 
 packages:
 
