@@ -1,19 +1,19 @@
 import { createWriteStream } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { htmlToBlocks, loadWordPress, restrictBlocks, serializeBlocks } from '@wm/blocks';
+import { blocksToHtml, externalBlock, htmlToBlocks, loadWordPress, restrictBlocks, serializeBlocks, type Block } from '@wm/blocks';
 import { jobPath, readJson, readJsonl, sourceKey, writeJson, type ExtractedPage } from '@wm/core';
-import { loadApprovedPlan, wpSlug, type Plan, type PlanItem, type PlanMedia } from '@wm/planner';
+import { loadApprovedPlan, wpSlug, type Plan, type PlanContentType, type PlanItem, type PlanMedia, type PlanRecord, type TargetEntity } from '@wm/planner';
 import { WpError, type WpClient } from '@wm/wp-client';
 import { LinkMap, rewriteLinks } from './links.js';
 import { probeTarget } from './target.js';
 
-export type EntityKind = 'page' | 'post' | 'document' | 'image';
+export type EntityKind = 'page' | 'post' | 'document' | 'image' | 'event' | 'person' | 'form' | 'record';
 
 export interface RunEntity {
   kind: EntityKind;
   id: number;
-  /** Root-relative URL on the target. */
+  /** Root-relative URL on the target ('' for objects without one, e.g. forms). */
   path: string;
   action: 'created' | 'updated';
   warnings: string[];
@@ -26,15 +26,37 @@ export interface RunState {
   startedAt: string;
   finishedAt: string | null;
   cleanup: Record<string, string>;
+  settings: Record<string, string>;
   categories: Record<string, number>;
   entities: Record<string, RunEntity>;
-  failures: { sourceKey: string; kind: EntityKind | 'redirects'; step: string; error: string }[];
+  failures: { sourceKey: string; kind: EntityKind | 'redirects' | 'setup'; step: string; error: string }[];
   redirects: { from: string; to: string }[];
   redirectImport: { imported: number; updated: number; skipped: number; failed: number } | null;
 }
 
 type Post = { id: number; slug: string; link: string; status: string };
 type Media = { id: number; source_url: string };
+type Schema = {
+  post_types: Record<string, { rest_base: string }>;
+  acf: { field_groups: { key: string; location: { param: string; value: string }[][]; fields: { name: string; choices?: Record<string, string> }[] }[] };
+};
+
+/**
+ * Anything created as post-type content with block content: pages, posts, table pages, listing
+ * pages and custom-type entries. They are created as drafts, published together, then relinked.
+ */
+interface ContentDoc {
+  key: string;
+  kind: 'page' | 'post' | 'record';
+  /** Core REST collection route, e.g. /wp/v2/pages. */
+  route: string;
+  postType: string;
+  slug: string;
+  targetPath: string;
+  build: () => { body: Record<string, unknown>; warnings: string[] };
+  /** Source keys this doc links to, for relinking when one of them gets a different URL. */
+  linksTo: Set<string>;
+}
 
 const stateFile = (jobId: string) => jobPath(jobId, 'run', 'state.json');
 
@@ -51,10 +73,15 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   // Loading the block library blocks the event loop for seconds. Do it before any request, or
   // pooled connections the server closes meanwhile get reused and writes fail ("other side closed").
   loadWordPress();
-  // The approval covers the plan, and the plan records the hash of the content it was built from.
+  // The approval covers the plan, and the plan records the hashes of the content it was built from.
   const extractFile = jobPath(jobId, 'extract', 'pages.jsonl');
   if ((await fileSha256(extractFile)) !== plan.inputs.extractSha256) {
     throw new Error('The extracted content changed after this plan was made: run "wm plan" and approve again');
+  }
+  for (const [name, sha] of Object.entries(plan.inputs.analysisSha256)) {
+    if ((await fileSha256(jobPath(jobId, 'analyze', `${name}.json`)).catch(() => '')) !== sha) {
+      throw new Error(`The ${name} analysis changed after this plan was made: run "wm plan" and approve again`);
+    }
   }
   const pages = new Map((await readJsonl<ExtractedPage>(extractFile)).map((p) => [p.sourceKey, p]));
   await mkdir(jobPath(jobId, 'run'), { recursive: true });
@@ -68,6 +95,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     startedAt: new Date().toISOString(),
     finishedAt: null,
     cleanup: {},
+    settings: {},
     categories: {},
     entities: {},
     failures: [],
@@ -75,13 +103,14 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     redirectImport: null,
   };
   const save = () => writeJson(stateFile(jobId), state);
-  const fail = (key: string, kind: EntityKind | 'redirects', step: string, err: unknown) => {
+  const fail = (key: string, kind: RunState['failures'][number]['kind'], step: string, err: unknown) => {
     const cause = (err as { cause?: { code?: string; message?: string } }).cause;
     const error = (err instanceof Error ? err.message : String(err)) + (cause ? ` (${cause.code ?? ''} ${cause.message ?? ''})`.replace('( ', '(') : '');
     state.failures.push({ sourceKey: key, kind, step, error });
     event('failure', { sourceKey: key, kind, step, error });
     log(`  ✗ ${step} ${key}: ${error}`);
   };
+  const action = (previous: TargetEntity | undefined) => (previous && previous.job_id !== jobId ? 'updated' : 'created');
   event('start', { planVersion: plan.version, approvedBy: approval.approvedBy });
 
   // Preflight: same target, bridge present.
@@ -101,29 +130,79 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     await save();
   }
 
-  // 2. Allow ACF values on media over REST (the seed's "Media Library" field group).
-  const schema = await client.get<{ acf: { field_groups: { key: string; location: { param: string }[][] }[] } }>('/website-mover/v1/schema');
-  const mediaGroup = schema.acf.field_groups.find((g) => g.location.some((rules) => rules.some((r) => r.param === 'attachment')));
-  if (mediaGroup) await client.post(`/website-mover/v1/acf/field-groups/${mediaGroup.key}/show-in-rest`, {});
+  // 2. Site settings (e.g. timezone, so event times are local).
+  for (const s of plan.settings) {
+    try {
+      await client.post('/wp/v2/settings', { [s.key]: s.to });
+      state.settings[s.key] = s.to;
+    } catch (err) {
+      fail(s.key, 'setup', 'setting', err);
+    }
+  }
 
-  // 3. Categories.
-  const cats = await allPages<{ id: number; name: string }>(client, '/wp/v2/categories');
-  for (const name of plan.categories) {
-    const found = cats.find((c) => decode(c.name).toLowerCase() === name.toLowerCase());
-    state.categories[name] = found ? found.id : (await client.post<{ id: number }>('/wp/v2/categories', { name })).id;
+  // 3. Content types created through ACF (stored natively), then ACF values over REST on the field
+  //    groups we write to (media library, people, the new types).
+  for (const ct of plan.contentTypes) {
+    try {
+      await createContentType(client, ct, plan.records.filter((r) => r.postType === ct.postType));
+    } catch (err) {
+      fail(ct.postType, 'setup', 'content-type', err);
+    }
+  }
+  const schema = await client.get<Schema>('/website-mover/v1/schema');
+  const groupFor = (param: string, value?: string) =>
+    schema.acf.field_groups.find((g) => g.location.some((rules) => rules.some((r) => r.param === param && (value === undefined || r.value === value))));
+  for (const g of [groupFor('attachment'), plan.people.length ? groupFor('post_type', 'people') : undefined]) {
+    if (g) await client.post(`/website-mover/v1/acf/field-groups/${g.key}/show-in-rest`, {});
+  }
+  const libraryChoices = new Map(
+    Object.entries(groupFor('attachment')?.fields.find((f) => f.name === 'library_select')?.choices ?? {}).map(([value, label]) => [label, value]),
+  );
+  const restBase = (postType: string) => schema.post_types[postType]?.rest_base ?? postType;
+
+  // 4. Terms: news categories, event categories, document types, community types.
+  const terms = async (taxonomy: string, names: string[]) => {
+    const ids: Record<string, number> = {};
+    if (!names.length) return ids;
+    const found = await allPages<{ id: number; name: string }>(client, `/wp/v2/${taxonomy}`);
+    for (const name of names) {
+      const match = found.find((c) => decode(c.name).toLowerCase() === name.toLowerCase());
+      try {
+        ids[name] = match ? match.id : (await client.post<{ id: number }>(`/wp/v2/${taxonomy}`, { name })).id;
+      } catch (err) {
+        fail(`${taxonomy}:${name}`, 'setup', 'term', err);
+      }
+    }
+    return ids;
+  };
+  state.categories = await terms('categories', plan.categories);
+  const eventCats = await terms('tribe_events_cat', plan.eventCategories);
+  const docTypes = await terms('resource_type', plan.documentTypes);
+  const recordTerms: Record<string, Record<string, number>> = {};
+  for (const ct of plan.contentTypes) {
+    if (ct.taxonomy) {
+      const names = [...new Set(plan.records.filter((r) => r.postType === ct.postType && r.term).map((r) => r.term!))];
+      recordTerms[ct.postType] = await terms(ct.taxonomy.name, names);
+    }
   }
   await save();
 
-  // 4. Media.
+  // 5. Media.
   const links = LinkMap.forPlan(plan);
   const images = new Map<string, { id: number; url: string }>();
+  const mediaByKey = new Map<string, RunEntity>();
   const alts = imageAlts(pages);
   log(`Media: ${plan.media.length} files`);
   await mapLimit(plan.media, 3, async (m) => {
     try {
-      const entity = await uploadMedia(client, jobId, m, ours.get(m.sourceKey), alts.get(m.sourceKey) ?? '', meta(m.sourceKey));
+      const fields = {
+        resource_type: m.documentType && docTypes[m.documentType] ? [docTypes[m.documentType]!] : undefined,
+        library_select: m.fields.library_select ? libraryChoices.get(m.fields.library_select) ?? m.fields.library_select : null,
+      };
+      const entity = await uploadMedia(client, jobId, m, ours.get(m.sourceKey), alts.get(m.sourceKey) ?? '', meta(m.sourceKey), fields);
       state.entities[m.sourceKey] = entity;
       links.add(m, entity.path);
+      for (const key of [m.sourceKey, ...m.redirectFrom.map((r) => safeKey(new URL(r, plan.source.origin).href))]) mediaByKey.set(key, entity);
       if (m.type === 'image') images.set(entity.path, { id: entity.id, url: entity.path });
     } catch (err) {
       fail(m.sourceKey, m.type, 'upload', err);
@@ -131,89 +210,265 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   });
   await save();
   event('media', { done: Object.values(state.entities).length });
+  const mediaId = (url: string | null) => (url ? mediaByKey.get(safeKey(url))?.id : undefined);
 
-  // 5. Pages and posts, as drafts (published together at the end).
-  const render = (item: PlanItem) => {
-    const page = pages.get(item.sourceKey);
-    if (!page) throw new Error('no extracted content');
-    const warnings: string[] = [];
-    const { html, unresolved } = rewriteLinks(page.contentHtml, links, plan.source.origin);
+  // 6. Forms (needed before the pages that hold them).
+  const formIds = new Map<string, number>();
+  for (const f of plan.forms.filter((x) => x.action === 'rebuild')) {
+    try {
+      const res = await client.post<{ id: number }>('/website-mover/v1/forms', {
+        source_key: f.key,
+        title: f.title,
+        description: f.description ?? '',
+        fields: f.fields,
+        sensitive_fields: f.sensitive,
+        ...(f.retentionDays ? { retention_days: f.retentionDays } : {}),
+      });
+      formIds.set(f.key, res.id);
+      state.entities[f.key] = { kind: 'form', id: res.id, path: '', action: action(ours.get(f.key)), warnings: [] };
+    } catch (err) {
+      fail(f.key, 'form', 'form', err);
+    }
+  }
+
+  // 7. Content documents: pages, posts, table pages, listing pages, custom-type entries.
+  const convert = (html: string, warnings: string[], formsInOrder: number[] = []) => {
+    const { html: rewritten, unresolved } = rewriteLinks(withFormMarkers(html), links, plan.source.origin);
     if (unresolved.length) warnings.push(`${unresolved.length} link(s) to source content not migrated yet`);
-    const blocks = restrictBlocks(
-      htmlToBlocks(html, { demoteH1: true, onWarning: (w) => warnings.push(w), resolveImage: (url) => images.get(url) }),
+    let blocks = restrictBlocks(
+      htmlToBlocks(rewritten, { demoteH1: true, onWarning: (w) => warnings.push(w), resolveImage: (url) => images.get(url) }),
       plan.target.disabledBlocks,
       (w) => warnings.push(w),
     );
-    return { content: serializeBlocks(blocks), warnings };
+    blocks = placeForms(blocks, formsInOrder);
+    return serializeBlocks(blocks);
   };
-  const posts = new Map<string, Post>();
-  const save1 = async (item: PlanItem, status?: string) => {
-    const { content, warnings } = render(item);
-    const previous = ours.get(item.sourceKey);
-    const body = {
-      title: item.title,
+  const linkedKeys = (page: ExtractedPage | undefined) =>
+    new Set([...(page?.links ?? []), ...(page?.documents ?? [])].map((l) => safeKey(l.href)));
+  const docs: ContentDoc[] = [];
+  for (const item of plan.items) {
+    const page = pages.get(item.sourceKey);
+    docs.push({
+      key: item.sourceKey,
+      kind: item.type,
+      route: item.type === 'post' ? '/wp/v2/posts' : '/wp/v2/pages',
+      postType: item.type,
       slug: item.slug,
-      content,
-      meta: meta(item.sourceKey),
-      ...(status ? { status } : {}),
-      ...(item.type === 'post'
-        ? { ...postDate(item.date), categories: item.categories.map((c) => state.categories[c]!) }
-        : {}),
-    };
-    const route = item.type === 'post' ? '/wp/v2/posts' : '/wp/v2/pages';
-    const post = previous
-      ? await client.post<Post>(`${route}/${previous.id}`, body)
-      : await createOnce(client, route, body, item.sourceKey);
-    posts.set(item.sourceKey, post);
-    const path = post.status === 'publish' ? new URL(post.link).pathname : item.targetPath;
-    // "created" = made by this job (in this run or an earlier one); "updated" = existed before the job.
-    const action = previous && previous.job_id !== jobId ? 'updated' : 'created';
-    state.entities[item.sourceKey] = { kind: item.type, id: post.id, path, action, warnings };
-  };
-  log(`Content: ${plan.items.length} pages and posts`);
-  await mapLimit(plan.items, 4, async (item) => {
-    try {
-      await save1(item, ours.get(item.sourceKey) ? undefined : 'draft');
-    } catch (err) {
-      fail(item.sourceKey, item.type, 'create', err);
+      targetPath: item.targetPath,
+      linksTo: linkedKeys(page),
+      build: () => {
+        if (!page) throw new Error('no extracted content');
+        const warnings: string[] = [];
+        const forms = item.forms.map((k) => formIds.get(k)).filter((id): id is number => id !== undefined);
+        const content = convert(page.contentHtml, warnings, forms);
+        const extra = item.type === 'post' ? { ...postDate(item.date), categories: item.categories.map((c) => state.categories[c]).filter(Boolean) } : {};
+        return { body: { title: item.title, content, ...extra }, warnings };
+      },
+    });
+  }
+  for (const table of plan.tables) {
+    docs.push({
+      key: `table:${table.key}`,
+      kind: 'page',
+      route: '/wp/v2/pages',
+      postType: 'page',
+      slug: table.slug,
+      targetPath: table.targetPath,
+      linksTo: new Set(),
+      build: () => {
+        const warnings: string[] = [];
+        const head = `<thead><tr>${table.columns.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>`;
+        const body = `<tbody>${table.rows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+        const notes = table.notes.map((n) => `<p>${escapeHtml(n)}</p>`).join('');
+        return { body: { title: table.title, content: convert(`${notes}<table>${head}${body}</table>`, warnings) }, warnings };
+      },
+    });
+  }
+  for (const ct of plan.contentTypes) {
+    const entries = plan.records.filter((r) => r.postType === ct.postType).sort((a, b) => a.title.localeCompare(b.title));
+    docs.push({
+      key: `listing:${ct.postType}`,
+      kind: 'page',
+      route: '/wp/v2/pages',
+      postType: 'page',
+      slug: ct.listing.slug,
+      targetPath: ct.listing.targetPath,
+      linksTo: new Set(entries.map((r) => r.sourceKey)),
+      build: () => {
+        const warnings: string[] = [];
+        const path = (r: PlanRecord) => state.entities[r.sourceKey]?.path || r.targetPath;
+        const list = `<ul>${entries.map((r) => `<li><a href="${escapeHtml(path(r))}">${escapeHtml(r.title)}</a></li>`).join('')}</ul>`;
+        return { body: { title: ct.listing.title, content: convert(list, warnings) }, warnings };
+      },
+    });
+    for (const r of entries) {
+      const page = pages.get(r.sourceKey);
+      docs.push({
+        key: r.sourceKey,
+        kind: 'record',
+        route: `/wp/v2/${restBase(ct.postType)}`,
+        postType: ct.postType,
+        slug: r.slug,
+        targetPath: r.targetPath,
+        linksTo: linkedKeys(page),
+        build: () => {
+          const warnings: string[] = [];
+          const termId = r.term ? recordTerms[ct.postType]?.[r.term] : undefined;
+          const photo = mediaId(r.photo);
+          return {
+            body: {
+              title: r.title,
+              content: convert(page?.contentHtml ?? '', warnings),
+              acf: r.fields,
+              ...(ct.taxonomy && termId ? { [ct.taxonomy.name]: [termId] } : {}),
+              ...(photo ? { featured_media: photo } : {}),
+            },
+            warnings,
+          };
+        },
+      });
     }
-  });
-  await save();
-
-  // 6. Publish.
-  const drafts = plan.items.filter((i) => posts.get(i.sourceKey)?.status === 'draft');
-  log(`Publish: ${drafts.length} items`);
-  await mapLimit(drafts, 4, async (item) => {
-    try {
-      const route = item.type === 'post' ? '/wp/v2/posts' : '/wp/v2/pages';
-      const post = await client.post<Post>(`${route}/${posts.get(item.sourceKey)!.id}`, { status: 'publish' });
-      posts.set(item.sourceKey, post);
-      state.entities[item.sourceKey]!.path = new URL(post.link).pathname;
-    } catch (err) {
-      fail(item.sourceKey, item.type, 'publish', err);
-    }
-  });
-  await save();
-
-  // 7. WordPress makes slugs unique only on publish: if anything got a different slug than
-  //    planned, point links (and redirects, below) at its real URL.
-  const moved = plan.items.filter((i) => posts.has(i.sourceKey) && posts.get(i.sourceKey)!.slug !== i.slug);
-  if (moved.length) {
-    log(`Links: ${moved.length} items got a different slug; updating links to them`);
-    for (const item of moved) {
-      const path = `/${posts.get(item.sourceKey)!.slug}/`;
-      links.add(item, path);
-      state.entities[item.sourceKey]!.path = path;
-    }
-    const movedKeys = new Set(moved.map((m) => m.sourceKey));
-    const affected = plan.items.filter((i) => pages.get(i.sourceKey)?.links.some((l) => movedKeys.has(safeKey(l.href))));
-    await mapLimit(affected, 4, (item) => save1(item).catch((err) => fail(item.sourceKey, item.type, 'relink', err)));
   }
 
-  // 8. Redirects: every changed source URL → its new path.
-  for (const entry of [...plan.items, ...plan.media]) {
-    const entity = state.entities[entry.sourceKey];
-    if (!entity) continue;
+  const posts = new Map<string, Post>();
+  const saveDoc = async (doc: ContentDoc, status?: string) => {
+    const { body, warnings } = doc.build();
+    const previous = ours.get(doc.key);
+    const full = { ...body, slug: doc.slug, meta: meta(doc.key), ...(status ? { status } : {}) };
+    const post = previous
+      ? await client.post<Post>(`${doc.route}/${previous.id}`, full)
+      : await createOnce(client, doc.route, full, doc.key, doc.postType);
+    posts.set(doc.key, post);
+    const path = post.status === 'publish' ? new URL(post.link).pathname : doc.targetPath;
+    state.entities[doc.key] = { kind: doc.kind, id: post.id, path, action: action(previous), warnings };
+  };
+  // Custom-type entries first, so the listing page links to their real URLs.
+  const docOrder = (d: ContentDoc) => (d.kind === 'record' ? 0 : 1);
+  log(`Content: ${docs.length} pages, posts and entries`);
+  for (const group of [docs.filter((d) => docOrder(d) === 0), docs.filter((d) => docOrder(d) === 1)]) {
+    await mapLimit(group, 4, async (doc) => {
+      try {
+        await saveDoc(doc, ours.get(doc.key) ? undefined : 'draft');
+      } catch (err) {
+        fail(doc.key, doc.kind, 'create', err);
+      }
+    });
+  }
+  await save();
+
+  // 8. People.
+  if (plan.people.length) log(`People: ${plan.people.length}`);
+  for (const person of plan.people) {
+    try {
+      const previous = ours.get(person.key);
+      const photo = mediaId(person.photo);
+      const body = {
+        title: person.name,
+        slug: person.slug,
+        status: 'publish',
+        meta: meta(person.key),
+        ...(photo ? { featured_media: photo } : {}),
+        acf: {
+          title: person.role ?? '',
+          email: person.email ? [{ email_label: '', email: person.email }] : [],
+          phone: person.phone ? [{ phone_label: '', phone_number: person.phone }] : [],
+          biography: person.bio ?? '',
+        },
+      };
+      const route = `/wp/v2/${restBase('people')}`;
+      const post = previous ? await client.post<Post>(`${route}/${previous.id}`, body) : await createOnce(client, route, body, person.key, 'people');
+      state.entities[person.key] = { kind: 'person', id: post.id, path: new URL(post.link).pathname, action: action(previous), warnings: [] };
+    } catch (err) {
+      fail(person.key, 'person', 'create', err);
+    }
+  }
+
+  // 9. Events (The Events Calendar). Its classic editor stores HTML, so descriptions are the
+  //    converted content rendered without block markup.
+  if (plan.events.length) log(`Events: ${plan.events.length}`);
+  const itemsByKey = new Map(plan.items.map((i) => [i.sourceKey, i]));
+  await mapLimit(plan.events, 3, async (ev) => {
+    try {
+      const warnings: string[] = [];
+      const parts = ev.sourceKeys.map((k) => pages.get(k)).filter((p): p is ExtractedPage => !!p);
+      let html = parts.map((p, i) => (i === 0 ? '' : `<h2>${escapeHtml(p.title)}</h2>`) + p.contentHtml).join('\n');
+      const news = ev.newsKeys.map((k) => itemsByKey.get(k)).filter((i): i is PlanItem => !!i);
+      if (news.length) html += `<h2>News</h2><ul>${news.map((n) => `<li><a href="${escapeHtml(n.sourceUrl)}">${escapeHtml(n.title)}</a></li>`).join('')}</ul>`;
+      const { html: rewritten, unresolved } = rewriteLinks(html, links, plan.source.origin);
+      if (unresolved.length) warnings.push(`${unresolved.length} link(s) to source content not migrated yet`);
+      const description = blocksToHtml(htmlToBlocks(rewritten, { demoteH1: true, resolveImage: (url) => images.get(url) }));
+      const [start, end, allDay] = ev.startTime
+        ? [`${ev.date} ${ev.startTime}:00`, `${ev.date} ${ev.endTime ?? ev.startTime}:00`, false]
+        : [`${ev.date} 00:00:00`, `${ev.date} 23:59:59`, true];
+      const body = {
+        title: ev.title,
+        slug: ev.slug,
+        status: 'publish',
+        description,
+        start_date: start,
+        end_date: end,
+        all_day: allDay,
+        categories: eventCats[ev.category] ? [eventCats[ev.category]] : [],
+      };
+      const previous = ours.get(ev.key);
+      const created = previous
+        ? await client.post<{ id: number; url: string }>(`/tribe/events/v1/events/${previous.id}`, body)
+        : await client.post<{ id: number; url: string }>('/tribe/events/v1/events', body);
+      // Tag it (The Events Calendar's API has no meta field).
+      await client.post(`/wp/v2/tribe_events/${created.id}`, { meta: meta(ev.key) });
+      if (ev.cancelled) warnings.push('cancelled: the source says this meeting was cancelled; set the event status by hand');
+      state.entities[ev.key] = { kind: 'event', id: created.id, path: new URL(created.url).pathname, action: action(previous), warnings };
+    } catch (err) {
+      fail(ev.key, 'event', 'create', err);
+    }
+  });
+  await save();
+
+  // 10. Publish the drafts.
+  const drafts = docs.filter((d) => posts.get(d.key)?.status === 'draft');
+  log(`Publish: ${drafts.length} items`);
+  await mapLimit(drafts, 4, async (doc) => {
+    try {
+      const post = await client.post<Post>(`${doc.route}/${posts.get(doc.key)!.id}`, { status: 'publish' });
+      posts.set(doc.key, post);
+      state.entities[doc.key]!.path = new URL(post.link).pathname;
+    } catch (err) {
+      fail(doc.key, doc.kind, 'publish', err);
+    }
+  });
+  await save();
+
+  // 11. WordPress makes slugs unique only on publish (and events get theirs from The Events
+  //     Calendar): if anything got a different URL than planned, point links at the real one.
+  const planned = new Map<string, { path: string; sourceKeys: string[]; redirectFrom: string[] }>();
+  for (const d of docs) planned.set(d.key, { path: d.targetPath, sourceKeys: [d.key], redirectFrom: entryRedirects(plan, d.key) });
+  for (const ev of plan.events) planned.set(ev.key, { path: ev.targetPath, sourceKeys: ev.sourceKeys, redirectFrom: ev.redirectFrom });
+  const moved = [...planned].filter(([key, p]) => state.entities[key] && state.entities[key]!.path !== p.path);
+  if (moved.length) {
+    log(`Links: ${moved.length} items got a different URL than planned; updating links to them`);
+    const movedKeys = new Set<string>();
+    for (const [key, p] of moved) {
+      const path = state.entities[key]!.path;
+      links.set(key, path);
+      links.addPaths(p.redirectFrom, path);
+      for (const k of p.sourceKeys) movedKeys.add(k);
+    }
+    const affected = docs.filter((d) => [...d.linksTo].some((k) => movedKeys.has(k)));
+    await mapLimit(affected, 4, (doc) => saveDoc(doc).catch((err) => fail(doc.key, doc.kind, 'relink', err)));
+  }
+
+  // 12. Redirects: every changed source URL → its new path.
+  const redirectEntries: { key: string; redirectFrom: string[] }[] = [
+    ...plan.items.map((i) => ({ key: i.sourceKey, redirectFrom: i.redirectFrom })),
+    ...plan.media.map((m) => ({ key: m.sourceKey, redirectFrom: m.redirectFrom })),
+    ...plan.events.map((e) => ({ key: e.key, redirectFrom: e.redirectFrom })),
+    ...plan.records.map((r) => ({ key: r.sourceKey, redirectFrom: r.redirectFrom })),
+    ...plan.tables.map((t) => ({ key: `table:${t.key}`, redirectFrom: t.redirectFrom })),
+    ...plan.contentTypes.map((c) => ({ key: `listing:${c.postType}`, redirectFrom: c.listing.redirectFrom })),
+  ];
+  for (const entry of redirectEntries) {
+    const entity = state.entities[entry.key];
+    if (!entity?.path) continue;
     for (const from of entry.redirectFrom) if (from !== entity.path) state.redirects.push({ from, to: entity.path });
   }
   if (info.redirection) {
@@ -231,16 +486,88 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   return state;
 }
 
+function entryRedirects(plan: Plan, key: string): string[] {
+  if (key.startsWith('table:')) return plan.tables.find((t) => `table:${t.key}` === key)?.redirectFrom ?? [];
+  if (key.startsWith('listing:')) return plan.contentTypes.find((c) => `listing:${c.postType}` === key)?.listing.redirectFrom ?? [];
+  return plan.items.find((i) => i.sourceKey === key)?.redirectFrom ?? plan.records.find((r) => r.sourceKey === key)?.redirectFrom ?? [];
+}
+
+/** Creates (or updates) a custom post type, its taxonomy and its field group through the bridge's ACF endpoints. */
+async function createContentType(client: WpClient, ct: PlanContentType, entries: PlanRecord[]): Promise<void> {
+  if (ct.taxonomy) {
+    await client.post('/website-mover/v1/acf/taxonomies', {
+      key: `taxonomy_wm_${ct.taxonomy.name}`,
+      title: ct.taxonomy.label,
+      taxonomy: ct.taxonomy.name,
+      object_type: [ct.postType],
+      hierarchical: true,
+      public: true,
+      show_in_rest: true,
+      labels: { name: ct.taxonomy.label, singular_name: ct.taxonomy.singular },
+    });
+  }
+  await client.post('/website-mover/v1/acf/post-types', {
+    key: `post_type_wm_${ct.postType}`,
+    title: ct.label,
+    post_type: ct.postType,
+    public: true,
+    show_in_rest: true,
+    has_archive: false,
+    rewrite: { permalink_rewrite: 'custom_permalink', slug: ct.rewriteSlug, with_front: true },
+    supports: ['title', 'editor', 'thumbnail', 'excerpt', 'custom-fields'],
+    taxonomies: ct.taxonomy ? [ct.taxonomy.name] : [],
+    labels: { name: ct.label, singular_name: ct.singular },
+  });
+  // Long or multi-line values get a textarea; everything else is a text field.
+  const long = (name: string) => entries.some((r) => (r.fields[name] ?? '').length > 120 || (r.fields[name] ?? '').includes('\n'));
+  await client.post('/website-mover/v1/acf/field-groups', {
+    key: `group_wm_${ct.postType}_details`,
+    title: `${ct.singular} details`,
+    show_in_rest: 1,
+    location: [[{ param: 'post_type', operator: '==', value: ct.postType }]],
+    fields: Object.entries(ct.fields).map(([name, label]) => ({
+      key: `field_wm_${ct.postType}_${name}`,
+      label,
+      name,
+      type: long(name) ? 'textarea' : 'text',
+    })),
+  });
+}
+
+const FORM_MARKER = 'wm-form-marker';
+
+/** Replaces each <form> with a marker paragraph, so the rebuilt form's block lands where it was. */
+function withFormMarkers(html: string): string {
+  let n = 0;
+  return html.replace(/<form\b[\s\S]*?<\/form>/gi, () => `<p>${FORM_MARKER}-${n++}</p>`);
+}
+
+/** Swaps marker paragraphs for form blocks (in order); forms without a marker go at the end. */
+function placeForms(blocks: Block[], formIds: number[]): Block[] {
+  const remaining = [...formIds];
+  const out = blocks.flatMap((b) => {
+    const marker = b.name === 'core/paragraph' && new RegExp(`^${FORM_MARKER}-\\d+$`).test(String(b.attributes.content ?? '').trim());
+    if (!marker) return [b];
+    const id = remaining.shift();
+    return id === undefined ? [] : [externalBlock('gravityforms/form', { formId: String(id) })];
+  });
+  return [...out, ...remaining.map((id) => externalBlock('gravityforms/form', { formId: String(id) }))];
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 /**
  * Creates a post. If the connection drops (the server may still have saved it), looks the post up
  * by its source key before trying again, so a retry never makes a duplicate.
  */
-async function createOnce(client: WpClient, route: string, body: object, key: string): Promise<Post> {
+async function createOnce(client: WpClient, route: string, body: object, key: string, postType: string): Promise<Post> {
   try {
     return await client.post<Post>(route, body);
   } catch (err) {
     if (err instanceof WpError) throw err; // the server answered: not a network problem
-    const saved = (await client.get<{ id: number; source_key: string | null }[]>('/website-mover/v1/entities', { types: route.endsWith('posts') ? 'post' : 'page' }))
+    const saved = (await client.get<{ id: number; source_key: string | null }[]>('/website-mover/v1/entities', { types: postType }))
       .find((e) => e.source_key === key);
     return saved ? client.post<Post>(`${route}/${saved.id}`, body) : client.post<Post>(route, body);
   }
@@ -253,6 +580,7 @@ async function uploadMedia(
   previous: { id: number; link: string; job_id: string | null } | undefined,
   alt: string,
   meta: Record<string, string>,
+  doc: { resource_type?: number[]; library_select: string | null },
 ): Promise<RunEntity> {
   let id = previous?.id;
   let url = previous?.link;
@@ -271,9 +599,11 @@ async function uploadMedia(
     slug: `${wpSlug(title, 80) || 'file'}-file`,
     ...(m.type === 'image' ? { alt_text: alt } : {}),
     meta,
+    ...(doc.resource_type ? { resource_type: doc.resource_type } : {}),
     acf: {
       index_for_library: m.fields.index_for_library,
-      ...(m.fields.publication_date ? { publication_date: m.fields.publication_date } : {}),
+      ...(m.fields.publication_date ? { publication_date: m.fields.publication_date.replace(/-/g, '') } : {}),
+      ...(doc.library_select ? { library_select: [doc.library_select] } : {}),
     },
   });
   const action = previous && previous.job_id !== meta._wm_job_id ? 'updated' : 'created';
