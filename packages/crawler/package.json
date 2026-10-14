@@ -6,9 +6,11 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@wm/core": "workspace:*",
     "cheerio": "^1.2.0",
     "robots-parser": "^3.0.1"
   }

@@ -1,6 +1,6 @@
 # Website Mover — Technical Plan
 
-Status: **M0 done** (2026-10-13), except style guide extraction, which is waiting on the PDF. Results are in `docs/m0/`. **Next: M1.** First real job: Jacksonville Housing Authority (JHA), source `https://www.jaxha.org/`.
+Status: **M0 done** (2026-10-13), except style guide extraction, which is waiting on the PDF (`docs/m0/`). **M1 thin end-to-end passes on the local seed** (`docs/m1/`). It still needs a run on the hosted seed, once the bridge is installed there. First real job: Jacksonville Housing Authority (JHA), source `https://www.jaxha.org/`.
 
 ## 1. What we're building
 

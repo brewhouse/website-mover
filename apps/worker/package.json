@@ -1,0 +1,20 @@
+{
+  "name": "@wm/worker",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "wm": "./src/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "wm": "tsx --env-file=../../.env src/cli.ts"
+  },
+  "dependencies": {
+    "@wm/core": "workspace:*",
+    "@wm/crawler": "workspace:*",
+    "@wm/executor": "workspace:*",
+    "@wm/extractor": "workspace:*",
+    "@wm/planner": "workspace:*",
+    "@wm/wp-client": "workspace:*"
+  }
+}

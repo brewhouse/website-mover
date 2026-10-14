@@ -26,7 +26,7 @@ export function restrictBlocks(
   const fallbacks: Record<string, Fallback> = {
     // Background image + content on top → the image, then the content.
     'core/cover': (b) => [
-      ...(b.attributes.url ? [wp.createBlock('core/image', { url: b.attributes.url, alt: b.attributes.alt ?? '' })] : []),
+      ...(b.attributes.url ? [wp.createBlock('core/image', { url: b.attributes.url, id: b.attributes.id, alt: b.attributes.alt ?? '' })] : []),
       ...b.innerBlocks,
     ],
     // A button row → one link paragraph per button.

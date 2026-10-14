@@ -15,3 +15,6 @@ snapshots/
 
 # Local copy of the seed site codebase (read-only; contains licensed plugins)
 bases/
+
+# Migration jobs: snapshots, plans, run state and reports (M1 stores jobs on disk)
+data/

@@ -16,5 +16,6 @@ const WM_BRIDGE_NAMESPACE = 'website-mover/v1';
 require_once __DIR__ . '/includes/rest.php';
 require_once __DIR__ . '/includes/acf.php';
 require_once __DIR__ . '/includes/forms.php';
+require_once __DIR__ . '/includes/entities.php';
 
 add_action( 'rest_api_init', 'wm_bridge_register_routes' );

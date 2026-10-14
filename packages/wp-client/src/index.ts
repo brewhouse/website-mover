@@ -17,11 +17,13 @@ export class WpError extends Error {
 
 /** Minimal WordPress REST client using an Application Password. */
 export class WpClient {
+  readonly baseUrl: string;
   private readonly root: string;
   private readonly auth: string;
 
   constructor({ baseUrl, user, appPassword }: WpClientOptions) {
-    this.root = `${baseUrl.replace(/\/$/, '')}/wp-json`;
+    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.root = `${this.baseUrl}/wp-json`;
     this.auth = `Basic ${Buffer.from(`${user}:${appPassword.replace(/\s+/g, '')}`).toString('base64')}`;
   }
 
@@ -38,10 +40,12 @@ export class WpClient {
   }
 
   /** Uploads a file to the media library. */
-  upload<T = unknown>(data: Uint8Array<ArrayBuffer>, filename: string, contentType: string) {
-    return this.send<T>('POST', '/wp/v2/media', undefined, data, {
+  upload<T = unknown>(data: Uint8Array<ArrayBuffer>, filename: string, contentType: string, query?: Record<string, string | number>) {
+    // Header values must be ASCII; WordPress sanitizes the name again anyway.
+    const ascii = filename.normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\]/g, '') || 'file';
+    return this.send<T>('POST', '/wp/v2/media', query, data, {
       'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '')}"`,
+      'Content-Disposition': `attachment; filename="${ascii}"`,
     });
   }
 
@@ -61,11 +65,19 @@ export class WpClient {
     const url = new URL(this.root + path);
     for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, String(v));
 
-    const res = await fetch(url, {
-      method,
-      headers: { Authorization: this.auth, Accept: 'application/json', ...headers },
-      body,
-    });
+    const init = { method, headers: { Authorization: this.auth, Accept: 'application/json', ...headers }, body };
+    // Reads are retried on network errors. Writes are not (a dropped connection may still have
+    // been processed); callers make writes idempotent instead.
+    const attempts = method === 'GET' ? 3 : 1;
+    let res: Response | undefined;
+    for (let attempt = 1; !res; attempt++) {
+      try {
+        res = await fetch(url, init);
+      } catch (err) {
+        if (attempt >= attempts) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      }
+    }
     const text = await res.text();
     const json = text ? safeJson(text) : null;
     if (!res.ok) {

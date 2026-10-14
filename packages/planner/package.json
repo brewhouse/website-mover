@@ -1,0 +1,16 @@
+{
+  "name": "@wm/planner",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wm/core": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}
