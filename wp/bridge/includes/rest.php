@@ -14,6 +14,16 @@ function wm_bridge_register_routes() {
 		'callback' => 'wm_bridge_schema',
 	) );
 
+	register_rest_route( WM_BRIDGE_NAMESPACE, '/entities', $admin + array(
+		'methods'  => WP_REST_Server::READABLE,
+		'callback' => 'wm_bridge_entities',
+	) );
+
+	register_rest_route( WM_BRIDGE_NAMESPACE, '/trash', $admin + array(
+		'methods'  => WP_REST_Server::CREATABLE,
+		'callback' => 'wm_bridge_trash',
+	) );
+
 	register_rest_route( WM_BRIDGE_NAMESPACE, '/acf/post-types', $admin + array(
 		'methods'  => WP_REST_Server::CREATABLE,
 		'callback' => fn( $request ) => wm_bridge_acf_upsert( $request, 'acf-post-type' ),
@@ -82,5 +92,27 @@ function wm_bridge_status() {
 		// Block types switched off in the editor (Disable Unused Block Editor Blocks).
 		'disabled_blocks' => array_values( (array) get_option( 'dubeb_disabled_blocks', array() ) ),
 		'upload_max_size' => wp_max_upload_size(),
+		'permalinks'      => get_option( 'permalink_structure' ),
+		'front_page'      => (int) get_option( 'page_on_front' ),
+		// Slugs WordPress uses for post type and taxonomy URLs; pages must not take them.
+		'reserved_slugs'  => wm_bridge_reserved_slugs(),
 	);
+}
+
+function wm_bridge_reserved_slugs() {
+	$slugs = array();
+	foreach ( get_post_types( array( 'public' => true ), 'objects' ) as $pt ) {
+		if ( ! empty( $pt->rewrite['slug'] ) ) {
+			$slugs[] = $pt->rewrite['slug'];
+		}
+		if ( $pt->has_archive ) {
+			$slugs[] = true === $pt->has_archive ? $pt->name : $pt->has_archive;
+		}
+	}
+	foreach ( get_taxonomies( array( 'public' => true ), 'objects' ) as $tax ) {
+		if ( ! empty( $tax->rewrite['slug'] ) ) {
+			$slugs[] = $tax->rewrite['slug'];
+		}
+	}
+	return array_values( array_unique( $slugs ) );
 }

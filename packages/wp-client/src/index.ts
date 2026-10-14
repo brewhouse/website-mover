@@ -17,11 +17,13 @@ export class WpError extends Error {
 
 /** Minimal WordPress REST client using an Application Password. */
 export class WpClient {
+  readonly baseUrl: string;
   private readonly root: string;
   private readonly auth: string;
 
   constructor({ baseUrl, user, appPassword }: WpClientOptions) {
-    this.root = `${baseUrl.replace(/\/$/, '')}/wp-json`;
+    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.root = `${this.baseUrl}/wp-json`;
     this.auth = `Basic ${Buffer.from(`${user}:${appPassword.replace(/\s+/g, '')}`).toString('base64')}`;
   }
 
@@ -39,9 +41,11 @@ export class WpClient {
 
   /** Uploads a file to the media library. */
   upload<T = unknown>(data: Uint8Array<ArrayBuffer>, filename: string, contentType: string) {
+    // Header values must be ASCII; WordPress sanitizes the name again anyway.
+    const ascii = filename.normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\]/g, '') || 'file';
     return this.send<T>('POST', '/wp/v2/media', undefined, data, {
       'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '')}"`,
+      'Content-Disposition': `attachment; filename="${ascii}"`,
     });
   }
 

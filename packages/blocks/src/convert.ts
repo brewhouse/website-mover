@@ -18,6 +18,8 @@ export interface ConvertOptions {
   demoteH1?: boolean;
   /** Called for content we drop or can't convert cleanly. */
   onWarning?: (message: string) => void;
+  /** Maps an image URL to its uploaded attachment, so image blocks get the attachment id. */
+  resolveImage?: (url: string) => { id: number; url: string } | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +319,11 @@ function tidy(blocks: Block[], options: ConvertOptions, captions: string[]): Blo
     // including one in the caption; without an href it's meaningless.
     if (name === 'core/image' && attributes.linkDestination === 'custom' && !attributes.href) {
       delete attributes.linkDestination;
+    }
+
+    if (name === 'core/image' && options.resolveImage) {
+      const uploaded = options.resolveImage(String(attributes.url ?? ''));
+      if (uploaded) Object.assign(attributes, uploaded);
     }
 
     // rawHandler gives core/embed only a URL. Add what the editor would set
