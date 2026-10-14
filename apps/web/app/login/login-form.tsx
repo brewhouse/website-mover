@@ -11,7 +11,7 @@ export function LoginForm({ next }: { next: string }) {
       {state.error && <Notice tone="bad">{state.error}</Notice>}
       <input type="hidden" name="next" value={next} />
       <Field label="Email" htmlFor="email">
-        <input id="email" name="email" type="email" autoComplete="username" required className={inputClass} />
+        <input id="email" name="email" type="email" autoComplete="username" required defaultValue={state.values?.email} className={inputClass} />
       </Field>
       <Field label="Password" htmlFor="password">
         <input id="password" name="password" type="password" autoComplete="current-password" required className={inputClass} />

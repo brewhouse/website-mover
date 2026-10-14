@@ -30,6 +30,13 @@ import { dbReady, requireUser, SESSION_COOKIE } from './session';
 export interface FormState {
   error?: string;
   ok?: string;
+  /** What was submitted (never secrets), so a form that failed validation keeps its values. */
+  values?: Record<string, string>;
+}
+
+/** The form's text fields, minus secrets and files. */
+function kept(form: FormData, ...secret: string[]): Record<string, string> {
+  return Object.fromEntries([...form.entries()].filter(([k, v]) => typeof v === 'string' && !secret.includes(k) && !k.startsWith('$')) as [string, string][]);
 }
 
 const text = (form: FormData, name: string) => String(form.get(name) ?? '').trim();
@@ -39,7 +46,7 @@ const text = (form: FormData, name: string) => String(form.get(name) ?? '').trim
 export async function login(_: FormState, form: FormData): Promise<FormState> {
   await dbReady();
   const user = await checkLogin(text(form, 'email'), String(form.get('password') ?? ''));
-  if (!user) return { error: 'That email and password don’t match an account.' };
+  if (!user) return { error: 'That email and password don’t match an account.', values: kept(form, 'password') };
   const { token, expiresAt } = await createSession(user.id);
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -69,14 +76,14 @@ export async function addTarget(_: FormState, form: FormData): Promise<FormState
   const url = text(form, 'url');
   const wpUser = text(form, 'wpUser');
   const appPassword = String(form.get('appPassword') ?? '').trim();
-  if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) return { error: 'Name: lowercase letters, numbers and dashes.' };
-  if (!wpUser || !appPassword) return { error: 'Enter the WordPress user and its Application Password.' };
+  if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) return { error: 'Name: lowercase letters, numbers and dashes.', values: kept(form, 'appPassword') };
+  if (!wpUser || !appPassword) return { error: 'Enter the WordPress user and its Application Password.', values: kept(form, 'appPassword') };
   try {
     await assertPublicUrl(url);
   } catch (err) {
-    return { error: `Site URL: ${(err as Error).message}` };
+    return { error: `Site URL: ${(err as Error).message}`, values: kept(form, 'appPassword') };
   }
-  if ((await listTargets()).some((t) => t.name === name)) return { error: `There is already a target called ${name}.` };
+  if ((await listTargets()).some((t) => t.name === name)) return { error: `There is already a target called ${name}.`, values: kept(form, 'appPassword') };
   const target = await createTarget({ name, url, wpUser, appPassword, createdBy: user.id });
   await audit(null, user.id, 'target.add', { target: target.name, url: target.url });
   revalidatePath('/targets');
@@ -114,24 +121,24 @@ export async function createJobAction(_: FormState, form: FormData): Promise<For
   const ga4Id = text(form, 'ga4Id').toUpperCase() || null;
   const pdf = form.get('styleGuide');
 
-  if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(id)) return { error: 'Job name: lowercase letters, numbers and dashes (e.g. jha).' };
-  if (await getJob(id)) return { error: `There is already a job called ${id}.` };
+  if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(id)) return { error: 'Job name: lowercase letters, numbers and dashes (e.g. jha).', values: kept(form) };
+  if (await getJob(id)) return { error: `There is already a job called ${id}.`, values: kept(form) };
   try {
     await assertPublicUrl(sourceUrl);
   } catch (err) {
-    return { error: `Source URL: ${(err as Error).message}` };
+    return { error: `Source URL: ${(err as Error).message}`, values: kept(form) };
   }
-  if (!PROFILES.includes(profile)) return { error: 'Choose a site profile.' };
-  if (!(await listTargets()).some((t) => t.id === targetId)) return { error: 'Choose a target.' };
-  if (timezone && !Intl.supportedValuesOf('timeZone').includes(timezone)) return { error: `Unknown timezone: ${timezone}` };
-  if (ga4Id && !/^G-[A-Z0-9]{4,12}$/.test(ga4Id)) return { error: 'GA4 measurement IDs look like G-XXXXXXXXXX.' };
-  if (form.get('rights') !== 'on') return { error: 'Confirm we have the rights to copy this site’s content.' };
+  if (!PROFILES.includes(profile)) return { error: 'Choose a site profile.', values: kept(form) };
+  if (!(await listTargets()).some((t) => t.id === targetId)) return { error: 'Choose a target.', values: kept(form) };
+  if (timezone && !Intl.supportedValuesOf('timeZone').includes(timezone)) return { error: `Unknown timezone: ${timezone}`, values: kept(form) };
+  if (ga4Id && !/^G-[A-Z0-9]{4,12}$/.test(ga4Id)) return { error: 'GA4 measurement IDs look like G-XXXXXXXXXX.', values: kept(form) };
+  if (form.get('rights') !== 'on') return { error: 'Confirm we have the rights to copy this site’s content.', values: kept(form) };
 
   let styleGuide: string | null = null;
   if (pdf instanceof File && pdf.size > 0) {
-    if (pdf.size > MAX_PDF_BYTES) return { error: 'The style guide is over 50 MB.' };
+    if (pdf.size > MAX_PDF_BYTES) return { error: 'The style guide is over 50 MB.', values: kept(form) };
     const bytes = Buffer.from(await pdf.arrayBuffer());
-    if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') return { error: 'The style guide must be a PDF.' };
+    if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') return { error: 'The style guide must be a PDF.', values: kept(form) };
     styleGuide = 'style-guide.pdf';
     await mkdir(jobPath(id, 'inputs'), { recursive: true });
     await writeFile(jobPath(id, 'inputs', styleGuide), bytes);

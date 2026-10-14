@@ -6,18 +6,19 @@ import { addTarget, testTarget, type FormState } from '@/lib/actions';
 
 export function AddTargetForm() {
   const [state, action, pending] = useActionState<FormState, FormData>(addTarget, {});
+  const v = state.values ?? {};
   return (
     <form action={action} className="grid gap-4 p-4">
       {state.error && <Notice tone="bad">{state.error}</Notice>}
       {state.ok && <Notice tone="ok">{state.ok}</Notice>}
       <Field label="Name" htmlFor="name" hint="Short, e.g. jha-dev.">
-        <input id="name" name="name" required pattern="[a-z0-9][a-z0-9-]*" className={inputClass} />
+        <input id="name" name="name" required pattern="[a-z0-9][a-z0-9-]*" defaultValue={v.name} className={inputClass} />
       </Field>
       <Field label="Site URL" htmlFor="url">
-        <input id="url" name="url" type="url" required placeholder="https://dev-site.pantheonsite.io" className={inputClass} />
+        <input id="url" name="url" type="url" required placeholder="https://dev-site.pantheonsite.io" defaultValue={v.url} className={inputClass} />
       </Field>
       <Field label="WordPress user" htmlFor="wpUser">
-        <input id="wpUser" name="wpUser" required autoComplete="off" className={inputClass} />
+        <input id="wpUser" name="wpUser" required autoComplete="off" defaultValue={v.wpUser} className={inputClass} />
       </Field>
       <Field label="Application Password" htmlFor="appPassword" hint="Users → Profile → Application Passwords. Stored encrypted; never shown again.">
         <input id="appPassword" name="appPassword" type="password" required autoComplete="new-password" className={inputClass} />
