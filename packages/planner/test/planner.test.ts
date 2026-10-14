@@ -167,3 +167,78 @@ describe('approval', () => {
     await expect(loadApprovedPlan('test')).rejects.toThrow(/approval is for plan v1/i);
   });
 });
+
+describe('buildPlan with analysis (M2)', () => {
+  it('turns meeting pages into events, keeps index pages, and places forms', () => {
+    const notice = page('/upages.php?id=639', { kind: 'meeting', title: 'May 11th, 2026 - Finance Committee Meeting' });
+    const agenda = page('/may-11-2026-agenda', { kind: 'meeting', title: 'May 11, 2026 Agenda' });
+    const index = page('/meetings', { kind: 'meeting', title: 'Meetings' });
+    const help = page('/help-center', { kind: 'utility', title: 'Help Center' });
+    const signup = page('/sign-up', { kind: 'utility', title: 'Sign Up' });
+    const agendaFile: SnapshotFile = {
+      url: `${origin}/plugins/show_image.php?id=7`,
+      finalUrl: `${origin}/plugins/show_image.php?id=7`,
+      status: 200,
+      contentType: 'application/pdf',
+      filename: 'agenda.pdf',
+      bytes: 1,
+      sha256: 'h7',
+      path: 'snapshot/files/h7.pdf',
+      referencedBy: [agenda.sourceKey],
+    };
+    const withAnalysis = buildPlan({
+      jobId: 'test',
+      version: 1,
+      source: { origin, profile: 'bjm' },
+      inputs: { extractSha256: 'test' },
+      target,
+      pages: [notice, agenda, index, help, signup],
+      snapshotPages: [],
+      files: [agendaFile],
+      existing: [],
+      analysis: {
+        meetings: {
+          meetings: [
+            {
+              key: 'meeting:2026-05-11:finance-committee-meeting',
+              title: notice.title,
+              date: '2026-05-11',
+              startTime: '12:00',
+              endTime: null,
+              kind: 'Finance Committee Meeting',
+              type: 'committee',
+              category: 'Committee Meetings',
+              location: null,
+              cancelled: false,
+              sourceKeys: [notice.sourceKey, agenda.sourceKey],
+              newsKeys: [],
+              documents: [{ href: `${origin}/plugins/show_image.php?id=7`, text: 'Agenda', role: 'agenda' }],
+              recordings: [],
+              confidence: 'high',
+              reasons: [],
+            },
+          ],
+          indexPages: [index.sourceKey],
+          unresolved: [],
+        },
+        forms: {
+          forms: [
+            { key: `${help.sourceKey}#form-1`, pageKey: help.sourceKey, kind: 'form', title: 'Help Center', description: null, fields: [], sensitive: [], uploads: false, captcha: true, implementation: 'native', warnings: [] },
+            { key: `${signup.sourceKey}#form-1`, pageKey: signup.sourceKey, kind: 'subscription', title: 'Sign Up', description: null, fields: [], sensitive: [], uploads: false, captcha: false, implementation: 'native', warnings: [] },
+          ],
+        },
+      },
+    });
+
+    // The merged meeting pages are one event; their URLs redirect to it, and they aren't pages.
+    expect(withAnalysis.events).toHaveLength(1);
+    expect(withAnalysis.events[0]!.redirectFrom).toEqual(['/upages.php?id=639', '/may-11-2026-agenda']);
+    expect(withAnalysis.items.map((i) => i.sourceUrl.replace(origin, ''))).toEqual(['/help-center', '/meetings']);
+    // Forms go on their page; a subscription sign-up is flagged, and its page isn't migrated.
+    expect(withAnalysis.items.find((i) => i.sourceUrl.endsWith('/help-center'))!.forms).toEqual([`${help.sourceKey}#form-1`]);
+    expect(withAnalysis.forms.map((f) => [f.title, f.action, f.captcha])).toEqual([['Help Center', 'rebuild', true], ['Sign Up', 'flag', false]]);
+    expect(withAnalysis.notMigrated.find((s) => s.sourceUrl.endsWith('/sign-up'))!.reason).toMatch(/subscription/i);
+    // A file used only by a meeting page is uploaded now that the meeting is migrated.
+    expect(withAnalysis.media.map((m) => m.sourceUrl.replace(origin, ''))).toEqual(['/plugins/show_image.php?id=7']);
+  });
+});
