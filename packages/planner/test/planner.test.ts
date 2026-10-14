@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { ExtractedPage, SnapshotFile, SnapshotPage } from '@wm/core';
+import type { ExtractedPage, SiteAnalysis, SnapshotFile, SnapshotPage } from '@wm/core';
 import { approvePlan, buildPlan, loadApprovedPlan, savePlan, wpSlug, type TargetEntity, type TargetInfo } from '../src/index.js';
 
 describe('wpSlug', () => {
@@ -247,5 +247,131 @@ describe('buildPlan with analysis (M2)', () => {
     expect(withAnalysis.notMigrated.find((s) => s.sourceUrl.endsWith('/sign-up'))!.reason).toMatch(/subscription/i);
     // A file used only by a meeting page is uploaded now that the meeting is migrated.
     expect(withAnalysis.media.map((m) => m.sourceUrl.replace(origin, ''))).toEqual(['/plugins/show_image.php?id=7']);
+  });
+});
+
+describe('buildPlan with the site structure (M3)', () => {
+  it('links menus and homepage tiles to migrated content and clears contact placeholders the source has no value for', () => {
+    const about = page('/about-us', { title: 'About Us' });
+    const site: SiteAnalysis = {
+      siteName: 'Jacksonville Housing',
+      menus: {
+        top: [{ label: 'Calendar', href: `${origin}/calendar` }],
+        main: [{ label: 'About Us', href: `${origin}/about-us`, children: [{ label: 'Old Page', href: `${origin}/not-migrated` }] }],
+        footer: [],
+        social: [{ label: 'Like us on Facebook', href: 'https://www.facebook.com/JacksonvilleHousingAuthority' }],
+        explore: [],
+      },
+      contact: { address: '1300 N Broad Street, Jacksonville, FL 32202', phone: '904-630-3810', email: null, fax: null, hours: null },
+      footerNotices: [],
+      home: {
+        slides: [],
+        buttons: [
+          { label: 'View Our Full Calendar', href: `${origin}/calendar` },
+          { label: 'Old Tile', href: `${origin}/not-migrated` },
+        ],
+      },
+    };
+    const result = buildPlan({
+      jobId: 'test',
+      version: 1,
+      source: { origin, profile: 'bjm' },
+      inputs: { extractSha256: 'test' },
+      // The Events Calendar is active: the source's calendar page becomes its /events/ archive.
+      target: { ...target, reservedSlugs: [...target.reservedSlugs, 'event'] },
+      pages: [about],
+      snapshotPages: [],
+      files: [],
+      existing: [],
+      analysis: { site },
+    });
+
+    const menu = (name: string) => result.site!.menus.find((m) => m.name === name)!.items.map((i) => [i.title, i.key, i.url]);
+    // Links to migrated pages carry the page's key (the menu follows later slug changes); a link to
+    // content that isn't migrated is left out and reported; external links and labels stay as in the source.
+    expect(menu('Main Menu')).toEqual([['About Us', about.sourceKey, '/about-us/']]);
+    expect(menu('Top Menu')).toEqual([['Calendar', null, '/events/']]);
+    expect(menu('Social Menu')).toEqual([['Like us on Facebook', null, 'https://www.facebook.com/JacksonvilleHousingAuthority']]);
+    expect(result.site!.home.quickLinks).toEqual([{ title: 'View Our Full Calendar', url: '/events/', key: null }]);
+    expect(result.warnings.join('\n')).toMatch(/"Old Page"[\s\S]*"Old Tile"/);
+
+    // The seed's placeholder email and fax, with their headings and icons, are cleared so the
+    // footer doesn't show empty rows; the phone keeps the seed's heading.
+    expect(result.site!.options).toEqual({
+      footer_address: '1300 N Broad Street, Jacksonville, FL 32202',
+      footer_address_heading: '',
+      footer_phone: '904-630-3810',
+      footer_email: '',
+      footer_email_heading: '',
+      footer_email_icon: '',
+      footer_fax: '',
+      footer_fax_heading: '',
+      footer_fax_icon: '',
+    });
+    expect(result.site!.home.clearOthers).toBe(true);
+  });
+
+  it('keeps dropdown parents without a page of their own as headings, links documents, and empties menus the source lacks', () => {
+    const fss = page('/fss', { title: 'FSS Program' });
+    const planPdf = `${origin}/plugins/show_image.php?id=12`;
+    const pdf: SnapshotFile = {
+      url: planPdf,
+      finalUrl: planPdf,
+      status: 200,
+      contentType: 'application/pdf',
+      filename: 'annual-plan.pdf',
+      bytes: 1,
+      sha256: 'h12',
+      path: 'snapshot/files/h12.pdf',
+      referencedBy: [],
+    };
+    // Shaped like a site.json from before homepage tiles were read (no `home.buttons`).
+    const site = {
+      siteName: null,
+      menus: {
+        top: [],
+        main: [
+          { label: 'Residents', href: '', children: [{ label: 'FSS Program', href: `${origin}/fss` }] },
+          { label: 'Annual Plan', href: planPdf },
+        ],
+        footer: [],
+        social: [],
+        explore: [],
+      },
+      contact: { address: null, phone: null, email: null, fax: null, hours: null },
+      footerNotices: [],
+      home: { slides: [] },
+    } as unknown as SiteAnalysis;
+    const result = buildPlan({
+      jobId: 'test',
+      version: 1,
+      source: { origin, profile: 'bjm' },
+      inputs: { extractSha256: 'test' },
+      target,
+      pages: [fss],
+      snapshotPages: [],
+      files: [pdf],
+      existing: [],
+      analysis: { site },
+    });
+
+    const main = result.site!.menus.find((m) => m.name === 'Main Menu')!.items;
+    expect(main.map((i) => [i.title, i.key, i.url, i.parent])).toEqual([
+      ['Residents', null, '#', null],
+      ['FSS Program', fss.sourceKey, '/fss/', 0],
+      // A document only the menu links to is uploaded; the executor links the item to the file.
+      ['Annual Plan', 'jaxha.org/plugins/show_image.php?id=12', '/plugins/show_image.php?id=12', null],
+    ]);
+    expect(result.media.map((m) => [m.sourceKey, m.usedBy])).toEqual([['jaxha.org/plugins/show_image.php?id=12', ['site']]]);
+    // Menus the source has no links for are still planned, so the seed's demo links are removed.
+    expect(result.site!.menus.map((m) => [m.name, m.items.length])).toEqual([
+      ['Main Menu', 3],
+      ['Top Menu', 0],
+      ['Footer Menu', 0],
+      ['Social Menu', 0],
+      ['Explore Menu', 0],
+    ]);
+    expect(result.site!.home.quickLinks).toEqual([]);
+    expect(result.site!.options).toMatchObject({ footer_address: '', footer_address_heading: '', footer_address_icon: '' });
   });
 });

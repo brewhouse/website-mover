@@ -39,6 +39,11 @@ function wm_bridge_register_routes() {
 		'callback' => fn( $request ) => wm_bridge_acf_upsert( $request, 'acf-field-group' ),
 	) );
 
+	register_rest_route( WM_BRIDGE_NAMESPACE, '/acf/options', $admin + array(
+		'methods'  => WP_REST_Server::CREATABLE,
+		'callback' => 'wm_bridge_acf_options',
+	) );
+
 	register_rest_route( WM_BRIDGE_NAMESPACE, '/acf/field-groups/(?P<key>group_[A-Za-z0-9_]+)/show-in-rest', $admin + array(
 		'methods'  => WP_REST_Server::CREATABLE,
 		'callback' => 'wm_bridge_acf_show_in_rest',

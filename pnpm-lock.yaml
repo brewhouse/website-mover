@@ -356,6 +356,15 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0
 
+  packages/llm:
+    dependencies:
+      openai:
+        specifier: ^7.32.0
+        version: 7.32.0(undici@8.11.2)(zod@4.6.7)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
   packages/planner:
     dependencies:
       '@wm/analyzer':
@@ -364,6 +373,15 @@ importers:
       '@wm/core':
         specifier: workspace:*
         version: link:../core
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
+  packages/styleguide:
+    dependencies:
+      '@wm/llm':
+        specifier: workspace:*
+        version: link:../llm
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -2131,6 +2149,30 @@ packages:
   obug@3.0.0:
     resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
     engines: {node: '>=12.20.0'}
+
+  openai@7.32.0:
+    resolution: {integrity: sha512-avqxu/jl1gsVBCBgFNPr9sTh+wZppQphuhhFy1zEvAJxEaJ4t0ery6hZdOT9kws/EcNTARoQcZs2IT3bliE1SA==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      undici: '>=5 <9'
+      ws: ^8.21.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      undici:
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
 
   p-limit@2.3.0:
     resolution: {integrity: sha512-//88mFWSJx8lxCzwdAABTJL2MyWB12+eIY7MDL2SqLmAkeKU9qxRvWuSyTjm3FUmpBEMuFfckAIqEaVGUDxb6w==}
@@ -4665,6 +4707,11 @@ snapshots:
   object-assign@4.1.1: {}
 
   obug@3.0.0: {}
+
+  openai@7.32.0(undici@8.11.2)(zod@4.6.7):
+    optionalDependencies:
+      undici: 8.11.2
+      zod: 4.6.7
 
   p-limit@2.3.0:
     dependencies:

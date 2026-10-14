@@ -58,6 +58,30 @@ function wm_bridge_acf_upsert( WP_REST_Request $request, string $type ) {
 }
 
 /**
+ * Sets ACF options-page fields (the framework's theme settings: footer contact details, colours,
+ * heading sizes). Body: { values: { field_name: value } }. Stored as ordinary ACF options.
+ */
+function wm_bridge_acf_options( WP_REST_Request $request ) {
+	if ( ! function_exists( 'update_field' ) ) {
+		return new WP_Error( 'wm_acf_missing', 'ACF is required.', array( 'status' => 424 ) );
+	}
+	$result = array();
+	foreach ( (array) $request['values'] as $name => $value ) {
+		$name = sanitize_key( $name );
+		if ( ! acf_get_field( $name ) ) {
+			$result[ $name ] = 'unknown field';
+			continue;
+		}
+		$result[ $name ] = update_field( $name, is_string( $value ) ? wp_kses_post( $value ) : $value, 'option' ) ? 'updated' : 'unchanged';
+	}
+	// The framework regenerates its CSS from these options on save.
+	if ( function_exists( 'generate_options_css' ) ) {
+		generate_options_css();
+	}
+	return $result;
+}
+
+/**
  * Turns on "Show in REST API" for an existing field group, so its values can be written through
  * the core REST `acf` property. Changes only that setting; the seed's field definitions stay as
  * they are.

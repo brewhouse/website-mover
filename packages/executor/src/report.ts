@@ -3,7 +3,7 @@ import { externalBlock, validateSerialized } from '@wm/blocks';
 import { jobPath, writeJson } from '@wm/core';
 import { loadPlan } from '@wm/planner';
 import type { WpClient } from '@wm/wp-client';
-import { loadRunState, mapLimit, type EntityKind } from './execute.js';
+import { loadRunState, mapLimit, type EntityKind, type RunState } from './execute.js';
 
 interface KindCounts {
   planned: number;
@@ -30,6 +30,7 @@ export interface Report {
   notLive: { sourceKey: string; path: string; status: number }[];
   invalid: { sourceKey: string; errors: string[] }[];
   warnings: Record<string, number>;
+  site: RunState['site'];
 }
 
 /** Checks the run against the target and writes report.json/.md, url-map.csv and redirects.csv. */
@@ -115,6 +116,7 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
     notLive,
     invalid,
     warnings,
+    site: state.site,
   };
 
   await writeJson(jobPath(jobId, 'report', 'report.json'), report);
@@ -150,6 +152,10 @@ export function renderReport(r: Report): string {
   ];
   if (r.failures.length) out.push('## Failures', '', ...r.failures.map((f) => `- ${f.kind} \`${f.sourceKey}\` at ${f.step}: ${f.error}`), '');
   if (r.notLive.length) out.push('## Not answering 200', '', ...r.notLive.map((n) => `- \`${n.path}\` → ${n.status} (${n.sourceKey})`), '');
+  if (r.site) {
+    out.push('## Site structure', '', `Homepage slides: ${r.site.homeSlides}. Quick links: ${r.site.homeQuickLinks ?? 0}. Menus: ${Object.entries(r.site.menus).map(([n, c]) => `${n} (${c} items)`).join(', ') || 'none'}.`, '');
+    if (r.site.warnings.length) out.push(...r.site.warnings.map((w) => `- ${w}`), '');
+  }
   if (r.redirects.broken.length) out.push('## Redirects not working', '', ...r.redirects.broken.map((b) => `- \`${b.from}\` → expected \`${b.to}\`, got ${b.got}`), '');
   if (r.invalid.length) out.push('## Block problems', '', ...r.invalid.map((i) => `- \`${i.sourceKey}\`: ${i.errors.join('; ')}`), '');
   const w = Object.entries(r.warnings).sort((a, b) => b[1] - a[1]);

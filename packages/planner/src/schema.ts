@@ -150,6 +150,35 @@ export const PlanTable = z.object({
 });
 export type PlanTable = z.infer<typeof PlanTable>;
 
+/** A menu item. `key` is the planned entry it points at (so the menu links to the object, not a URL); else `url`. */
+export const PlanMenuItem = z.object({
+  title: z.string(),
+  sourceUrl: z.string(),
+  key: z.string().nullable(),
+  url: z.string(),
+  /** Index of the parent item in the same menu. */
+  parent: z.number().nullable(),
+});
+export type PlanMenuItem = z.infer<typeof PlanMenuItem>;
+
+/** Site-wide structure (M3): named menus, theme options, homepage fields, site title. */
+export const PlanSite = z.object({
+  title: z.string().nullable(),
+  /** The framework's named menus ("Main Menu", "Top Menu", ...), replaced as a whole. */
+  menus: z.array(z.object({ name: z.string(), items: z.array(PlanMenuItem) })),
+  /** Theme option fields (ACF options pages) → value. Empty string clears a placeholder. */
+  options: z.record(z.string(), z.string()),
+  /** Homepage template fields. */
+  home: z.object({
+    banner: z.array(z.object({ title: z.string(), image: z.string().nullable(), linkUrl: z.string().nullable(), linkKey: z.string().nullable(), linkTitle: z.string().nullable() })),
+    /** Link tiles under the slideshow (the homepage template's `banner_icon`). */
+    quickLinks: z.array(z.object({ title: z.string(), url: z.string(), key: z.string().nullable() })).default([]),
+    /** Clear the homepage template's other fields (the seed's demo placeholders). */
+    clearOthers: z.boolean().default(false),
+  }),
+});
+export type PlanSite = z.infer<typeof PlanSite>;
+
 /** A site setting the plan changes (shown with its current value for review). */
 export const PlanSetting = z.object({ key: z.string(), from: z.string(), to: z.string(), reason: z.string() });
 export type PlanSetting = z.infer<typeof PlanSetting>;
@@ -209,6 +238,7 @@ export const Plan = z.object({
   tables: z.array(PlanTable).default([]),
   documentTypes: z.array(z.string()).default([]),
   settings: z.array(PlanSetting).default([]),
+  site: PlanSite.nullable().default(null),
   cleanup: z.array(PlanCleanup),
   /** Existing target content that is kept (framework pages the migration reuses). */
   keep: z.array(PlanCleanup.extend({ reason: z.string() })),

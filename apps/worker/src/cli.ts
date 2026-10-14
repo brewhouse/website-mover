@@ -23,12 +23,13 @@ import {
   type JobInfo,
   type MeetingAnalysis,
   type RecordAnalysis,
+  type SiteAnalysis,
   type SnapshotFile,
   type SnapshotPage,
 } from '@wm/core';
 import { scanSite } from '@wm/crawler';
 import { extractJob } from '@wm/extractor';
-import { analyzeForms, analyzeMeetings, analyzeRecords } from '@wm/analyzer';
+import { analyzeForms, analyzeMeetings, analyzeRecords, analyzeSite } from '@wm/analyzer';
 import { approvePlan, buildPlan, latestPlanVersion, loadPlan, savePlan } from '@wm/planner';
 import { buildReport, connectTarget, executePlan, probeTarget, type TargetName } from '@wm/executor';
 
@@ -70,6 +71,7 @@ switch (command) {
     const meetings = await analyzeMeetings(jobId, console.log);
     const forms = await analyzeForms(jobId, console.log);
     const records = await analyzeRecords(jobId, console.log);
+    const site = await analyzeSite(jobId, console.log);
     console.log({
       meetings: meetings.meetings.length,
       meetingIndexPages: meetings.indexPages.length,
@@ -79,14 +81,16 @@ switch (command) {
       communities: records.communities.length,
       tables: records.tables.length,
       documents: records.documents.length,
+      menus: Object.fromEntries(Object.entries(site.menus).map(([k, v]) => [k, v.length])),
+      homeSlides: site.home.slides.length,
     });
     break;
   }
   case 'plan': {
     const job = await readJson<JobInfo>(jobPath(jobId, 'job.json'));
     // Analysis is optional (M1 plans don't have it); when present, its hashes go into the plan.
-    const analysisFiles = { meetings: 'meetings.json', forms: 'forms.json', records: 'records.json' } as const;
-    const analysis: { meetings?: MeetingAnalysis; forms?: FormAnalysis; records?: RecordAnalysis } = {};
+    const analysisFiles = { meetings: 'meetings.json', forms: 'forms.json', records: 'records.json', site: 'site.json' } as const;
+    const analysis: { meetings?: MeetingAnalysis; forms?: FormAnalysis; records?: RecordAnalysis; site?: SiteAnalysis } = {};
     const analysisSha256: Record<string, string> = {};
     for (const [name, file] of Object.entries(analysisFiles)) {
       const full = jobPath(jobId, 'analyze', file);

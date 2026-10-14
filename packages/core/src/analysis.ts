@@ -155,3 +155,37 @@ export interface DocumentRecord {
   date: string | null;
   reasons: string[];
 }
+
+/** analyze/site.json: the site's shared structure (navigation, contact details, homepage), M3. */
+export interface SiteAnalysis {
+  /** Organization/site name as the source writes it (e.g. "Jacksonville Housing"). */
+  siteName: string | null;
+  menus: {
+    /** Utility bar above the header. */
+    top: NavLink[];
+    /** Primary navigation, with dropdown children. */
+    main: NavLink[];
+    /** Footer links (site map, accessibility, ...). */
+    footer: NavLink[];
+    /** Social profiles. */
+    social: NavLink[];
+    /** Other link lists shown site-wide (e.g. "Industry Links"). */
+    explore: NavLink[];
+  };
+  contact: { address: string | null; phone: string | null; email: string | null; fax: string | null; hours: string | null };
+  /** Statements shown on every page's footer (e.g. fair-housing notices), verbatim. */
+  footerNotices: string[];
+  home: {
+    /** Homepage slideshow / hero slides. */
+    slides: { title: string; subtitle: string | null; link: string | null; image: string | null; alt: string }[];
+    /** Link tiles shown under the slideshow (quick links). */
+    buttons: NavLink[];
+  };
+}
+
+export interface NavLink {
+  label: string;
+  /** Absolute URL. */
+  href: string;
+  children?: NavLink[];
+}

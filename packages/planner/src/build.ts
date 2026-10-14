@@ -1,4 +1,4 @@
-import type { ExtractedPage, FormAnalysis, FormRecord, MeetingAnalysis, RecordAnalysis, SnapshotFile, SnapshotPage } from '@wm/core';
+import type { ExtractedPage, FormAnalysis, FormRecord, MeetingAnalysis, NavLink, RecordAnalysis, SiteAnalysis, SnapshotFile, SnapshotPage } from '@wm/core';
 import { sourceKey } from '@wm/core';
 import {
   Plan,
@@ -10,7 +10,9 @@ import {
   type PlanMedia,
   type PlanPerson,
   type PlanRecord,
+  type PlanMenuItem,
   type PlanSetting,
+  type PlanSite,
   type PlanSkip,
   type PlanTable,
   type TargetInfo,
@@ -42,7 +44,7 @@ export interface BuildPlanInput {
   files: SnapshotFile[];
   existing: TargetEntity[];
   /** Output of the analyze stage (M2); without it, structured content is listed as not migrated. */
-  analysis?: { meetings?: MeetingAnalysis; forms?: FormAnalysis; records?: RecordAnalysis };
+  analysis?: { meetings?: MeetingAnalysis; forms?: FormAnalysis; records?: RecordAnalysis; site?: SiteAnalysis };
   /** Site timezone the target should have (IANA name). */
   timezone?: string;
 }
@@ -339,12 +341,16 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const alts = new Map<string, string>();
   for (const p of pages) if (included.has(p.sourceKey)) for (const img of p.images) if (img.alt) alts.set(safeKey(img.src), img.alt);
   const docInfo = new Map((records?.documents ?? []).map((d) => [safeKey(d.url), d]));
+  // Files the site structure uses: slide images, and documents that menus, slides and tiles link to.
+  const siteFiles = new Set(input.analysis?.site ? siteHrefs(input.analysis.site).map(safeKey) : []);
+  for (const s of input.analysis?.site?.home.slides ?? []) if (s.image && s.alt) alts.set(safeKey(s.image), s.alt);
   const media: PlanMedia[] = [];
   const byHash = new Map<string, PlanMedia>();
   for (const f of input.files) {
     if (f.status !== 200 || !f.path || !f.sha256) continue;
     const key = sourceKey(f.url);
     const usedBy = f.referencedBy.filter((k) => included.has(k));
+    if (siteFiles.has(key)) usedBy.push('site');
     if (!usedBy.length) {
       notMigrated.push({
         sourceKey: key,
@@ -386,6 +392,25 @@ export function buildPlan(input: BuildPlanInput): Plan {
     settings.push({ key: 'timezone', from: target.timezone || '(UTC offset)', to: input.timezone, reason: 'Event and meeting times are in the organization\'s local time' });
   }
 
+  const site = input.analysis?.site
+    ? planSite(input.analysis.site, {
+        origin: input.source.origin,
+        keep,
+        target,
+        entries: [
+          ...items.map((i) => ({ key: i.sourceKey, path: i.targetPath, from: [pathAndQuery(i.sourceUrl), ...i.redirectFrom] })),
+          ...events.map((e) => ({ key: e.key, path: e.targetPath, from: e.redirectFrom })),
+          ...recordsPlan.map((r) => ({ key: r.sourceKey, path: r.targetPath, from: [pathAndQuery(r.sourceUrl), ...r.redirectFrom] })),
+          ...tables.map((t) => ({ key: `table:${t.key}`, path: t.targetPath, from: t.redirectFrom })),
+          ...contentTypes.map((c) => ({ key: `listing:${c.postType}`, path: c.listing.targetPath, from: c.listing.redirectFrom })),
+          // Files: the executor links to the uploaded file; until then, the legacy URL (it redirects there).
+          ...media.map((m) => ({ key: m.sourceKey, path: m.redirectFrom[0]!, from: m.redirectFrom })),
+        ],
+        pages,
+        warnings,
+      })
+    : null;
+
   const categories = [...new Set(items.flatMap((i) => i.categories))].sort();
   const eventCategories = [...new Set(events.map((e) => e.category))].sort();
   const documentTypes = [...new Set(media.map((m) => m.documentType).filter((t): t is string => !!t))].sort();
@@ -420,6 +445,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     tables,
     documentTypes,
     settings,
+    site,
     cleanup,
     keep,
     notMigrated,
@@ -439,6 +465,109 @@ export function buildPlan(input: BuildPlanInput): Plan {
     },
     warnings,
   });
+}
+
+/** The framework's named menus and the source menus that feed them. */
+const MENUS: [name: string, from: keyof SiteAnalysis['menus']][] = [
+  ['Main Menu', 'main'],
+  ['Top Menu', 'top'],
+  ['Footer Menu', 'footer'],
+  ['Social Menu', 'social'],
+  ['Explore Menu', 'explore'],
+];
+
+interface SiteContext {
+  origin: string;
+  keep: Plan['keep'];
+  target: TargetInfo;
+  entries: { key: string; path: string; from: string[] }[];
+  pages: ExtractedPage[];
+  warnings: string[];
+}
+
+/** Menus, footer options, homepage fields and the site title from the source's shared structure. */
+function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
+  const byKey = new Map<string, { key: string | null; path: string }>();
+  for (const e of ctx.entries) for (const from of e.from) byKey.set(safeKey(new URL(from, ctx.origin).href), { key: e.key, path: e.path });
+  // Listings the framework replaces with its own pages.
+  const newsPage = ctx.keep.find((k) => /News listing/.test(k.reason));
+  const replacements: [RegExp, string | null][] = [
+    [/^\/$/, '/'],
+    [/^\/(news|press_full_list\.php)$/, newsPage ? new URL(newsPage.link).pathname : null],
+    [/^\/calendar$/, ctx.target.reservedSlugs.includes('event') ? '/events/' : null],
+  ];
+  const resolve = (href: string): { key: string | null; url: string } | null => {
+    let url: URL;
+    try {
+      url = new URL(href);
+    } catch {
+      return null;
+    }
+    if (url.hostname.replace(/^www\./, '') !== new URL(ctx.origin).hostname.replace(/^www\./, '')) return { key: null, url: href };
+    const hit = byKey.get(safeKey(href));
+    if (hit) return { key: hit.key, url: hit.path + url.hash };
+    for (const [re, to] of replacements) if (re.test(url.pathname.toLowerCase()) && to) return { key: null, url: to };
+    return null;
+  };
+
+  const dropped: string[] = [];
+  const headings: string[] = [];
+  // Every framework menu is planned, empty ones included, so none keeps the seed's demo links.
+  const menus = MENUS.map(([name, from]) => {
+    const items: PlanMenuItem[] = [];
+    const add = (link: NavLink, parent: number | null) => {
+      let target = resolve(link.href);
+      if (!target) {
+        // A dropdown parent without a migrated page of its own stays as a heading, so its children aren't lost.
+        if (!link.children?.some((c) => resolve(c.href))) {
+          dropped.push(`${name}: "${link.label}" (${link.href || 'no link'})`);
+          return;
+        }
+        if (link.href) headings.push(`${name}: "${link.label}" (${link.href})`);
+        target = { key: null, url: '#' };
+      }
+      items.push({ title: link.label, sourceUrl: link.href, key: target.key, url: target.url, parent });
+      const index = items.length - 1;
+      for (const child of link.children ?? []) add(child, index);
+    };
+    for (const link of site.menus[from]) add(link, null);
+    return { name, items };
+  });
+  if (dropped.length) ctx.warnings.push(`Menu links to content that isn't migrated were left out: ${dropped.join('; ')}`);
+  if (headings.length) ctx.warnings.push(`Dropdown parents whose own page isn't migrated are kept as headings without a link: ${headings.join('; ')}`);
+
+  // Footer contact. Where the source has no value, the seed's placeholder (and its heading and
+  // icon, which the footer would still show) is cleared. The seed's address heading ("City Hall")
+  // is a demo label, so it's cleared either way.
+  const options: Record<string, string> = { footer_address_heading: '' };
+  for (const [field, value] of [['address', site.contact.address], ['phone', site.contact.phone], ['email', site.contact.email], ['fax', site.contact.fax]] as const) {
+    options[`footer_${field}`] = value ?? '';
+    if (!value) Object.assign(options, { [`footer_${field}_heading`]: '', [`footer_${field}_icon`]: '' });
+  }
+  if (site.contact.hours) ctx.warnings.push(`Office hours ("${site.contact.hours}") have no place in the framework footer (theme change).`);
+  if (site.footerNotices.length) ctx.warnings.push(`${site.footerNotices.length} footer notice(s) (e.g. fair-housing statements) have no place in the framework footer (theme change).`);
+
+  const banner = site.home.slides.map((s) => {
+    const target = s.link ? resolve(s.link) : null;
+    return { title: s.title, image: s.image, linkUrl: target?.url ?? null, linkKey: target?.key ?? null, linkTitle: s.subtitle };
+  });
+  // `buttons` is newer than the first M3 analyses.
+  const quickLinks = (site.home.buttons ?? []).flatMap((b) => {
+    const target = resolve(b.href);
+    if (!target) ctx.warnings.push(`Homepage link "${b.label}" (${b.href}) points to content that isn't migrated: left out.`);
+    return target ? [{ title: b.label, url: target.url, key: target.key }] : [];
+  });
+  return { title: site.siteName, menus, options, home: { banner, quickLinks, clearOthers: true } };
+}
+
+/** Every URL the site structure points at: menu links, slide images and links, homepage tiles. */
+function siteHrefs(site: SiteAnalysis): string[] {
+  const walk = (links: NavLink[]): string[] => links.flatMap((l) => [l.href, ...walk(l.children ?? [])]);
+  return [
+    ...Object.values(site.menus).flatMap(walk),
+    ...site.home.slides.flatMap((s) => [s.image ?? '', s.link ?? '']),
+    ...walk(site.home.buttons ?? []),
+  ].filter(Boolean);
 }
 
 /** Entries of forms with sensitive fields are deleted after this many days. */
