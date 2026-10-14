@@ -152,6 +152,34 @@ describe('buildPlan', () => {
   });
 });
 
+describe('delta sync', () => {
+  it('records each page’s content hash, so a re-scan shows which pages changed', () => {
+    const before = plan([page('/about', { contentHtml: '<p>Old text</p>' }), page('/contact')]);
+    const after = plan([page('/about', { contentHtml: '<p>New text</p>' }), page('/contact')]);
+    const hash = (p: typeof before, key: string) => p.items.find((i) => i.sourceKey === key)!.contentSha256;
+    expect(hash(before, 'jaxha.org/about')).toMatch(/^[0-9a-f]{64}$/);
+    expect(hash(after, 'jaxha.org/about')).not.toBe(hash(before, 'jaxha.org/about'));
+    expect(hash(after, 'jaxha.org/contact')).toBe(hash(before, 'jaxha.org/contact'));
+  });
+});
+
+describe('framework links', () => {
+  it('redirects the paths the framework hard-codes for news to the News page, unless content uses them', () => {
+    const news = entity(9, { title: 'News', slug: 'news', link: 'http://localhost:8088/news/', template: 'template-news.php' });
+    expect(plan([page('/about')], { existing: [news] }).siteRedirects).toEqual([
+      { from: '/latest-news/', to: '/news/', reason: 'The framework links here for "All News"; the News page is elsewhere' },
+      { from: '/current-news/', to: '/news/', reason: 'The framework links here for "All News"; the News page is elsewhere' },
+    ]);
+    // A migrated page that is itself at /latest-news/ keeps its URL.
+    expect(plan([page('/latest-news')], { existing: [news] }).siteRedirects.map((r) => r.from)).toEqual(['/current-news/']);
+    // An existing page there (one the plan doesn't trash) keeps its URL too.
+    const other = entity(10, { type: 'custom_type', slug: 'current-news', link: 'http://localhost:8088/current-news/' });
+    expect(plan([page('/about')], { existing: [news, other] }).siteRedirects.map((r) => r.from)).toEqual(['/latest-news/']);
+    // No News page kept: nothing to redirect to.
+    expect(plan([page('/about')]).siteRedirects).toEqual([]);
+  });
+});
+
 describe('approval', () => {
   it('lets execution use a plan only while it is exactly the approved one', async () => {
     process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));

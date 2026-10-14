@@ -4,6 +4,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { jobPath, readJson } from '@wm/core';
 import { Approval, latestPlanVersion, loadDecisions, loadPlan, type Plan, type ReviewDecisions } from '@wm/planner';
 import type { Report } from '@wm/executor';
+import type { QaReport } from '@wm/qa';
+import type { PostLaunchReport } from '@wm/executor';
 
 export interface PlanState {
   plan: Plan;
@@ -59,6 +61,7 @@ export async function stagesOnDisk(jobId: string): Promise<Set<string>> {
     analyze: ['analyze', 'site.json'],
     execute: ['run', 'state.json'],
     report: ['report', 'report.json'],
+    qa: ['qa', 'qa.json'],
   };
   const done = await Promise.all(Object.entries(files).map(async ([stage, parts]) => ((await stat(jobPath(jobId, ...parts)).catch(() => null)) ? stage : null)));
   return new Set(done.filter((s): s is string => !!s));
@@ -71,6 +74,20 @@ export async function previousPlan(jobId: string, version: number): Promise<Plan
 
 export async function loadReport(jobId: string): Promise<Report | null> {
   return readJson<Report>(jobPath(jobId, 'report', 'report.json')).catch(() => null);
+}
+
+export async function loadPostLaunch(jobId: string): Promise<PostLaunchReport | null> {
+  return readJson<PostLaunchReport>(jobPath(jobId, 'postlaunch', 'postlaunch.json')).catch(() => null);
+}
+
+export async function loadQa(jobId: string): Promise<QaReport | null> {
+  return readJson<QaReport>(jobPath(jobId, 'qa', 'qa.json')).catch(() => null);
+}
+
+/** A QA screenshot, by its file name (as qa.json lists it). */
+export async function qaScreenshot(jobId: string, file: string): Promise<Buffer | null> {
+  if (!/^[a-z0-9-]+-(mobile|tablet|desktop)\.png$/i.test(file)) return null;
+  return readFile(jobPath(jobId, 'qa', 'screenshots', file)).catch(() => null);
 }
 
 /** Files the report page offers for download. */

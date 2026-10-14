@@ -7,6 +7,7 @@ import { loadApprovedPlan, wpSlug, type Plan, type PlanContentType, type PlanIte
 import { WpError, type WpClient } from '@wm/wp-client';
 import { LinkMap, rewriteLinks } from './links.js';
 import { probeTarget } from './target.js';
+import { snapshotBefore } from './rollback.js';
 
 export type EntityKind = 'page' | 'post' | 'document' | 'image' | 'event' | 'person' | 'form' | 'record';
 
@@ -125,6 +126,16 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   }
   const ours = new Map(existing.filter((e) => e.source_key).map((e) => [e.source_key!, e]));
   const meta = (key: string) => ({ _wm_source_key: key, _wm_job_id: jobId });
+
+  // 0. What the job will change on the site structure, as it is now (once: rollback restores it).
+  try {
+    const before = await client.get<Schema>('/website-mover/v1/schema');
+    const homeGroup = before.acf.field_groups.find((g) => g.location.some((rules) => rules.some((r) => r.param === 'page_template' && r.value === 'template-home.php')));
+    await snapshotBefore(client, jobId, plan, { pageId: existing.find((e) => e.front_page)?.id ?? null, groupKey: homeGroup?.key ?? null, fields: homeGroup?.fields });
+  } catch (err) {
+    // Nothing has changed yet: stop rather than change the site with no way to restore it.
+    throw new Error(`Couldn't save the site structure before changing it (rollback needs it): ${(err as Error).message}`);
+  }
 
   // 1. Demo content → trash.
   if (plan.cleanup.length) {
@@ -495,6 +506,8 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     if (!entity?.path) continue;
     for (const from of entry.redirectFrom) if (from !== entity.path) state.redirects.push({ from, to: entity.path });
   }
+  // Paths the framework links to that have no page of their own (e.g. its hard-coded news links).
+  for (const r of plan.siteRedirects) state.redirects.push({ from: r.from, to: r.to });
   if (info.redirection) {
     try {
       state.redirectImport = await importRedirects(client, state.redirects, log);

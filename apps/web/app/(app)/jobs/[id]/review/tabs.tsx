@@ -706,6 +706,11 @@ export function ChangesTab({ plan, previous }: TabProps) {
   const events = diff(plan.events, previous.events, (e) => e.key);
   const prevItems = keyed(previous.items, (i) => i.sourceKey);
   const moved = plan.items.filter((i) => prevItems.has(i.sourceKey) && (prevItems.get(i.sourceKey)!.targetPath !== i.targetPath || prevItems.get(i.sourceKey)!.type !== i.type));
+  // Delta sync: pages whose content changed on the source since the previous version's scan.
+  const changed = plan.items.filter((i) => {
+    const before = prevItems.get(i.sourceKey)?.contentSha256;
+    return before && i.contentSha256 && before !== i.contentSha256;
+  });
   const counts = Object.entries(plan.expected).filter(([k, v]) => (previous.expected as Record<string, number>)[k] !== v);
   const list = (keys: string[]) => (keys.length ? <span className="font-mono text-xs break-all">{keys.slice(0, 30).join(', ')}{keys.length > 30 ? ` … (+${keys.length - 30})` : ''}</span> : <span className="text-muted">none</span>);
   return (
@@ -717,6 +722,8 @@ export function ChangesTab({ plan, previous }: TabProps) {
         <dd>{list(items.added)}</dd>
         <dt className="text-muted">Pages and posts removed</dt>
         <dd>{list(items.removed)}</dd>
+        <dt className="text-muted">Content changed on the source</dt>
+        <dd>{list(changed.map((i) => `${i.title} (${i.targetPath})`))}</dd>
         <dt className="text-muted">New URL or type</dt>
         <dd>{list(moved.map((i) => `${i.sourceKey} → ${i.type} ${i.targetPath}`))}</dd>
         <dt className="text-muted">Files added / removed</dt>

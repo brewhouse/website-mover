@@ -18,6 +18,7 @@
     "@wm/executor": "workspace:*",
     "@wm/extractor": "workspace:*",
     "@wm/planner": "workspace:*",
+    "@wm/qa": "workspace:*",
     "@wm/wp-client": "workspace:*"
   }
 }

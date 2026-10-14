@@ -2,7 +2,10 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getJob } from '@wm/db';
 import { Badge, Card, Empty, LinkButton, Notice, PageHeader, Stat, when } from '@/components/ui';
-import { DOWNLOADS, loadReport } from '@/lib/job-files';
+import { DOWNLOADS, loadPostLaunch, loadQa, loadReport, planState } from '@/lib/job-files';
+import { scopeChecklist } from '@/lib/scope';
+import type { PostLaunchReport } from '@wm/executor';
+import type { QaReport } from '@wm/qa';
 import { requireUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -15,7 +18,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   await requireUser();
   const { id } = await params;
   if (!(await getJob(id))) notFound();
-  const r = await loadReport(id);
+  const [r, qa, postlaunch] = await Promise.all([loadReport(id), loadQa(id), loadPostLaunch(id)]);
   if (!r) {
     return (
       <>
@@ -28,7 +31,10 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   const failed = rows.reduce((n, [, c]) => n + c.failed, 0);
   const notLive = r.notLive.length;
   const broken = r.redirects.broken.length;
-  const ok = !failed && !notLive && !broken && !r.invalid.length;
+  const brokenLinks = r.links?.broken ?? [];
+  const ok = !failed && !notLive && !broken && !r.invalid.length && !brokenLinks.length;
+  const plan = (await planState(id, r.planVersion))?.plan;
+  const scope = plan ? scopeChecklist(plan, r, qa, postlaunch) : [];
   return (
     <>
       <PageHeader
@@ -48,11 +54,12 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
           </LinkButton>
         ))}
       />
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <Stat label="Failures" value={failed} />
         <Stat label="Not answering 200" value={notLive} />
         <Stat label="Redirects working" value={r.redirects.working ?? '—'} hint={`of ${r.redirects.total}${r.redirects.imported === null ? ' (CSV only)' : ''}`} />
         <Stat label="Block problems" value={r.invalid.length} />
+        <Stat label="Broken links/images" value={r.links ? brokenLinks.length : '—'} hint={r.links ? `of ${r.links.checked} checked` : 'rebuild the report'} />
       </div>
       <div className="grid gap-6">
         <Card title="Counts">
@@ -134,6 +141,58 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
             </ul>
           </Card>
         )}
+        {scope.length > 0 && (
+          <Card title="Scope checklist (statement of work)">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Line</th>
+                  <th>Owner</th>
+                  <th>Status</th>
+                  <th>Why</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scope.map((s) => (
+                  <tr key={s.line}>
+                    <td className="font-medium">{s.line}</td>
+                    <td className="text-muted">{s.owner}</td>
+                    <td>
+                      <Badge tone={s.status === 'done' ? 'ok' : s.status === 'partial' ? 'warn' : 'neutral'}>{s.status}</Badge>
+                    </td>
+                    <td className="max-w-xl text-muted">{s.why}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        )}
+        {brokenLinks.length > 0 && (
+          <Card title={`Broken links and images (${brokenLinks.length} of ${r.links!.checked} checked)`}>
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Link</th>
+                  <th>Answer</th>
+                  <th>On</th>
+                </tr>
+              </thead>
+              <tbody>
+                {brokenLinks.map((b) => (
+                  <tr key={b.url}>
+                    <td className="max-w-md font-mono text-xs break-all">{b.url}</td>
+                    <td>{b.status || 'no answer'}</td>
+                    <td className="text-xs text-muted">
+                      {b.pageCount > 5 ? `${b.pageCount} pages (from the theme, probably)` : b.pages.map((p) => <div key={p} className="font-mono">{p}</div>)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        )}
+        {postlaunch && <PostLaunchSection pl={postlaunch} />}
+        {qa ? <QaSection jobId={id} qa={qa} /> : <Notice tone="info">No QA yet: run it from the job page (accessibility and phone/tablet/desktop checks).</Notice>}
         <Card title="Warnings">
           {Object.keys(r.warnings).length ? (
             <table className="data">
@@ -154,5 +213,156 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
         </Card>
       </div>
     </>
+  );
+}
+
+const IMPACT_TONE = { critical: 'bad', serious: 'bad', moderate: 'warn', minor: 'neutral' } as const;
+
+function QaSection({ jobId, qa }: { jobId: string; qa: QaReport }) {
+  const templates = qa.pages.filter((p) => p.template && Object.keys(p.screenshots).length);
+  const failedPages = qa.pages.filter((p) => p.status !== 200);
+  return (
+    <>
+      <Card title={`Accessibility (WCAG 2.1 AA, axe-core): ${qa.pages.length} pages checked ${when(qa.ranAt)}`}>
+        <p className="border-b border-line px-4 py-2 text-xs text-muted">
+          One page per template plus {qa.pages.filter((p) => !p.template).length} sampled pages. <strong>Site-wide</strong> means every checked page has it: it comes from the theme, not the content.
+          {failedPages.length > 0 && <span className="text-bad"> {failedPages.length} page(s) didn’t load: {failedPages.map((p) => `${p.path} (${p.status})`).join(', ')}.</span>}
+        </p>
+        {qa.rules.length ? (
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Impact</th>
+                <th>Rule</th>
+                <th>Pages</th>
+                <th>Example</th>
+              </tr>
+            </thead>
+            <tbody>
+              {qa.rules.map((rule) => (
+                <tr key={rule.id}>
+                  <td>
+                    <Badge tone={IMPACT_TONE[rule.impact as keyof typeof IMPACT_TONE] ?? 'neutral'}>{rule.impact ?? 'n/a'}</Badge>
+                  </td>
+                  <td className="max-w-sm">
+                    {rule.helpUrl ? (
+                      <a href={rule.helpUrl} target="_blank" rel="noreferrer" className="font-medium text-brand hover:underline">
+                        {rule.help}
+                      </a>
+                    ) : (
+                      <span className="font-medium">{rule.help}</span>
+                    )}
+                    <div className="font-mono text-xs text-muted">{rule.id}</div>
+                  </td>
+                  <td className="max-w-xs text-xs">
+                    {rule.siteWide ? <Badge tone="warn">site-wide</Badge> : rule.pages.map((p) => <div key={p} className="font-mono">{p}</div>)}
+                  </td>
+                  <td className="max-w-md">
+                    <code className="block truncate font-mono text-xs text-muted" title={rule.sample}>
+                      {rule.sample}
+                    </code>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <Empty>No WCAG A/AA violations found on the checked pages.</Empty>
+        )}
+      </Card>
+      <Card title="Phone, tablet and desktop">
+        <div className="grid gap-1 border-b border-line px-4 py-3 text-sm">
+          {Object.entries(qa.overflow).map(([viewport, pages]) => (
+            <div key={viewport}>
+              <span className="font-medium capitalize">{viewport}:</span>{' '}
+              {pages.length ? (
+                <span className="text-warn">
+                  sideways scrolling on {pages.length} page(s): <span className="font-mono text-xs">{pages.join(' ')}</span>
+                </span>
+              ) : (
+                <span className="text-ok">every page fits</span>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-6 p-4">
+          {templates.map((p) => (
+            <figure key={p.path}>
+              <figcaption className="mb-2 text-sm">
+                <span className="font-medium">{p.template}</span> <span className="font-mono text-xs text-muted">{p.path}</span>
+              </figcaption>
+              <div className="flex items-start gap-3 overflow-x-auto">
+                {(['mobile', 'tablet', 'desktop'] as const).map((v) =>
+                  p.screenshots[v] ? (
+                    <a key={v} href={`/api/jobs/${jobId}/qa/${p.screenshots[v]}`} target="_blank" rel="noreferrer" className="shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={`/api/jobs/${jobId}/qa/${p.screenshots[v]}`} alt={`${p.template} at ${v} width`} loading="lazy" className={`rounded border border-line ${v === 'mobile' ? 'w-28' : v === 'tablet' ? 'w-48' : 'w-72'}`} />
+                    </a>
+                  ) : null,
+                )}
+              </div>
+            </figure>
+          ))}
+        </div>
+      </Card>
+    </>
+  );
+}
+
+const PROBLEM_LABEL = { 'not-found': 'Not found', error: 'Error', 'wrong-target': 'Wrong page', chain: 'Redirect chain', loop: 'Redirect loop' } as const;
+
+function PostLaunchSection({ pl }: { pl: PostLaunchReport }) {
+  return (
+    <Card title={`Post-launch check: ${pl.ok} of ${pl.checked} legacy URLs OK on ${pl.base} (${when(pl.ranAt)})`}>
+      <p className="border-b border-line px-4 py-2 text-sm">
+        {pl.ga4.expected ? (
+          pl.ga4.found.includes(pl.ga4.expected) ? (
+            <span className="text-ok">GA4 {pl.ga4.expected} is on the homepage.</span>
+          ) : (
+            <span className="text-warn">GA4 {pl.ga4.expected} is not on the homepage{pl.ga4.found.length ? ` (found ${pl.ga4.found.join(', ')})` : ''}: theme change T13.</span>
+          )
+        ) : (
+          <span className="text-muted">No GA4 measurement ID for this job.</span>
+        )}
+      </p>
+      {pl.leftOut?.length > 0 && (
+        <p className="border-b border-line px-4 py-2 text-xs text-muted">
+          {pl.leftOut.length} legacy URLs were left out on purpose (see the plan’s “Not migrated”):{' '}
+          {Object.entries(pl.leftOut.reduce<Record<number, number>>((acc, l) => ({ ...acc, [l.status]: (acc[l.status] ?? 0) + 1 }), {}))
+            .map(([status, n]) => `${n} answer ${status === '0' ? 'nothing' : status}`)
+            .join(', ')}
+          .{' '}
+          {pl.leftOut.some((l) => l.status === 200) && (
+            <span className="text-warn">Still answering 200: {pl.leftOut.filter((l) => l.status === 200).slice(0, 10).map((l) => l.url).join(' ')}</span>
+          )}
+        </p>
+      )}
+      {pl.problems.length ? (
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Legacy URL</th>
+              <th>Problem</th>
+              <th>Hops</th>
+              <th>Expected</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pl.problems.slice(0, 200).map((p) => (
+              <tr key={p.url}>
+                <td className="max-w-sm font-mono text-xs break-all">{p.url}</td>
+                <td>
+                  <Badge tone={p.problem === 'chain' ? 'warn' : 'bad'}>{PROBLEM_LABEL[p.problem]}</Badge>
+                </td>
+                <td className="font-mono text-xs">{p.hops.map((h) => `${h.status}${h.location ? ` → ${h.location}` : ''}`).join(' · ')}</td>
+                <td className="font-mono text-xs">{p.expected}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <Empty>Every legacy URL answers 200, directly or with one 301 to the right page.</Empty>
+      )}
+    </Card>
   );
 }

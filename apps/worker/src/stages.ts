@@ -22,10 +22,11 @@ import { scanSite } from '@wm/crawler';
 import { extractJob } from '@wm/extractor';
 import { analyzeForms, analyzeMeetings, analyzeRecords, analyzeSite } from '@wm/analyzer';
 import { buildPlan, latestPlanVersion, loadDecisions, savePlan } from '@wm/planner';
-import { buildReport, executePlan, probeTarget } from '@wm/executor';
+import { buildReport, executePlan, probeTarget, rollbackJob, runPostLaunch } from '@wm/executor';
+import { runQa } from '@wm/qa';
 import type { WpClient } from '@wm/wp-client';
 
-export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report';
+export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa' | 'postlaunch' | 'rollback';
 
 export interface StageContext {
   jobId: string;
@@ -35,6 +36,10 @@ export interface StageContext {
   target?: { name: string; client: WpClient };
   /** Site timezone the plan should set (IANA name). */
   timezone?: string | null;
+  /** GA4 measurement ID (plan: theme option; post-launch: the tag to look for). */
+  ga4Id?: string | null;
+  /** The live address for the post-launch check (else the target). */
+  liveUrl?: string | null;
   log: (message: string) => void;
 }
 
@@ -95,6 +100,7 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
         existing,
         analysis,
         timezone: ctx.timezone ?? undefined,
+        ga4Id: ctx.ga4Id ?? undefined,
         decisions: await loadDecisions(jobId),
       });
       const sha = await savePlan(plan);
@@ -112,6 +118,18 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
       const report = await buildReport({ jobId, client: target().client, log });
       log(`Report: ${jobPath(jobId, 'report', 'report.md')}`);
       return { counts: report.counts, failures: report.failures.length };
+    }
+    case 'rollback': {
+      const r = await rollbackJob({ jobId, client: target().client, log });
+      return { ...r, problems: r.problems.length };
+    }
+    case 'postlaunch': {
+      const r = await runPostLaunch({ jobId, base: ctx.liveUrl || target().client.baseUrl, ga4Id: ctx.ga4Id, log });
+      return { checked: r.checked, ok: r.ok, problems: r.problems.length, ga4Found: r.ga4.found };
+    }
+    case 'qa': {
+      const qa = await runQa({ jobId, baseUrl: target().client.baseUrl, log });
+      return { pages: qa.pages.length, rules: qa.rules.length, siteWide: qa.rules.filter((r) => r.siteWide).length, overflowMobile: qa.overflow.mobile?.length ?? 0 };
     }
   }
 }

@@ -112,6 +112,18 @@ export function safeFetch(input: string | URL, init: RequestInit = {}): Promise<
 }
 
 /**
+ * Whether the tool may connect to a host: on the allowlist, or every address it resolves to is public.
+ * For clients that do their own networking (Chromium in the QA stage), checked per request.
+ */
+export async function isAllowedHost(hostname: string): Promise<boolean> {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (allowedHosts().has(host)) return true;
+  if (isIP(host)) return !isBlockedAddress(host);
+  const addresses = await new Promise<LookupAddress[]>((resolve) => dnsLookup(host, { all: true }, (err, a) => resolve(err ? [] : a)));
+  return addresses.length > 0 && !addresses.some((a) => isBlockedAddress(a.address));
+}
+
+/**
  * Fails fast (at intake) when a URL isn't one the tool may fetch: wrong scheme, credentials in the
  * URL, or a host that resolves to a non-public address.
  */

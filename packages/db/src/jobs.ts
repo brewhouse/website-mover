@@ -49,12 +49,14 @@ export interface Job {
   timezone: string | null;
   ga4Id: string | null;
   styleGuide: string | null;
+  /** The live address, once launched (post-launch check). */
+  liveUrl: string | null;
   createdBy: string;
   createdAt: Date;
 }
 
 const jobSelect = `select j.id, j.source_url as "sourceUrl", j.profile, j.target_id as "targetId", t.name as "targetName", j.timezone,
-  j.ga4_id as "ga4Id", j.style_guide as "styleGuide", u.name as "createdBy", j.created_at as "createdAt"
+  j.ga4_id as "ga4Id", j.style_guide as "styleGuide", j.live_url as "liveUrl", u.name as "createdBy", j.created_at as "createdAt"
   from jobs j join targets t on t.id = j.target_id join users u on u.id = j.created_by`;
 
 export async function createJob(j: {
@@ -74,6 +76,10 @@ export async function createJob(j: {
   );
 }
 
+export async function setLiveUrl(id: string, liveUrl: string | null): Promise<void> {
+  await db().query('update jobs set live_url = $2 where id = $1', [id, liveUrl]);
+}
+
 export async function getJob(id: string): Promise<Job | null> {
   return (await db().query<Job>(`${jobSelect} where j.id = $1`, [id])).rows[0] ?? null;
 }
@@ -86,7 +92,7 @@ export async function listJobs(): Promise<(Job & { lastRun: StageRun | null })[]
 
 // ---------- Stage runs ----------
 
-export const STAGES = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report'] as const;
+export const STAGES = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'] as const;
 export type Stage = (typeof STAGES)[number];
 
 export interface StageRun {

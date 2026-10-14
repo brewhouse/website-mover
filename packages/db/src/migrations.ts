@@ -98,4 +98,40 @@ create index audit_job on audit (job_id, id);
 alter table stage_runs add column heartbeat_at timestamptz;
 `,
   },
+  {
+    name: '003_m5_stages.sql',
+    sql: `
+-- M5: accessibility/responsive QA, the post-launch check, and rollback run as stages too.
+alter table stage_runs drop constraint stage_runs_stage_check;
+alter table stage_runs add constraint stage_runs_stage_check
+  check (stage in ('scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'));
+`,
+  },
+  {
+    name: '004_live_url.sql',
+    sql: `
+-- The site's live address, for the post-launch check (the target's URL until launch).
+alter table jobs add column live_url text;
+`,
+  },
+  {
+    name: '005_approvers_and_login_limits.sql',
+    sql: `
+-- Only approvers may approve a plan, run a migration or roll one back. Accounts that existed before
+-- this could already do all of that, so they keep it.
+alter table users add column can_approve boolean not null default false;
+update users set can_approve = true;
+
+-- Login attempts, for rate limiting (kept a day).
+create table login_attempts (
+  id bigserial primary key,
+  email text not null,
+  ip text,
+  ok boolean not null,
+  at timestamptz not null default now()
+);
+create index login_attempts_email on login_attempts (email, at);
+create index login_attempts_ip on login_attempts (ip, at);
+`,
+  },
 ];

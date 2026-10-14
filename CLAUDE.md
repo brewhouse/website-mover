@@ -2,7 +2,7 @@
 
 Internal tool that migrates a website into a blank WordPress "seed" site: scans the source, proposes a migration plan for human approval, then rebuilds everything as Gutenberg content styled from a brand style guide PDF.
 
-**The full design is in `docs/PLAN.md` — read it before starting work.** Status: M0 done (`docs/m0/`). M1, M2, M3's site structure and M4 (review UI and approval gate) pass on the local seed (`docs/m1/` … `docs/m4/` results). Next: M5 (PLAN §10), M3 branding once the style guide PDF arrives, and running on the hosted seed once the bridge is installed there.
+**The full design is in `docs/PLAN.md` — read it before starting work.** Status: M0–M5 pass on the local seed (`docs/m0/` … `docs/m5/` results). Still open: M3 branding (needs the style guide PDF), the run on the hosted seed (needs the bridge in the seed's Pantheon codebase), and theme changes T1–T16 for the team.
 
 ## Key decisions (don't re-litigate)
 - Flow: Scan → Plan (versioned JSON) → Approve → Execute → Verify → QA → Report. Execution only follows the approved plan, using scan-time snapshots.
@@ -26,5 +26,8 @@ Internal tool that migrates a website into a blank WordPress "seed" site: scans 
   - `docker compose up -d postgres`.
   - Create a login with `pnpm --filter @wm/worker wm user add --email … --name …`. Save the local seed as a target with `wm target add --name local --url http://localhost:8088 --user wm-local --password-env SEED_LOCAL_APP_PASSWORD`.
   - Then run `pnpm --filter @wm/worker worker` and `pnpm --filter @wm/web dev` (http://localhost:3100).
-  - Jobs the CLI ran: `wm job register`.
+  - Jobs the CLI ran: `wm job register … --rights-confirmed`.
+  - Only approvers can approve, migrate or roll back: `wm user add --approver`, `wm user grant --email …`.
+  - A job's GA4 ID goes with the job (intake form; CLI `--ga4` on plan and postlaunch), never from the environment.
+  - Behind a reverse proxy, set `WM_TRUST_PROXY=1` so login limits use the client's address.
 - SSRF guard (`@wm/net`): the tool refuses private addresses. `.env` sets `WM_ALLOW_PRIVATE_HOSTS=localhost` for the local seed (development only).

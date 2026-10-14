@@ -26,7 +26,7 @@ describe.runIf(available)('db (Postgres)', () => {
   let targetId: number;
 
   beforeAll(async () => {
-    expect(await m.migrate()).toEqual(['001_init.sql', '002_run_heartbeat.sql']);
+    expect(await m.migrate()).toEqual(['001_init.sql', '002_run_heartbeat.sql', '003_m5_stages.sql', '004_live_url.sql', '005_approvers_and_login_limits.sql']);
     expect(await m.migrate()).toEqual([]); // once only
   });
   afterAll(async () => {
@@ -51,6 +51,23 @@ describe.runIf(available)('db (Postgres)', () => {
     const expired = await m.createSession(user.id);
     await m.db().query(`update sessions set expires_at = now() - interval '1 minute'`);
     expect(await m.sessionUser(expired.token)).toBeNull();
+  });
+
+  it('lets only approvers approve, and pauses logins after repeated failures', async () => {
+    const reviewer = await m.createUser('rev@example.org', 'Rev Only', 'another long password');
+    expect(reviewer.canApprove).toBe(false);
+    expect(await m.setApprover('rev@example.org', true)).toBe(true);
+    expect((await m.checkLogin('rev@example.org', 'another long password'))!.canApprove).toBe(true);
+
+    for (let i = 0; i < m.LOGIN_LIMIT.perEmail - 1; i++) await m.recordLogin('rev@example.org', '10.0.0.1', false);
+    expect(await m.loginBlocked('REV@example.org', '10.0.0.9')).toBe(false);
+    await m.recordLogin('rev@example.org', '10.0.0.1', false);
+    expect(await m.loginBlocked('rev@example.org', '10.0.0.9')).toBe(true);
+    // Another account isn't affected by this one's failures (the address limit is looser).
+    expect(await m.loginBlocked('someone@example.org', '10.0.0.1')).toBe(false);
+    // A successful login clears the count.
+    await m.recordLogin('rev@example.org', '10.0.0.1', true);
+    expect(await m.loginBlocked('rev@example.org', '10.0.0.1')).toBe(false);
   });
 
   it('stores Application Passwords encrypted and gives them back only through targetCredentials', async () => {

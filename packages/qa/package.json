@@ -1,0 +1,19 @@
+{
+  "name": "@wm/qa",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@wm/core": "workspace:*",
+    "@wm/net": "workspace:*",
+    "@wm/planner": "workspace:*",
+    "playwright": "1.64.0"
+  }
+}

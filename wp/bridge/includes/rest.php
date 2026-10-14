@@ -39,9 +39,30 @@ function wm_bridge_register_routes() {
 		'callback' => fn( $request ) => wm_bridge_acf_upsert( $request, 'acf-field-group' ),
 	) );
 
-	register_rest_route( WM_BRIDGE_NAMESPACE, '/acf/options', $admin + array(
+	register_rest_route( WM_BRIDGE_NAMESPACE, '/acf/options', array(
+		$admin + array(
+			'methods'  => WP_REST_Server::CREATABLE,
+			'callback' => 'wm_bridge_acf_options',
+		),
+		$admin + array(
+			'methods'  => WP_REST_Server::READABLE,
+			'callback' => 'wm_bridge_acf_options_get',
+		),
+	) );
+
+	register_rest_route( WM_BRIDGE_NAMESPACE, '/untrash', $admin + array(
 		'methods'  => WP_REST_Server::CREATABLE,
-		'callback' => 'wm_bridge_acf_options',
+		'callback' => 'wm_bridge_untrash',
+	) );
+
+	register_rest_route( WM_BRIDGE_NAMESPACE, '/forms/trash', $admin + array(
+		'methods'  => WP_REST_Server::CREATABLE,
+		'callback' => 'wm_bridge_forms_trash',
+	) );
+
+	register_rest_route( WM_BRIDGE_NAMESPACE, '/acf/trash', $admin + array(
+		'methods'  => WP_REST_Server::CREATABLE,
+		'callback' => 'wm_bridge_acf_trash',
 	) );
 
 	register_rest_route( WM_BRIDGE_NAMESPACE, '/acf/field-groups/(?P<key>group_[A-Za-z0-9_]+)/show-in-rest', $admin + array(

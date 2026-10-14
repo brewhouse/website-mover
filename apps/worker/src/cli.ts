@@ -8,12 +8,18 @@
  *   wm approve --job jha --by "Name"
  *   wm execute --job jha [--target local]
  *   wm report  --job jha [--target local]
+ *   wm qa      --job jha [--target local]      accessibility and responsive checks (Playwright + axe-core)
+ *   wm postlaunch --job jha [--base https://www.jaxha.org] [--target local]   legacy URLs and GA4 on the live site
+ *   wm rollback --job jha --confirm jha [--target local]   undo the job on the target
+ * A job's GA4 measurement ID is given per command (--ga4 G-…) to plan and postlaunch: it belongs to
+ * the job, not the environment.
  *
  * --target local is the Docker seed configured in .env; any other name is a target saved in the
  * web app (needs DATABASE_URL).
  *
  * Web app administration (needs DATABASE_URL):
- *   wm user add      --email a@b.org --name "Full Name" [--password-env VAR]
+ *   wm user add      --email a@b.org --name "Full Name" [--approver] [--password-env VAR]
+ *   wm user grant    --email a@b.org [--revoke]           approver permission
  *   wm user password --email a@b.org [--password-env VAR]
  *   wm target add    --name local --url http://localhost:8088 --user wm-local [--password-env VAR]
  *   wm job register  --job jha --origin https://www.jaxha.org --profile bjm --target local --by a@b.org --rights-confirmed [--timezone ...]
@@ -43,21 +49,29 @@ const { positionals, values } = parseArgs({
     user: { type: 'string' },
     'password-env': { type: 'string' },
     'rights-confirmed': { type: 'boolean', default: false },
+    base: { type: 'string' },
+    ga4: { type: 'string' },
+    confirm: { type: 'string' },
+    approver: { type: 'boolean', default: false },
+    revoke: { type: 'boolean', default: false },
   },
 });
 const [command, sub] = positionals;
 // pnpm runs scripts in the package directory; resolve user paths against where the command was typed.
 const cwd = process.env.INIT_CWD ?? process.cwd();
 
-const STAGES: StageName[] = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report'];
+const STAGES: StageName[] = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'];
 
 if (command && (STAGES as string[]).includes(command)) {
   const jobId = values.job ?? fail('--job is required');
+  if (command === 'rollback' && values.confirm !== jobId) fail(`Rollback undoes the job on its target: confirm with --confirm ${jobId}`);
   const summary = await runStage(command as StageName, {
     jobId,
     source: command === 'scan' ? { origin: values.origin ?? fail('--origin is required'), profile: values.profile!, cacheDir: values.cache ? path.resolve(cwd, values.cache) : undefined } : undefined,
-    target: ['plan', 'execute', 'report'].includes(command) ? await cliTarget(values.target!) : undefined,
+    target: ['plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'].includes(command) ? await cliTarget(values.target!) : undefined,
     timezone: values.timezone,
+    ga4Id: values.ga4 ?? null,
+    liveUrl: values.base ?? null,
     log: console.log,
   });
   console.log(summary);
@@ -76,11 +90,13 @@ if (command && (STAGES as string[]).includes(command)) {
       await db.migrate();
       const email = values.email ?? fail('--email is required');
       if (sub === 'add') {
-        const user = await db.createUser(email, values.name ?? fail('--name is required'), await secret('Password for the new user'));
-        console.log(`Added ${user.name} <${user.email}>`);
+        const user = await db.createUser(email, values.name ?? fail('--name is required'), await secret('Password for the new user'), values.approver);
+        console.log(`Added ${user.name} <${user.email}>${user.canApprove ? ' (approver)' : ''}`);
+      } else if (sub === 'grant') {
+        console.log((await db.setApprover(email, !values.revoke)) ? `${email} ${values.revoke ? 'can no longer' : 'can now'} approve, run and roll back migrations` : `No user ${email}`);
       } else if (sub === 'password') {
         console.log((await db.setPassword(email, await secret('New password'))) ? 'Password changed; their sessions are ended' : `No user ${email}`);
-      } else fail('wm user add | wm user password');
+      } else fail('wm user add | wm user password | wm user grant');
       await db.closeDb();
       break;
     }

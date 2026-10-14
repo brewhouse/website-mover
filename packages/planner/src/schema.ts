@@ -18,6 +18,8 @@ export const PlanItem = z.object({
   /** Forms (FormRecord keys) rebuilt in the forms plugin and placed where the source form was. */
   forms: z.array(z.string()).default([]),
   warnings: z.array(z.string()),
+  /** sha256 of the extracted content: a re-scan shows which pages changed (delta sync). */
+  contentSha256: z.string().nullable().default(null),
 });
 export type PlanItem = z.infer<typeof PlanItem>;
 
@@ -260,6 +262,8 @@ export const Plan = z.object({
   site: PlanSite.nullable().default(null),
   /** The reviewer decisions this version applied. */
   decisions: ReviewDecisions.nullable().default(null),
+  /** Redirects for paths the framework itself links to (not legacy URLs), e.g. its hard-coded news links. */
+  siteRedirects: z.array(z.object({ from: z.string(), to: z.string(), reason: z.string() })).default([]),
   cleanup: z.array(PlanCleanup),
   /** Existing target content that is kept (framework pages the migration reuses). */
   keep: z.array(PlanCleanup.extend({ reason: z.string() })),
