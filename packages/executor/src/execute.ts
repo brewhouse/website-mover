@@ -34,7 +34,7 @@ export interface RunState {
   redirectImport: { imported: number; updated: number; skipped: number; failed: number } | null;
 }
 
-type Post = { id: number; slug: string; link: string; status: string };
+type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
 type Media = { id: number; source_url: string };
 type Schema = {
   post_types: Record<string, { rest_base: string }>;
@@ -339,6 +339,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     const post = previous
       ? await client.post<Post>(`${doc.route}/${previous.id}`, full)
       : await createOnce(client, doc.route, full, doc.key, doc.postType);
+    assertTagged(post, doc.key, doc.postType);
     posts.set(doc.key, post);
     const path = post.status === 'publish' ? new URL(post.link).pathname : doc.targetPath;
     state.entities[doc.key] = { kind: doc.kind, id: post.id, path, action: action(previous), warnings };
@@ -378,6 +379,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
       };
       const route = `/wp/v2/${restBase('people')}`;
       const post = previous ? await client.post<Post>(`${route}/${previous.id}`, body) : await createOnce(client, route, body, person.key, 'people');
+      assertTagged(post, person.key, 'people');
       state.entities[person.key] = { kind: 'person', id: post.id, path: new URL(post.link).pathname, action: action(previous), warnings: [] };
     } catch (err) {
       fail(person.key, 'person', 'create', err);
@@ -416,7 +418,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
         ? await client.post<{ id: number; url: string }>(`/tribe/events/v1/events/${previous.id}`, body)
         : await client.post<{ id: number; url: string }>('/tribe/events/v1/events', body);
       // Tag it (The Events Calendar's API has no meta field).
-      await client.post(`/wp/v2/tribe_events/${created.id}`, { meta: meta(ev.key) });
+      assertTagged(await client.post<Post>(`/wp/v2/tribe_events/${created.id}`, { meta: meta(ev.key) }), ev.key, 'tribe_events');
       if (ev.cancelled) warnings.push('cancelled: the source says this meeting was cancelled; set the event status by hand');
       state.entities[ev.key] = { kind: 'event', id: created.id, path: new URL(created.url).pathname, action: action(previous), warnings };
     } catch (err) {
@@ -485,6 +487,16 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   event('finish', { entities: Object.keys(state.entities).length, failures: state.failures.length });
   events.end();
   return state;
+}
+
+/**
+ * Every object must keep its source key: re-runs find objects by it, and untagged objects of the
+ * seed's own types look like demo content to the next plan.
+ */
+function assertTagged(post: Post, key: string, postType: string): void {
+  if (post.meta?._wm_source_key !== key) {
+    throw new Error(`The target did not store the source key on this ${postType} (is the bridge active and up to date?)`);
+  }
 }
 
 function entryRedirects(plan: Plan, key: string): string[] {
