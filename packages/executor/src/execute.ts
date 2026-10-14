@@ -495,6 +495,8 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     if (!entity?.path) continue;
     for (const from of entry.redirectFrom) if (from !== entity.path) state.redirects.push({ from, to: entity.path });
   }
+  // Paths the framework links to that have no page of their own (e.g. its hard-coded news links).
+  for (const r of plan.siteRedirects) state.redirects.push({ from: r.from, to: r.to });
   if (info.redirection) {
     try {
       state.redirectImport = await importRedirects(client, state.redirects, log);

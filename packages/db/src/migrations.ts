@@ -107,4 +107,11 @@ alter table stage_runs add constraint stage_runs_stage_check
   check (stage in ('scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'));
 `,
   },
+  {
+    name: '004_live_url.sql',
+    sql: `
+-- The site's live address, for the post-launch check (the target's URL until launch).
+alter table jobs add column live_url text;
+`,
+  },
 ];

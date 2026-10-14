@@ -15,6 +15,7 @@ import {
   enqueueStages,
   getJob,
   JobBusyError,
+  setLiveUrl,
   listRuns,
   listTargets,
   targetCredentials,
@@ -158,6 +159,7 @@ const RUNS: Record<string, Stage[]> = {
   execute: ['execute', 'report', 'qa'],
   report: ['report'],
   qa: ['qa'],
+  postlaunch: ['postlaunch'],
 };
 
 export async function runStages(_: FormState, form: FormData): Promise<FormState> {
@@ -180,6 +182,25 @@ export async function runStages(_: FormState, form: FormData): Promise<FormState
   await audit(jobId, user.id, 'run', { stages });
   revalidatePath(`/jobs/${jobId}`);
   return { ok: `Queued: ${stages.join(' → ')}` };
+}
+
+/** The site's live address, for the post-launch check (empty: check the target). */
+export async function saveLiveUrl(_: FormState, form: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const jobId = text(form, 'jobId');
+  const url = text(form, 'liveUrl');
+  if (!(await getJob(jobId))) return { error: 'Unknown job.' };
+  if (url) {
+    try {
+      await assertPublicUrl(url);
+    } catch (err) {
+      return { error: `Live address: ${(err as Error).message}`, values: kept(form) };
+    }
+  }
+  await setLiveUrl(jobId, url ? new URL(url).origin : null);
+  await audit(jobId, user.id, 'job.live-url', { liveUrl: url || null });
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: url ? `Post-launch checks will use ${new URL(url).origin}.` : 'Post-launch checks will use the target.' };
 }
 
 // ---------- Review decisions ----------

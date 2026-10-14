@@ -4,7 +4,7 @@ import { LiveLog } from '@/components/live-log';
 import { RunStatus } from '@/components/run-status';
 import { Badge, Card, Empty, LinkButton, PageHeader, when, type Tone } from '@/components/ui';
 import { loadReport, planState, stagesOnDisk } from '@/lib/job-files';
-import { RunButtons, type RunChoice } from './run-buttons';
+import { LiveUrlForm, RunButtons, type RunChoice } from './run-buttons';
 import { requireUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -48,6 +48,12 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
       disabled: !plan ? 'Needs a plan.' : !plan.approved ? `Plan v${plan.plan.version} needs approval first (Review).` : false,
     },
     { run: 'report', label: 'Rebuild the report', help: 'Re-check the target: live URLs, blocks, redirects.', disabled: lastOf('execute') || onDisk.has('execute') ? false : 'Run the migration first.' },
+    {
+      run: 'postlaunch',
+      label: 'Post-launch check',
+      help: `Every legacy URL and the GA4 tag on ${job.liveUrl ?? `the target (set the live address below once launched)`}.`,
+      disabled: lastOf('execute') || onDisk.has('execute') ? false : 'Run the migration first.',
+    },
     { run: 'qa', label: 'Run QA', help: 'Accessibility (WCAG 2.1 AA) and phone/tablet/desktop checks with screenshots.', disabled: lastOf('execute') || onDisk.has('execute') ? false : 'Run the migration first.' },
   ];
 
@@ -98,6 +104,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         <div className="grid content-start gap-6">
           <Card title="Run">
             <RunButtons jobId={id} choices={choices} busy={!!active} />
+          </Card>
+          <Card title="Live address">
+            <LiveUrlForm jobId={id} liveUrl={job.liveUrl} />
           </Card>
           <Card title="Activity">
             {auditTrail.length ? (

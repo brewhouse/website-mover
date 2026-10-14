@@ -152,6 +152,20 @@ describe('buildPlan', () => {
   });
 });
 
+describe('framework links', () => {
+  it('redirects the paths the framework hard-codes for news to the News page, unless content uses them', () => {
+    const news = entity(9, { title: 'News', slug: 'news', link: 'http://localhost:8088/news/', template: 'template-news.php' });
+    expect(plan([page('/about')], { existing: [news] }).siteRedirects).toEqual([
+      { from: '/latest-news/', to: '/news/', reason: 'The framework links here for "All News"; the News page is elsewhere' },
+      { from: '/current-news/', to: '/news/', reason: 'The framework links here for "All News"; the News page is elsewhere' },
+    ]);
+    // A migrated page that is itself at /latest-news/ keeps its URL.
+    expect(plan([page('/latest-news')], { existing: [news] }).siteRedirects.map((r) => r.from)).toEqual(['/current-news/']);
+    // No News page kept: nothing to redirect to.
+    expect(plan([page('/about')]).siteRedirects).toEqual([]);
+  });
+});
+
 describe('approval', () => {
   it('lets execution use a plan only while it is exactly the approved one', async () => {
     process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));

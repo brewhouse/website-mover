@@ -260,6 +260,8 @@ export const Plan = z.object({
   site: PlanSite.nullable().default(null),
   /** The reviewer decisions this version applied. */
   decisions: ReviewDecisions.nullable().default(null),
+  /** Redirects for paths the framework itself links to (not legacy URLs), e.g. its hard-coded news links. */
+  siteRedirects: z.array(z.object({ from: z.string(), to: z.string(), reason: z.string() })).default([]),
   cleanup: z.array(PlanCleanup),
   /** Existing target content that is kept (framework pages the migration reuses). */
   keep: z.array(PlanCleanup.extend({ reason: z.string() })),

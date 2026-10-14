@@ -50,6 +50,8 @@ export interface BuildPlanInput {
   timezone?: string;
   /** The reviewer's changes (M4). */
   decisions?: ReviewDecisions;
+  /** GA4 measurement ID: set as the theme's `ga4_measurement_id` option (theme change T13). */
+  ga4Id?: string;
 }
 
 const EXCLUDED = 'Excluded by the reviewer';
@@ -73,6 +75,13 @@ const OWNED_TYPES = new Set([
 const KEEP_TEMPLATES: Record<string, string> = {
   'template-news.php': 'News listing page (framework News template)',
 };
+
+/**
+ * Paths the framework's templates link to with no page behind them on the seed: the "All News" button
+ * (single.php) and the news breadcrumb (functions.php). They redirect to the News page (theme change
+ * T14 removes the hard-coding).
+ */
+const FRAMEWORK_NEWS_PATHS = ['/latest-news/', '/current-news/'];
 
 /** WordPress paths a page slug must not take. */
 const WP_RESERVED = [
@@ -424,6 +433,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
 
   const site = input.analysis?.site
     ? planSite(input.analysis.site, {
+        ga4Id: input.ga4Id,
         origin: input.source.origin,
         keep,
         target,
@@ -441,11 +451,21 @@ export function buildPlan(input: BuildPlanInput): Plan {
       })
     : null;
 
+  const siteRedirects: Plan['siteRedirects'] = [];
+  const newsPage = keep.find((k) => /News listing/.test(k.reason));
+  if (newsPage?.link) {
+    const newsPath = new URL(newsPage.link, target.url).pathname;
+    const taken = new Set([...items.map((i) => i.targetPath), ...tables.map((t) => t.targetPath), ...contentTypes.map((c) => c.listing.targetPath)]);
+    for (const from of FRAMEWORK_NEWS_PATHS) {
+      if (from !== newsPath && !taken.has(from)) siteRedirects.push({ from, to: newsPath, reason: 'The framework links here for "All News"; the News page is elsewhere' });
+    }
+  }
+
   const categories = [...new Set(items.flatMap((i) => i.categories))].sort();
   const eventCategories = [...new Set(events.map((e) => e.category))].sort();
   const documentTypes = [...new Set(media.map((m) => m.documentType).filter((t): t is string => !!t))].sort();
   const redirectSources = [...items, ...media, ...events, ...recordsPlan, ...tables, ...contentTypes.map((c) => c.listing)];
-  const redirects = redirectSources.reduce((n, i) => n + i.redirectFrom.length, 0);
+  const redirects = redirectSources.reduce((n, i) => n + i.redirectFrom.length, 0) + siteRedirects.length;
 
   const deferredLinks = items.filter((i) => i.warnings.some((w) => /not migrated/i.test(w))).length;
   if (deferredLinks) warnings.push(`${deferredLinks} migrated pages mention content that isn't migrated.`);
@@ -478,6 +498,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     settings,
     site,
     decisions: decisions ?? null,
+    siteRedirects,
     cleanup,
     keep,
     notMigrated,
@@ -509,6 +530,7 @@ const MENUS: [name: string, from: keyof SiteAnalysis['menus']][] = [
 ];
 
 interface SiteContext {
+  ga4Id?: string;
   origin: string;
   keep: Plan['keep'];
   target: TargetInfo;
@@ -576,6 +598,8 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     options[`footer_${field}`] = value ?? '';
     if (!value) Object.assign(options, { [`footer_${field}_heading`]: '', [`footer_${field}_icon`]: '' });
   }
+  // GA4 goes in a theme option (T13); until the theme has the field, the executor reports it.
+  if (ctx.ga4Id) options.ga4_measurement_id = ctx.ga4Id;
   if (site.contact.hours) ctx.warnings.push(`Office hours ("${site.contact.hours}") have no place in the framework footer (theme change).`);
   if (site.footerNotices.length) ctx.warnings.push(`${site.footerNotices.length} footer notice(s) (e.g. fair-housing statements) have no place in the framework footer (theme change).`);
 

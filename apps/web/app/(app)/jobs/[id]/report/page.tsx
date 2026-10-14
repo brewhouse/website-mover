@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getJob } from '@wm/db';
 import { Badge, Card, Empty, LinkButton, Notice, PageHeader, Stat, when } from '@/components/ui';
-import { DOWNLOADS, loadQa, loadReport } from '@/lib/job-files';
+import { DOWNLOADS, loadPostLaunch, loadQa, loadReport, planState } from '@/lib/job-files';
+import { scopeChecklist } from '@/lib/scope';
+import type { PostLaunchReport } from '@wm/executor';
 import type { QaReport } from '@wm/qa';
 import { requireUser } from '@/lib/session';
 
@@ -16,7 +18,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   await requireUser();
   const { id } = await params;
   if (!(await getJob(id))) notFound();
-  const [r, qa] = await Promise.all([loadReport(id), loadQa(id)]);
+  const [r, qa, postlaunch] = await Promise.all([loadReport(id), loadQa(id), loadPostLaunch(id)]);
   if (!r) {
     return (
       <>
@@ -29,7 +31,10 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   const failed = rows.reduce((n, [, c]) => n + c.failed, 0);
   const notLive = r.notLive.length;
   const broken = r.redirects.broken.length;
-  const ok = !failed && !notLive && !broken && !r.invalid.length;
+  const brokenLinks = r.links?.broken ?? [];
+  const ok = !failed && !notLive && !broken && !r.invalid.length && !brokenLinks.length;
+  const plan = (await planState(id, r.planVersion))?.plan;
+  const scope = plan ? scopeChecklist(plan, r, qa, postlaunch) : [];
   return (
     <>
       <PageHeader
@@ -49,11 +54,12 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
           </LinkButton>
         ))}
       />
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <Stat label="Failures" value={failed} />
         <Stat label="Not answering 200" value={notLive} />
         <Stat label="Redirects working" value={r.redirects.working ?? '—'} hint={`of ${r.redirects.total}${r.redirects.imported === null ? ' (CSV only)' : ''}`} />
         <Stat label="Block problems" value={r.invalid.length} />
+        <Stat label="Broken links/images" value={r.links ? brokenLinks.length : '—'} hint={r.links ? `of ${r.links.checked} checked` : 'rebuild the report'} />
       </div>
       <div className="grid gap-6">
         <Card title="Counts">
@@ -135,6 +141,57 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
             </ul>
           </Card>
         )}
+        {scope.length > 0 && (
+          <Card title="Scope checklist (statement of work)">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Line</th>
+                  <th>Owner</th>
+                  <th>Status</th>
+                  <th>Why</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scope.map((s) => (
+                  <tr key={s.line}>
+                    <td className="font-medium">{s.line}</td>
+                    <td className="text-muted">{s.owner}</td>
+                    <td>
+                      <Badge tone={s.status === 'done' ? 'ok' : s.status === 'partial' ? 'warn' : 'neutral'}>{s.status}</Badge>
+                    </td>
+                    <td className="max-w-xl text-muted">{s.why}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        )}
+        {brokenLinks.length > 0 && (
+          <Card title={`Broken links and images (${brokenLinks.length} of ${r.links!.checked} checked)`}>
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Link</th>
+                  <th>Answer</th>
+                  <th>On</th>
+                </tr>
+              </thead>
+              <tbody>
+                {brokenLinks.map((b) => (
+                  <tr key={b.url}>
+                    <td className="max-w-md font-mono text-xs break-all">{b.url}</td>
+                    <td>{b.status || 'no answer'}</td>
+                    <td className="text-xs text-muted">
+                      {b.pageCount > 5 ? `${b.pageCount} pages (from the theme, probably)` : b.pages.map((p) => <div key={p} className="font-mono">{p}</div>)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        )}
+        {postlaunch && <PostLaunchSection pl={postlaunch} />}
         {qa ? <QaSection jobId={id} qa={qa} /> : <Notice tone="info">No QA yet: run it from the job page (accessibility and phone/tablet/desktop checks).</Notice>}
         <Card title="Warnings">
           {Object.keys(r.warnings).length ? (
@@ -249,5 +306,51 @@ function QaSection({ jobId, qa }: { jobId: string; qa: QaReport }) {
         </div>
       </Card>
     </>
+  );
+}
+
+const PROBLEM_LABEL = { 'not-found': 'Not found', error: 'Error', 'wrong-target': 'Wrong page', chain: 'Redirect chain', loop: 'Redirect loop' } as const;
+
+function PostLaunchSection({ pl }: { pl: PostLaunchReport }) {
+  return (
+    <Card title={`Post-launch check: ${pl.ok} of ${pl.checked} legacy URLs OK on ${pl.base} (${when(pl.ranAt)})`}>
+      <p className="border-b border-line px-4 py-2 text-sm">
+        {pl.ga4.expected ? (
+          pl.ga4.found.includes(pl.ga4.expected) ? (
+            <span className="text-ok">GA4 {pl.ga4.expected} is on the homepage.</span>
+          ) : (
+            <span className="text-warn">GA4 {pl.ga4.expected} is not on the homepage{pl.ga4.found.length ? ` (found ${pl.ga4.found.join(', ')})` : ''}: theme change T13.</span>
+          )
+        ) : (
+          <span className="text-muted">No GA4 measurement ID for this job.</span>
+        )}
+      </p>
+      {pl.problems.length ? (
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Legacy URL</th>
+              <th>Problem</th>
+              <th>Hops</th>
+              <th>Expected</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pl.problems.slice(0, 200).map((p) => (
+              <tr key={p.url}>
+                <td className="max-w-sm font-mono text-xs break-all">{p.url}</td>
+                <td>
+                  <Badge tone={p.problem === 'chain' ? 'warn' : 'bad'}>{PROBLEM_LABEL[p.problem]}</Badge>
+                </td>
+                <td className="font-mono text-xs">{p.hops.map((h) => `${h.status}${h.location ? ` → ${h.location}` : ''}`).join(' · ')}</td>
+                <td className="font-mono text-xs">{p.expected}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <Empty>Every legacy URL answers 200, directly or with one 301 to the right page.</Empty>
+      )}
+    </Card>
   );
 }

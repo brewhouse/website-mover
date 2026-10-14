@@ -1,5 +1,7 @@
 import { writeFile } from 'node:fs/promises';
+import * as cheerio from 'cheerio';
 import { externalBlock, validateSerialized } from '@wm/blocks';
+import { safeFetch } from '@wm/net';
 import { jobPath, writeJson } from '@wm/core';
 import { loadPlan } from '@wm/planner';
 import type { WpClient } from '@wm/wp-client';
@@ -31,6 +33,8 @@ export interface Report {
   invalid: { sourceKey: string; errors: string[] }[];
   warnings: Record<string, number>;
   site: RunState['site'];
+  /** Same-site links and images on the migrated pages that don't answer 200 (after redirects). */
+  links?: { checked: number; broken: { url: string; status: number; pageCount: number; pages: string[] }[] };
 }
 
 /** Checks the run against the target and writes report.json/.md, url-map.csv and redirects.csv. */
@@ -61,6 +65,27 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
   const invalid: Report['invalid'] = [];
   const warnings: Record<string, number> = {};
   const entities = Object.entries(state.entities);
+  const host = new URL(client.baseUrl).host;
+  // Every same-site link and image on the migrated pages → the pages it's on.
+  const linksOn = new Map<string, Set<string>>();
+  const collectLinks = (html: string, page: string) => {
+    const $ = cheerio.load(html);
+    for (const [selector, attr] of [['a[href]', 'href'], ['img[src]', 'src']] as const) {
+      $(selector).each((_, el) => {
+        const raw = $(el).attr(attr)?.trim();
+        if (!raw || raw.startsWith('#') || /^(mailto|tel|javascript|data):/i.test(raw)) return;
+        let url: URL;
+        try {
+          url = new URL(raw, client.baseUrl + page);
+        } catch {
+          return;
+        }
+        if (!/^https?:$/.test(url.protocol) || url.host !== host || /^\/wp-(admin|login|json)/.test(url.pathname)) return;
+        url.hash = '';
+        linksOn.set(url.href, (linksOn.get(url.href) ?? new Set()).add(page));
+      });
+    }
+  };
   log(`Verifying ${entities.length} objects on ${client.baseUrl}`);
   await mapLimit(entities, 6, async ([key, e]) => {
     counts[e.kind][e.action]++;
@@ -69,9 +94,12 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
       warnings[kind] = (warnings[kind] ?? 0) + 1;
     }
     if (e.path) {
-      const res = await fetch(client.baseUrl + e.path, { method: e.kind === 'document' || e.kind === 'image' ? 'HEAD' : 'GET', redirect: 'manual' });
+      const file = e.kind === 'document' || e.kind === 'image';
+      const res = await safeFetch(client.baseUrl + e.path, { method: file ? 'HEAD' : 'GET', redirect: 'manual' });
       if (res.status === 200) counts[e.kind].live++;
       else notLive.push({ sourceKey: key, path: e.path, status: res.status });
+      if (!file && res.status === 200) collectLinks(await res.text(), e.path);
+      else await res.body?.cancel();
     } else {
       counts[e.kind].live++; // no URL of its own (forms): existence is what was checked
     }
@@ -86,12 +114,30 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
     }
   });
 
+  // Each linked URL once: HEAD, or GET where HEAD isn't allowed; redirects followed.
+  log(`Checking ${linksOn.size} links and images`);
+  const brokenLinks: NonNullable<Report['links']>['broken'] = [];
+  await mapLimit([...linksOn], 6, async ([url, pages]) => {
+    let status = 0;
+    try {
+      let res = await safeFetch(url, { method: 'HEAD', redirect: 'follow' });
+      if (res.status === 405 || res.status === 501) res = await safeFetch(url, { method: 'GET', redirect: 'follow' });
+      status = res.status;
+      await res.body?.cancel();
+    } catch {
+      status = 0;
+    }
+    if (status !== 200) brokenLinks.push({ url, status, pageCount: pages.size, pages: [...pages].slice(0, 5) });
+  });
+  brokenLinks.sort((a, b) => b.pageCount - a.pageCount || a.url.localeCompare(b.url));
+
   let working: number | null = null;
   const broken: Report['redirects']['broken'] = [];
   if (state.redirectImport) {
     working = 0;
     await mapLimit(state.redirects, 6, async (r) => {
-      const res = await fetch(client.baseUrl + r.from, { redirect: 'manual' });
+      const res = await safeFetch(client.baseUrl + r.from, { redirect: 'manual' });
+      await res.body?.cancel();
       const location = res.headers.get('location') ?? '';
       if (res.status === 301 && new URL(location, client.baseUrl).pathname === r.to) working!++;
       else broken.push({ ...r, got: `${res.status} ${location}` });
@@ -117,6 +163,7 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
     invalid,
     warnings,
     site: state.site,
+    links: { checked: linksOn.size, broken: brokenLinks },
   };
 
   await writeJson(jobPath(jobId, 'report', 'report.json'), report);
@@ -156,6 +203,7 @@ export function renderReport(r: Report): string {
     out.push('## Site structure', '', `Homepage slides: ${r.site.homeSlides}. Quick links: ${r.site.homeQuickLinks ?? 0}. Menus: ${Object.entries(r.site.menus).map(([n, c]) => `${n} (${c} items)`).join(', ') || 'none'}.`, '');
     if (r.site.warnings.length) out.push(...r.site.warnings.map((w) => `- ${w}`), '');
   }
+  if (r.links?.broken.length) out.push(`## Broken links and images (${r.links.broken.length} of ${r.links.checked})`, '', ...r.links.broken.map((b) => `- \`${b.url}\` → ${b.status || 'no answer'} (on ${b.pageCount} page(s), e.g. ${b.pages[0]})`), '');
   if (r.redirects.broken.length) out.push('## Redirects not working', '', ...r.redirects.broken.map((b) => `- \`${b.from}\` → expected \`${b.to}\`, got ${b.got}`), '');
   if (r.invalid.length) out.push('## Block problems', '', ...r.invalid.map((i) => `- \`${i.sourceKey}\`: ${i.errors.join('; ')}`), '');
   const w = Object.entries(r.warnings).sort((a, b) => b[1] - a[1]);

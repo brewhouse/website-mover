@@ -9,6 +9,8 @@
  *   wm execute --job jha [--target local]
  *   wm report  --job jha [--target local]
  *   wm qa      --job jha [--target local]      accessibility and responsive checks (Playwright + axe-core)
+ *   wm postlaunch --job jha [--base https://www.jaxha.org] [--target local]   legacy URLs and GA4 on the live site
+ * The GA4 measurement ID comes from GA4_MEASUREMENT_ID.
  *
  * --target local is the Docker seed configured in .env; any other name is a target saved in the
  * web app (needs DATABASE_URL).
@@ -44,21 +46,24 @@ const { positionals, values } = parseArgs({
     user: { type: 'string' },
     'password-env': { type: 'string' },
     'rights-confirmed': { type: 'boolean', default: false },
+    base: { type: 'string' },
   },
 });
 const [command, sub] = positionals;
 // pnpm runs scripts in the package directory; resolve user paths against where the command was typed.
 const cwd = process.env.INIT_CWD ?? process.cwd();
 
-const STAGES: StageName[] = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa'];
+const STAGES: StageName[] = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch'];
 
 if (command && (STAGES as string[]).includes(command)) {
   const jobId = values.job ?? fail('--job is required');
   const summary = await runStage(command as StageName, {
     jobId,
     source: command === 'scan' ? { origin: values.origin ?? fail('--origin is required'), profile: values.profile!, cacheDir: values.cache ? path.resolve(cwd, values.cache) : undefined } : undefined,
-    target: ['plan', 'execute', 'report', 'qa'].includes(command) ? await cliTarget(values.target!) : undefined,
+    target: ['plan', 'execute', 'report', 'qa', 'postlaunch'].includes(command) ? await cliTarget(values.target!) : undefined,
     timezone: values.timezone,
+    ga4Id: process.env.GA4_MEASUREMENT_ID || null,
+    liveUrl: values.base ?? null,
     log: console.log,
   });
   console.log(summary);

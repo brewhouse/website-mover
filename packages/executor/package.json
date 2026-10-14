@@ -12,6 +12,7 @@
   "dependencies": {
     "@wm/blocks": "workspace:*",
     "@wm/core": "workspace:*",
+    "@wm/net": "workspace:*",
     "@wm/planner": "workspace:*",
     "@wm/wp-client": "workspace:*",
     "cheerio": "^1.2.0"

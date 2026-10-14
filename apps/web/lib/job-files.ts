@@ -5,6 +5,7 @@ import { jobPath, readJson } from '@wm/core';
 import { Approval, latestPlanVersion, loadDecisions, loadPlan, type Plan, type ReviewDecisions } from '@wm/planner';
 import type { Report } from '@wm/executor';
 import type { QaReport } from '@wm/qa';
+import type { PostLaunchReport } from '@wm/executor';
 
 export interface PlanState {
   plan: Plan;
@@ -73,6 +74,10 @@ export async function previousPlan(jobId: string, version: number): Promise<Plan
 
 export async function loadReport(jobId: string): Promise<Report | null> {
   return readJson<Report>(jobPath(jobId, 'report', 'report.json')).catch(() => null);
+}
+
+export async function loadPostLaunch(jobId: string): Promise<PostLaunchReport | null> {
+  return readJson<PostLaunchReport>(jobPath(jobId, 'postlaunch', 'postlaunch.json')).catch(() => null);
 }
 
 export async function loadQa(jobId: string): Promise<QaReport | null> {
