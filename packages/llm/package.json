@@ -6,8 +6,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p .",
-    "test": "vitest run"
+    "typecheck": "tsc -p ."
   },
   "dependencies": {
     "openai": "^7.32.0",

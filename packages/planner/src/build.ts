@@ -341,7 +341,8 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const alts = new Map<string, string>();
   for (const p of pages) if (included.has(p.sourceKey)) for (const img of p.images) if (img.alt) alts.set(safeKey(img.src), img.alt);
   const docInfo = new Map((records?.documents ?? []).map((d) => [safeKey(d.url), d]));
-  const slideImages = new Set((input.analysis?.site?.home.slides ?? []).map((s) => (s.image ? safeKey(s.image) : '')).filter(Boolean));
+  // Files the site structure uses: slide images, and documents that menus, slides and tiles link to.
+  const siteFiles = new Set(input.analysis?.site ? siteHrefs(input.analysis.site).map(safeKey) : []);
   for (const s of input.analysis?.site?.home.slides ?? []) if (s.image && s.alt) alts.set(safeKey(s.image), s.alt);
   const media: PlanMedia[] = [];
   const byHash = new Map<string, PlanMedia>();
@@ -349,7 +350,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     if (f.status !== 200 || !f.path || !f.sha256) continue;
     const key = sourceKey(f.url);
     const usedBy = f.referencedBy.filter((k) => included.has(k));
-    if (slideImages.has(key)) usedBy.push('home');
+    if (siteFiles.has(key)) usedBy.push('site');
     if (!usedBy.length) {
       notMigrated.push({
         sourceKey: key,
@@ -402,6 +403,8 @@ export function buildPlan(input: BuildPlanInput): Plan {
           ...recordsPlan.map((r) => ({ key: r.sourceKey, path: r.targetPath, from: [pathAndQuery(r.sourceUrl), ...r.redirectFrom] })),
           ...tables.map((t) => ({ key: `table:${t.key}`, path: t.targetPath, from: t.redirectFrom })),
           ...contentTypes.map((c) => ({ key: `listing:${c.postType}`, path: c.listing.targetPath, from: c.listing.redirectFrom })),
+          // Files: the executor links to the uploaded file; until then, the legacy URL (it redirects there).
+          ...media.map((m) => ({ key: m.sourceKey, path: m.redirectFrom[0]!, from: m.redirectFrom })),
         ],
         pages,
         warnings,
@@ -494,7 +497,12 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     [/^\/calendar$/, ctx.target.reservedSlugs.includes('event') ? '/events/' : null],
   ];
   const resolve = (href: string): { key: string | null; url: string } | null => {
-    const url = new URL(href);
+    let url: URL;
+    try {
+      url = new URL(href);
+    } catch {
+      return null;
+    }
     if (url.hostname.replace(/^www\./, '') !== new URL(ctx.origin).hostname.replace(/^www\./, '')) return { key: null, url: href };
     const hit = byKey.get(safeKey(href));
     if (hit) return { key: hit.key, url: hit.path + url.hash };
@@ -503,13 +511,20 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
   };
 
   const dropped: string[] = [];
+  const headings: string[] = [];
+  // Every framework menu is planned, empty ones included, so none keeps the seed's demo links.
   const menus = MENUS.map(([name, from]) => {
     const items: PlanMenuItem[] = [];
     const add = (link: NavLink, parent: number | null) => {
-      const target = resolve(link.href);
+      let target = resolve(link.href);
       if (!target) {
-        dropped.push(`${name}: "${link.label}" (${link.href})`);
-        return;
+        // A dropdown parent without a migrated page of its own stays as a heading, so its children aren't lost.
+        if (!link.children?.some((c) => resolve(c.href))) {
+          dropped.push(`${name}: "${link.label}" (${link.href || 'no link'})`);
+          return;
+        }
+        if (link.href) headings.push(`${name}: "${link.label}" (${link.href})`);
+        target = { key: null, url: '#' };
       }
       items.push({ title: link.label, sourceUrl: link.href, key: target.key, url: target.url, parent });
       const index = items.length - 1;
@@ -517,13 +532,15 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     };
     for (const link of site.menus[from]) add(link, null);
     return { name, items };
-  }).filter((m) => m.items.length);
+  });
   if (dropped.length) ctx.warnings.push(`Menu links to content that isn't migrated were left out: ${dropped.join('; ')}`);
+  if (headings.length) ctx.warnings.push(`Dropdown parents whose own page isn't migrated are kept as headings without a link: ${headings.join('; ')}`);
 
   // Footer contact. Where the source has no value, the seed's placeholder (and its heading and
-  // icon, which the footer would still show) is cleared; the address heading is a demo label.
-  const options: Record<string, string> = { footer_address: site.contact.address ?? '', footer_address_heading: '' };
-  for (const [field, value] of [['phone', site.contact.phone], ['email', site.contact.email], ['fax', site.contact.fax]] as const) {
+  // icon, which the footer would still show) is cleared. The seed's address heading ("City Hall")
+  // is a demo label, so it's cleared either way.
+  const options: Record<string, string> = { footer_address_heading: '' };
+  for (const [field, value] of [['address', site.contact.address], ['phone', site.contact.phone], ['email', site.contact.email], ['fax', site.contact.fax]] as const) {
     options[`footer_${field}`] = value ?? '';
     if (!value) Object.assign(options, { [`footer_${field}_heading`]: '', [`footer_${field}_icon`]: '' });
   }
@@ -534,12 +551,23 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     const target = s.link ? resolve(s.link) : null;
     return { title: s.title, image: s.image, linkUrl: target?.url ?? null, linkKey: target?.key ?? null, linkTitle: s.subtitle };
   });
-  const quickLinks = site.home.buttons.flatMap((b) => {
+  // `buttons` is newer than the first M3 analyses.
+  const quickLinks = (site.home.buttons ?? []).flatMap((b) => {
     const target = resolve(b.href);
     if (!target) ctx.warnings.push(`Homepage link "${b.label}" (${b.href}) points to content that isn't migrated: left out.`);
     return target ? [{ title: b.label, url: target.url, key: target.key }] : [];
   });
   return { title: site.siteName, menus, options, home: { banner, quickLinks, clearOthers: true } };
+}
+
+/** Every URL the site structure points at: menu links, slide images and links, homepage tiles. */
+function siteHrefs(site: SiteAnalysis): string[] {
+  const walk = (links: NavLink[]): string[] => links.flatMap((l) => [l.href, ...walk(l.children ?? [])]);
+  return [
+    ...Object.values(site.menus).flatMap(walk),
+    ...site.home.slides.flatMap((s) => [s.image ?? '', s.link ?? '']),
+    ...walk(site.home.buttons ?? []),
+  ].filter(Boolean);
 }
 
 /** Entries of forms with sensitive fields are deleted after this many days. */

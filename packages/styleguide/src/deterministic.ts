@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readdir } from 'node:fs/promises';
+import { mkdir, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -27,19 +27,7 @@ export async function readPdfFacts(pdf: string, workDir: string): Promise<PdfFac
   const pages = Number(/^Pages:\s+(\d+)/m.exec(info)?.[1] ?? 0);
   const { stdout: text } = await run('pdftotext', ['-layout', pdf, '-'], { maxBuffer: 64 * 1024 * 1024 });
 
-  const colors = new Map<string, string>();
-  const note = (hex: string, index: number) => {
-    const key = normalizeHex(hex);
-    if (key && !colors.has(key)) colors.set(key, text.slice(Math.max(0, index - 60), index + 60).replace(/\s+/g, ' ').trim());
-  };
-  for (const m of text.matchAll(/#([0-9a-f]{6}|[0-9a-f]{3})\b/gi)) note(m[1]!, m.index!);
-  // "HEX 0B3D91" / "Hex: 0b3d91" without a leading #.
-  for (const m of text.matchAll(/\bhex\s*:?\s*#?([0-9a-f]{6})\b/gi)) note(m[1]!, m.index!);
-  // "RGB 11 61 145", "R 11 G 61 B 145", "rgb(11, 61, 145)".
-  for (const m of text.matchAll(/\bR(?:GB)?\s*[:(]?\s*(\d{1,3})[\s,/]+(?:G\s*:?\s*)?(\d{1,3})[\s,/]+(?:B\s*:?\s*)?(\d{1,3})\b/gi)) {
-    const [r, g, b] = [m[1], m[2], m[3]].map(Number);
-    if ([r, g, b].every((v) => v! <= 255)) note([r, g, b].map((v) => v!.toString(16).padStart(2, '0')).join(''), m.index!);
-  }
+  const colors = statedColors(text);
   const cmyk = [...text.matchAll(/\bC(?:MYK)?\s*:?\s*\d{1,3}[\s,/]+M?\s*:?\s*\d{1,3}[\s,/]+Y?\s*:?\s*\d{1,3}[\s,/]+K?\s*:?\s*\d{1,3}\b/gi)].map((m) => m[0].replace(/\s+/g, ' '));
 
   const { stdout: fontList } = await run('pdffonts', [pdf]);
@@ -54,7 +42,9 @@ export async function readPdfFacts(pdf: string, workDir: string): Promise<PdfFac
     ),
   ];
 
+  // Images are paired with `pdfimages -list` rows by order, so start from empty folders.
   const imageDir = path.join(workDir, 'images');
+  await rm(imageDir, { recursive: true, force: true });
   await mkdir(imageDir, { recursive: true });
   const { stdout: imageList } = await run('pdfimages', ['-list', pdf]);
   await run('pdfimages', ['-png', '-p', pdf, path.join(imageDir, 'img')]);
@@ -63,11 +53,31 @@ export async function readPdfFacts(pdf: string, workDir: string): Promise<PdfFac
   const images = rows.map((c, i) => ({ page: Number(c[0]), width: Number(c[3]), height: Number(c[4]), file: path.join(imageDir, files[i] ?? '') })).filter((im) => im.file.endsWith('.png'));
 
   const renderDir = path.join(workDir, 'pages');
+  await rm(renderDir, { recursive: true, force: true });
   await mkdir(renderDir, { recursive: true });
   await run('pdftoppm', ['-r', '60', '-png', '-l', '12', pdf, path.join(renderDir, 'page')]);
   const renders = (await readdir(renderDir)).filter((f) => f.endsWith('.png')).sort().map((f) => path.join(renderDir, f));
 
-  return { pages, text, colors: [...colors].map(([hex, context]) => ({ hex, context })), cmyk: [...new Set(cmyk)], fonts, images, renders };
+  return { pages, text, colors, cmyk: [...new Set(cmyk)], fonts, images, renders };
+}
+
+/**
+ * Screen colours the text states: "#0B3D91", "HEX 0B3D91", "RGB 11 61 145", "R 11 G 61 B 145",
+ * "rgb(11, 61, 145)". Each as #RRGGBB, once, with the words around it.
+ */
+export function statedColors(text: string): { hex: string; context: string }[] {
+  const colors = new Map<string, string>();
+  const note = (hex: string, index: number) => {
+    const key = normalizeHex(hex);
+    if (key && !colors.has(key)) colors.set(key, text.slice(Math.max(0, index - 60), index + 60).replace(/\s+/g, ' ').trim());
+  };
+  for (const m of text.matchAll(/#([0-9a-f]{6}|[0-9a-f]{3})\b/gi)) note(m[1]!, m.index!);
+  for (const m of text.matchAll(/\bhex\s*:?\s*#?([0-9a-f]{6})\b/gi)) note(m[1]!, m.index!);
+  for (const m of text.matchAll(/\bR(?:GB)?\s*[:(]?\s*(\d{1,3})[\s,/]+(?:G\s*:?\s*)?(\d{1,3})[\s,/]+(?:B\s*:?\s*)?(\d{1,3})\b/gi)) {
+    const [r, g, b] = [m[1], m[2], m[3]].map(Number);
+    if ([r, g, b].every((v) => v! <= 255)) note([r, g, b].map((v) => v!.toString(16).padStart(2, '0')).join(''), m.index!);
+  }
+  return [...colors].map(([hex, context]) => ({ hex, context }));
 }
 
 /** "#0b3d91" / "0B3D91" / "fff" → "#0B3D91" / "#FFFFFF"; anything else → null. */

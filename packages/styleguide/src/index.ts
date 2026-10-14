@@ -5,9 +5,9 @@
 import path from 'node:path';
 import { z } from 'zod';
 import { structured } from '@wm/llm';
-import { normalizeHex, readPdfFacts, type PdfFacts } from './deterministic.js';
+import { normalizeHex, readPdfFacts, statedColors, type PdfFacts } from './deterministic.js';
 
-export { readPdfFacts, normalizeHex, type PdfFacts };
+export { readPdfFacts, normalizeHex, statedColors, type PdfFacts };
 
 const Role = z.enum(['primary', 'secondary', 'accent', 'text', 'background', 'other']);
 

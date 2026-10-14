@@ -3,7 +3,7 @@
 **Result: part 1 (site structure) PASSES on the local seed. Part 2 (branding) is waiting on the JHA style guide PDF.**
 
 - **Pipeline:** scan → extract → analyze → plan → approve → execute → report.
-- **Plan:** v11, approved as "local trial run, not a client approval".
+- **Plan:** v12, approved as "local trial run, not a client approval".
 - **Seed setup:** the same local seed as M2: the seed DB with its own plugin and block settings, and Redirection switched on.
 
 ## What was built

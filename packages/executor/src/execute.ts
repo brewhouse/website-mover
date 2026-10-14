@@ -38,7 +38,7 @@ export interface RunState {
 
 type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
 type Media = { id: number; source_url: string };
-type SeedField = { name: string; type?: string; choices?: Record<string, string>; min?: number | string; max?: number | string };
+export type SeedField = { name: string; type?: string; choices?: Record<string, string>; min?: number | string; max?: number | string };
 type Schema = {
   post_types: Record<string, { rest_base: string }>;
   acf: { field_groups: { key: string; location: { param: string; value: string }[][]; fields: SeedField[] }[] };
@@ -437,17 +437,14 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
 
   // 9b. Site structure: title, theme options, homepage fields, menus (after everything they link to exists).
   if (plan.site) {
-    try {
-      state.site = await applySite(client, plan, state, {
-        frontPage: existing.find((e) => e.front_page)?.id ?? null,
-        homeGroup: groupFor('page_template', 'template-home.php') ?? null,
-        mediaId,
-        postTypeOf: (key) => plan.records.find((r) => r.sourceKey === key)?.postType ?? (plan.items.find((i) => i.sourceKey === key)?.type === 'post' ? 'post' : 'page'),
-        log,
-      });
-    } catch (err) {
-      fail('site', 'setup', 'site', err);
-    }
+    state.site = await applySite(client, plan, state, {
+      frontPage: existing.find((e) => e.front_page)?.id ?? null,
+      homeGroup: groupFor('page_template', 'template-home.php') ?? null,
+      mediaId,
+      postTypeOf: (key) => plan.records.find((r) => r.sourceKey === key)?.postType ?? (plan.items.find((i) => i.sourceKey === key)?.type === 'post' ? 'post' : 'page'),
+      fail: (step, err) => fail('site', 'setup', step, err),
+      log,
+    });
   }
 
   // 10. Publish the drafts.
@@ -524,7 +521,11 @@ async function assertTagged(client: WpClient, post: Post, key: string, postType:
   }
 }
 
-/** Site title, theme options, homepage slides and the framework's named menus. */
+/**
+ * Site title, theme options, homepage fields and the framework's named menus. Each part is applied
+ * on its own, so a failure in one (e.g. a homepage field ACF rejects) doesn't leave the seed's
+ * demo menus in place.
+ */
 async function applySite(
   client: WpClient,
   plan: Plan,
@@ -535,85 +536,138 @@ async function applySite(
     homeGroup: { key: string; fields: SeedField[] } | null;
     mediaId: (url: string | null) => number | undefined;
     postTypeOf: (key: string) => string;
+    fail: (step: string, err: unknown) => void;
     log: (msg: string) => void;
   },
 ): Promise<NonNullable<RunState['site']>> {
   const site = plan.site!;
-  if (site.title) await client.post('/wp/v2/settings', { title: site.title });
-  const options = await client.post<Record<string, string>>('/website-mover/v1/acf/options', { values: site.options });
-
   const warnings: string[] = [];
+  const attempt = async (step: string, fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (err) {
+      ctx.fail(step, err);
+    }
+  };
+
+  await attempt('site title', async () => {
+    if (site.title) await client.post('/wp/v2/settings', { title: site.title });
+  });
+  let options: Record<string, string> = {};
+  await attempt('theme options', async () => {
+    options = await client.post<Record<string, string>>('/website-mover/v1/acf/options', { values: site.options });
+    const unknown = Object.keys(options).filter((k) => options[k] === 'unknown field');
+    if (unknown.length) warnings.push(`The seed has no theme option ${unknown.map((k) => `"${k}"`).join(', ')}: not set.`);
+  });
+
   const home = { slides: 0, quickLinks: 0 };
-  if (ctx.frontPage && ctx.homeGroup) {
-    await client.post(`/website-mover/v1/acf/field-groups/${ctx.homeGroup.key}/show-in-rest`, {});
-    const link = (title: string, key: string | null, url: string) => ({ title, url: (key && state.entities[key]?.path) || url, target: '' });
-    // Fields the source fills (slides, quick links); with clearOthers, the rest are emptied.
-    const filled: Record<string, { label: string; rows: unknown[]; names: string[] }> = {};
-    if (site.home.banner.length) {
-      filled.banner = {
-        label: 'slides',
-        rows: site.home.banner.map((b) => ({ select_image: ctx.mediaId(b.image) ?? null, title: b.title, link: link(b.linkTitle ?? '', b.linkKey, b.linkUrl ?? '') })),
-        names: site.home.banner.map((b) => b.title),
-      };
-    }
-    if (site.home.quickLinks.length) {
-      filled.banner_icon = {
-        label: 'quick links',
-        rows: site.home.quickLinks.map((q) => ({ banner_icon: null, icon_link: link(q.title, q.key, q.url) })),
-        names: site.home.quickLinks.map((q) => q.title),
-      };
-    }
-    const acf: Record<string, unknown> = {};
-    for (const field of ctx.homeGroup.fields) {
-      if (!field.name || ['tab', 'message', 'accordion'].includes(field.type ?? '')) continue;
-      const fill = filled[field.name];
-      const [min, max] = [Number(field.min) || 0, Number(field.max) || 0];
-      if (fill) {
-        const rows = max ? fill.rows.slice(0, max) : fill.rows;
-        if (rows.length < fill.rows.length) warnings.push(`The homepage template takes at most ${max} ${fill.label}; left out: ${fill.names.slice(max).map((n) => `"${n}"`).join(', ')}`);
-        acf[field.name] = rows;
-      } else if (site.home.clearOthers) {
-        // The seed's demo placeholders are cleared, except where the template requires rows.
-        if (min > 0) warnings.push(`The homepage template requires at least ${min} "${field.name}" row(s): the seed's placeholders stay until an editor replaces them.`);
-        else acf[field.name] = ['repeater', 'flexible_content'].includes(field.type ?? '') ? [] : ['text', 'textarea', 'wysiwyg', 'email', 'url'].includes(field.type ?? '') ? '' : null;
-      }
-    }
-    if (Object.keys(acf).length) await client.post(`/wp/v2/pages/${ctx.frontPage}`, { acf });
-    home.slides = Array.isArray(acf.banner) ? acf.banner.length : 0;
-    home.quickLinks = Array.isArray(acf.banner_icon) ? acf.banner_icon.length : 0;
+  const { frontPage, homeGroup } = ctx;
+  if (frontPage && homeGroup) {
+    await attempt('homepage fields', async () => {
+      await client.post(`/website-mover/v1/acf/field-groups/${homeGroup.key}/show-in-rest`, {});
+      const values = homeFieldValues(homeGroup.fields, site.home, {
+        link: (key, url) => (key && state.entities[key]?.path) || url,
+        mediaId: ctx.mediaId,
+      });
+      warnings.push(...values.warnings);
+      if (Object.keys(values.acf).length) await client.post(`/wp/v2/pages/${frontPage}`, { acf: values.acf });
+      Object.assign(home, values.counts);
+    });
   }
 
   // Named menus are replaced as a whole: the seed's items are demo links.
   const menus: Record<string, number> = {};
-  const existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
+  let existingMenus: { id: number; name: string }[] = [];
+  await attempt('menus', async () => {
+    existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
+  });
   for (const menu of site.menus) {
-    const id = existingMenus.find((m) => m.name === menu.name)?.id ?? (await client.post<{ id: number }>('/wp/v2/menus', { name: menu.name })).id;
-    for (const old of await client.get<{ id: number }[]>('/wp/v2/menu-items', { menus: id, per_page: 100 })) {
-      await client.delete(`/wp/v2/menu-items/${old.id}`, { force: 'true' });
-    }
-    const ids: number[] = [];
-    for (const [order, item] of menu.items.entries()) {
-      const entity = item.key ? state.entities[item.key] : undefined;
-      // Link to the object itself where it's a page, post or entry, so the menu follows slug changes.
-      const target =
-        entity && (entity.kind === 'page' || entity.kind === 'post' || entity.kind === 'record')
-          ? { type: 'post_type', object: ctx.postTypeOf(item.key!), object_id: entity.id }
-          : { type: 'custom', url: entity?.path || item.url };
-      const created = await client.post<{ id: number }>('/wp/v2/menu-items', {
-        title: item.title,
-        menus: id,
-        menu_order: order + 1,
-        parent: item.parent === null ? 0 : ids[item.parent] ?? 0,
-        status: 'publish',
-        ...target,
-      });
-      ids.push(created.id);
-    }
-    menus[menu.name] = ids.length;
+    await attempt(`menu ${menu.name}`, async () => {
+      let id = existingMenus.find((m) => m.name === menu.name)?.id;
+      if (!id && !menu.items.length) return; // nothing to empty
+      id ??= (await client.post<{ id: number }>('/wp/v2/menus', { name: menu.name })).id;
+      // Deleting shifts the list, so take the first page until none are left.
+      for (let old = await menuItems(client, id); old.length; old = await menuItems(client, id)) {
+        for (const item of old) await client.delete(`/wp/v2/menu-items/${item.id}`, { force: 'true' });
+      }
+      const ids: number[] = [];
+      for (const [order, item] of menu.items.entries()) {
+        const entity = item.key ? state.entities[item.key] : undefined;
+        // Link to the object itself where it's a page, post or entry, so the menu follows slug changes.
+        const target =
+          entity && (entity.kind === 'page' || entity.kind === 'post' || entity.kind === 'record')
+            ? { type: 'post_type', object: ctx.postTypeOf(item.key!), object_id: entity.id }
+            : { type: 'custom', url: entity?.path || item.url };
+        const created = await client.post<{ id: number }>('/wp/v2/menu-items', {
+          title: item.title,
+          menus: id,
+          menu_order: order + 1,
+          parent: item.parent === null ? 0 : ids[item.parent] ?? 0,
+          status: 'publish',
+          ...target,
+        });
+        ids.push(created.id);
+      }
+      menus[menu.name] = ids.length;
+    });
   }
   ctx.log(`Site: title, ${Object.keys(site.options).length} options, ${home.slides} homepage slides, ${home.quickLinks} quick links, menus ${Object.entries(menus).map(([n, c]) => `${n} (${c})`).join(', ')}`);
   for (const w of warnings) ctx.log(`  ! ${w}`);
   return { menus, options, homeSlides: home.slides, homeQuickLinks: home.quickLinks, warnings };
+}
+
+function menuItems(client: WpClient, menu: number) {
+  return client.get<{ id: number }[]>('/wp/v2/menu-items', { menus: menu, per_page: 100 });
+}
+
+/**
+ * The homepage template's ACF values: the source's slides and quick links within the template's
+ * row limits; with `clearOthers`, every other field emptied in a form ACF's REST check accepts
+ * (`[]` only for repeaters, `null` for relationships and images). A field that requires rows is
+ * left as the seed has it and reported, since ACF won't save it empty.
+ */
+export function homeFieldValues(
+  fields: SeedField[],
+  home: NonNullable<Plan['site']>['home'],
+  resolve: { link: (key: string | null, url: string) => string; mediaId: (url: string | null) => number | undefined },
+): { acf: Record<string, unknown>; warnings: string[]; counts: { slides: number; quickLinks: number } } {
+  const warnings: string[] = [];
+  const link = (title: string, key: string | null, url: string | null) => {
+    const href = url ? resolve.link(key, url) : '';
+    return href ? { title, url: href, target: '' } : null;
+  };
+  const filled: Record<string, { label: string; rows: unknown[]; names: string[] }> = {};
+  if (home.banner.length) {
+    for (const b of home.banner) if (b.image && !resolve.mediaId(b.image)) warnings.push(`Homepage slide "${b.title}": its image wasn't uploaded, so the slide has none.`);
+    filled.banner = {
+      label: 'slides',
+      rows: home.banner.map((b) => ({ select_image: resolve.mediaId(b.image) ?? null, title: b.title, link: link(b.linkTitle ?? '', b.linkKey, b.linkUrl) })),
+      names: home.banner.map((b) => b.title),
+    };
+  }
+  if (home.quickLinks.length) {
+    filled.banner_icon = {
+      label: 'quick links',
+      rows: home.quickLinks.map((q) => ({ banner_icon: null, icon_link: link(q.title, q.key, q.url) })),
+      names: home.quickLinks.map((q) => q.title),
+    };
+  }
+  const acf: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (!field.name || ['tab', 'message', 'accordion'].includes(field.type ?? '')) continue;
+    const fill = filled[field.name];
+    const [min, max] = [Number(field.min) || 0, Number(field.max) || 0];
+    if (fill) {
+      const rows = max ? fill.rows.slice(0, max) : fill.rows;
+      if (rows.length < fill.rows.length) warnings.push(`The homepage template takes at most ${max} ${fill.label}; left out: ${fill.names.slice(max).map((n) => `"${n}"`).join(', ')}`);
+      acf[field.name] = rows;
+    } else if (home.clearOthers) {
+      if (min > 0) warnings.push(`The homepage template requires at least ${min} "${field.name}" row(s): the seed's placeholders stay until an editor replaces them.`);
+      else acf[field.name] = ['repeater', 'flexible_content'].includes(field.type ?? '') ? [] : ['text', 'textarea', 'wysiwyg', 'email', 'url'].includes(field.type ?? '') ? '' : null;
+    }
+  }
+  const count = (name: string) => (Array.isArray(acf[name]) ? (acf[name] as unknown[]).length : 0);
+  return { acf, warnings, counts: { slides: count('banner'), quickLinks: count('banner_icon') } };
 }
 
 function entryRedirects(plan: Plan, key: string): string[] {

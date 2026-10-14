@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import * as cheerio from 'cheerio';
 import { jobPath, readJson, readJsonl, writeJson, type JobInfo, type NavLink, type SiteAnalysis, type SnapshotPage } from '@wm/core';
+import { cleanText as clean } from './records/text.js';
 
 /**
  * Reads the site's shared structure from the homepage: menus, contact details, footer notices and
@@ -13,7 +14,11 @@ export async function analyzeSite(jobId: string, log: (msg: string) => void = ()
   if (!home?.html) throw new Error('The snapshot has no homepage');
   const html = await readFile(jobPath(jobId, home.html), 'utf8');
   const titles = await Promise.all(
-    snapshot.filter((p) => p.status === 200 && p.html).slice(0, 50).map(async (p) => (await readFile(jobPath(jobId, p.html!), 'utf8')).match(/<title>([^<]*)<\/title>/i)?.[1] ?? ''),
+    snapshot
+      .filter((p) => p.status === 200 && p.html)
+      .slice(0, 50)
+      // Title text as shown (entities decoded).
+      .map(async (p) => cheerio.load((await readFile(jobPath(jobId, p.html!), 'utf8')).match(/<title>([^<]*)<\/title>/i)?.[1] ?? '', null, false).text()),
   );
   const site = job.profile === 'bjm' ? bjmSite(html, job.origin) : genericSite(html, job.origin);
   site.siteName = siteName(titles);
@@ -25,20 +30,16 @@ export async function analyzeSite(jobId: string, log: (msg: string) => void = ()
 /** Brooks Jeffrey Marketing sites (jaxha.org). */
 function bjmSite(html: string, origin: string): SiteAnalysis {
   const $ = cheerio.load(html);
-  const link = (a: cheerio.Cheerio<any>): NavLink | null => {
-    const href = a.attr('href');
-    const label = clean(a.text()) || clean(a.attr('aria-label') ?? '') || clean(a.attr('title') ?? '');
-    return href && label && !/^(javascript|tel|mailto):/i.test(href) ? { label, href: abs(href, origin) } : null;
-  };
-  const links = (selector: string) => $(selector).toArray().map((a) => link($(a))).filter((l): l is NavLink => !!l);
+  const link = (a: cheerio.Cheerio<any>) => navLink(a, origin);
+  const links = (selector: string) => $(selector).toArray().map((a) => link($(a))).filter((l): l is NavLink => !!l?.href);
 
   const main = $('#bottomNav ul.mainMenu > li')
     .toArray()
     .map((li) => {
       const item = link($(li).children('a').first());
       if (!item) return null;
-      const children = $(li).find('> ul > li > a').toArray().map((a) => link($(a))).filter((l): l is NavLink => !!l);
-      return children.length ? { ...item, children } : item;
+      const children = $(li).find('> ul > li > a').toArray().map((a) => link($(a))).filter((l): l is NavLink => !!l?.href);
+      return children.length ? { ...item, children } : item.href ? item : null;
     })
     .filter((l): l is NavLink => !!l);
 
@@ -48,7 +49,7 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
     .find('a')
     .toArray()
     .map((a) => link($(a)))
-    .filter((l): l is NavLink => !!l && !/maps\.(app\.)?goo|google\.[a-z]+\/maps/.test(l.href) && !/^\d{4}$/.test(l.label));
+    .filter((l): l is NavLink => !!l?.href && !/maps\.(app\.)?goo|google\.[a-z]+\/maps/.test(l.href) && !/^\d{4}$/.test(l.label));
   const address = clean(footerBottom.find('a[href*="maps"]').first().text()) || null;
   const phone = clean($('#footerPhone a[href^="tel:"]').first().text()) || null;
   $('#footerInfo br').replaceWith(' ');
@@ -68,7 +69,7 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
         subtitle: clean($(li).attr('data-banner-subtitle') ?? '') || null,
         link: href ? abs(href, origin) : null,
         // Slide images are served in a size variant; the file is the same id.
-        image: src ? abs(src, origin).replace(/([?&])(size|type)=[^&]*&?/g, '$1').replace(/[?&]$/, '') : null,
+        image: src ? withoutParams(abs(src, origin), ['size', 'type']) : null,
         alt: clean(img.attr('alt') ?? ''),
       };
     })
@@ -92,13 +93,9 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
 /** Unknown platforms: first <nav> list, footer links, no slides. */
 function genericSite(html: string, origin: string): SiteAnalysis {
   const $ = cheerio.load(html);
-  const toLink = (a: cheerio.Cheerio<any>) => {
-    const href = a.attr('href');
-    const label = clean(a.text());
-    return href && label ? { label, href: abs(href, origin) } : null;
-  };
-  const main = $('nav').first().find('> ul > li, ul:first > li').toArray().map((li) => toLink($(li).children('a').first())).filter((l): l is NavLink => !!l);
-  const footer = $('footer a').toArray().map((a) => toLink($(a))).filter((l): l is NavLink => !!l);
+  const toLink = (a: cheerio.Cheerio<any>) => navLink(a, origin);
+  const main = $('nav').first().find('> ul > li, ul:first > li').toArray().map((li) => toLink($(li).children('a').first())).filter((l): l is NavLink => !!l?.href);
+  const footer = $('footer a').toArray().map((a) => toLink($(a))).filter((l): l is NavLink => !!l?.href);
   return {
     siteName: null,
     menus: { top: [], main, footer: dedupe(footer), social: footer.filter((l) => /facebook|youtube|instagram|twitter|x\.com|linkedin/.test(l.href)), explore: [] },
@@ -108,12 +105,42 @@ function genericSite(html: string, origin: string): SiteAnalysis {
   };
 }
 
-/** The title segment most pages share (titles look like "Page - Site Name - Place"). */
+/**
+ * The title segment most pages share. Titles look like "Page - Site Name - Place", so when the site
+ * name and the place are on every page, the one further from the end wins.
+ */
 function siteName(titles: string[]): string | null {
-  const counts = new Map<string, number>();
-  for (const t of titles) for (const part of new Set(t.split(/\s[-|–]\s/).map(clean).filter(Boolean))) counts.set(part, (counts.get(part) ?? 0) + 1);
-  const [best] = [...counts].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length);
-  return best && best[1] >= titles.length / 2 ? best[0] : null;
+  const seen = new Map<string, { count: number; fromEnd: number }>();
+  for (const t of titles) {
+    const parts = t.split(/\s[-|–]\s/).map(clean).filter(Boolean);
+    for (const [i, part] of [...new Set(parts)].entries()) {
+      const s = seen.get(part) ?? { count: 0, fromEnd: 0 };
+      seen.set(part, { count: s.count + 1, fromEnd: s.fromEnd + (parts.length - 1 - i) });
+    }
+  }
+  const [best] = [...seen].sort(([, a], [, b]) => b.count - a.count || b.fromEnd / b.count - a.fromEnd / a.count);
+  return best && best[1].count >= titles.length / 2 ? best[0] : null;
+}
+
+/**
+ * A link as a menu item. '#' and script links get an empty href: they only open a dropdown.
+ * Phone and email links aren't menu items.
+ */
+function navLink(a: cheerio.Cheerio<any>, origin: string): NavLink | null {
+  const href = (a.attr('href') ?? '').trim();
+  const label = clean(a.text()) || clean(a.attr('aria-label') ?? '') || clean(a.attr('title') ?? '');
+  if (!label || /^(tel|mailto):/i.test(href)) return null;
+  return { label, href: !href || href.startsWith('#') || /^javascript:/i.test(href) ? '' : abs(href, origin) };
+}
+
+function withoutParams(url: string, names: string[]): string {
+  try {
+    const u = new URL(url);
+    for (const n of names) u.searchParams.delete(n);
+    return u.href;
+  } catch {
+    return url;
+  }
 }
 
 function dedupe(items: NavLink[]): NavLink[] {
@@ -128,6 +155,3 @@ function abs(href: string, origin: string): string {
   }
 }
 
-function clean(s: string): string {
-  return s.replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
-}

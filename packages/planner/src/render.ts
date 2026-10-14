@@ -36,7 +36,7 @@ export function renderPlan(plan: Plan): string {
     out.push('## Site structure', '');
     if (s.title) out.push(`Site title: "${cell(s.title)}".`, '');
     for (const menu of s.menus) {
-      out.push(`**${menu.name}** (replaced):`, '');
+      out.push(`**${menu.name}** (${menu.items.length ? 'replaced' : 'emptied: the source has no links for it'}):`, '');
       for (const item of menu.items) {
         const depth = item.parent === null ? 0 : 1 + (menu.items[item.parent]!.parent === null ? 0 : 1);
         out.push(`${'  '.repeat(depth)}- ${cell(item.title)} → \`${item.url}\``);

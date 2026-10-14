@@ -310,4 +310,68 @@ describe('buildPlan with the site structure (M3)', () => {
     });
     expect(result.site!.home.clearOthers).toBe(true);
   });
+
+  it('keeps dropdown parents without a page of their own as headings, links documents, and empties menus the source lacks', () => {
+    const fss = page('/fss', { title: 'FSS Program' });
+    const planPdf = `${origin}/plugins/show_image.php?id=12`;
+    const pdf: SnapshotFile = {
+      url: planPdf,
+      finalUrl: planPdf,
+      status: 200,
+      contentType: 'application/pdf',
+      filename: 'annual-plan.pdf',
+      bytes: 1,
+      sha256: 'h12',
+      path: 'snapshot/files/h12.pdf',
+      referencedBy: [],
+    };
+    // Shaped like a site.json from before homepage tiles were read (no `home.buttons`).
+    const site = {
+      siteName: null,
+      menus: {
+        top: [],
+        main: [
+          { label: 'Residents', href: '', children: [{ label: 'FSS Program', href: `${origin}/fss` }] },
+          { label: 'Annual Plan', href: planPdf },
+        ],
+        footer: [],
+        social: [],
+        explore: [],
+      },
+      contact: { address: null, phone: null, email: null, fax: null, hours: null },
+      footerNotices: [],
+      home: { slides: [] },
+    } as unknown as SiteAnalysis;
+    const result = buildPlan({
+      jobId: 'test',
+      version: 1,
+      source: { origin, profile: 'bjm' },
+      inputs: { extractSha256: 'test' },
+      target,
+      pages: [fss],
+      snapshotPages: [],
+      files: [pdf],
+      existing: [],
+      analysis: { site },
+    });
+
+    const main = result.site!.menus.find((m) => m.name === 'Main Menu')!.items;
+    expect(main.map((i) => [i.title, i.key, i.url, i.parent])).toEqual([
+      ['Residents', null, '#', null],
+      ['FSS Program', fss.sourceKey, '/fss/', 0],
+      // A document only the menu links to is uploaded; the executor links the item to the file.
+      ['Annual Plan', 'jaxha.org/plugins/show_image.php?id=12', '/plugins/show_image.php?id=12', null],
+    ]);
+    expect(result.media.map((m) => [m.sourceKey, m.usedBy])).toEqual([['jaxha.org/plugins/show_image.php?id=12', ['site']]]);
+    // Menus the source has no links for are still planned, so the seed's demo links are removed.
+    expect(result.site!.menus.map((m) => [m.name, m.items.length])).toEqual([
+      ['Main Menu', 3],
+      ['Top Menu', 0],
+      ['Footer Menu', 0],
+      ['Social Menu', 0],
+      ['Explore Menu', 0],
+    ]);
+    expect(result.site!.home.quickLinks).toEqual([]);
+    expect(result.site!.options).toMatchObject({ footer_address: '', footer_address_heading: '', footer_address_icon: '' });
+  });
 });
