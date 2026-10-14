@@ -379,6 +379,7 @@ export function externalBlock(name: string, attributes: Record<string, string | 
   if (!wp.getBlockType(name)) {
     const types = { string: 'string', number: 'number', boolean: 'boolean' } as const;
     wp.registerBlockType(name, {
+      apiVersion: 3,
       title: name,
       category: 'widgets',
       attributes: Object.fromEntries(Object.entries(attributes).map(([k, v]) => [k, { type: types[typeof v as keyof typeof types] }])),
