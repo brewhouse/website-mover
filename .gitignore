@@ -12,3 +12,6 @@ inputs/*
 !inputs/README.md
 snapshots/
 .local/
+
+# Local copy of the seed site codebase (read-only; contains licensed plugins)
+bases/

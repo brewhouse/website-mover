@@ -1,0 +1,23 @@
+{
+  "name": "@wm/blocks",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wordpress/block-library": "9.40.2",
+    "@wordpress/blocks": "15.13.1",
+    "jsdom": "^30.1.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@wm/wp-client": "workspace:*"
+  }
+}

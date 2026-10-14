@@ -1,0 +1,51 @@
+# Local copy of the seed site (Planeteria framework), for development and e2e tests.
+# The codebase is a copy of SEED_CODE_PATH under .local/seed (see setup.sh); the seed clone itself is never mounted.
+name: wm-seed
+
+services:
+  db:
+    image: mariadb:10.4 # matches pantheon.upstream.yml
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 3s
+      retries: 30
+
+  wordpress:
+    image: wordpress:php8.2-apache # PHP version from pantheon.upstream.yml
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${SEED_LOCAL_PORT:-8088}:80"
+    environment:
+      WM_DB_HOST: db
+      WM_HOME: "http://localhost:${SEED_LOCAL_PORT:-8088}"
+    volumes:
+      - ../../.local/seed:/var/www/html
+      - ../../wp/bridge:/var/www/html/wp-content/plugins/website-mover-bridge
+      - ./php.ini:/usr/local/etc/php/conf.d/zz-wm.ini:ro
+
+  cli:
+    image: wordpress:cli-php8.2
+    profiles: ["cli"]
+    user: "33:33"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WM_DB_HOST: db
+      WM_HOME: "http://localhost:${SEED_LOCAL_PORT:-8088}"
+    volumes:
+      - ../../.local/seed:/var/www/html
+      - ../../wp/bridge:/var/www/html/wp-content/plugins/website-mover-bridge
+      - ./php.ini:/usr/local/etc/php/conf.d/zz-wm.ini:ro
+
+volumes:
+  db:
