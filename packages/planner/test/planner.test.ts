@@ -32,6 +32,7 @@ const target: TargetInfo = {
   disabledBlocks: [],
   reservedSlugs: ['people', 'events/category'],
   redirection: false,
+  timezone: 'America/New_York',
 };
 
 function page(url: string, over: Partial<ExtractedPage> = {}): ExtractedPage {

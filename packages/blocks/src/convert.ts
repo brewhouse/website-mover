@@ -357,3 +357,33 @@ function embedAttributes(url: string): Record<string, unknown> {
   }
   return attrs;
 }
+
+/**
+ * HTML for targets that store classic content (no block editor), e.g. The Events Calendar's
+ * classic editor: the blocks' own saved HTML, without the block comment delimiters.
+ */
+export function blocksToHtml(blocks: Block[]): string {
+  return serializeBlocks(blocks)
+    .replace(/<!-- \/?wp:[^>]*?-->\n?/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * A block from a plugin the converter doesn't load (e.g. gravityforms/form). Dynamic blocks save
+ * no HTML, so a minimal registration (attributes only) is enough to create and serialize them
+ * with the block library.
+ */
+export function externalBlock(name: string, attributes: Record<string, string | number | boolean>): Block {
+  const wp = loadWordPress();
+  if (!wp.getBlockType(name)) {
+    const types = { string: 'string', number: 'number', boolean: 'boolean' } as const;
+    wp.registerBlockType(name, {
+      title: name,
+      category: 'widgets',
+      attributes: Object.fromEntries(Object.entries(attributes).map(([k, v]) => [k, { type: types[typeof v as keyof typeof types] }])),
+      save: () => null,
+    } as never);
+  }
+  return wp.createBlock(name, attributes);
+}
