@@ -27,8 +27,15 @@ export async function loadPlan(jobId: string, version?: number): Promise<{ plan:
   return { plan: Plan.parse(JSON.parse(raw.toString())), sha256: sha256(raw) };
 }
 
-export async function approvePlan(jobId: string, approvedBy: string): Promise<Approval> {
+/**
+ * Approves the latest plan. With `expect`, only if it's exactly the version and bytes the reviewer
+ * saw; otherwise nothing is written.
+ */
+export async function approvePlan(jobId: string, approvedBy: string, expect?: { version: number; sha256: string }): Promise<Approval> {
   const { plan, sha256: planSha256 } = await loadPlan(jobId);
+  if (expect && (plan.version !== expect.version || planSha256 !== expect.sha256)) {
+    throw new Error(`The latest plan is v${plan.version}, not the one reviewed (v${expect.version}): review it again`);
+  }
   const approval = Approval.parse({
     jobId,
     planVersion: plan.version,

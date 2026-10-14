@@ -166,7 +166,12 @@ describe('approval', () => {
     await writeFile(path.join(process.env.WM_DATA_DIR, 'jobs/test/plan/plan.v1.json'), JSON.stringify({ ...p, items: [] }, null, 2));
     await expect(loadApprovedPlan('test')).rejects.toThrow(/changed since/);
     // A newer version needs its own approval.
-    await savePlan({ ...p, version: 2 });
+    const sha2 = await savePlan({ ...p, version: 2 });
+    await expect(loadApprovedPlan('test')).rejects.toThrow(/approval is for plan v1/i);
+
+    // Approving from the review screen names the plan the reviewer saw; a newer one isn't approved by it.
+    await savePlan({ ...p, version: 3 });
+    await expect(approvePlan('test', 'Reviewer', { version: 2, sha256: sha2 })).rejects.toThrow(/latest plan is v3/);
     await expect(loadApprovedPlan('test')).rejects.toThrow(/approval is for plan v1/i);
   });
 });

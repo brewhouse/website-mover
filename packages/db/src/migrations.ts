@@ -1,3 +1,11 @@
+/**
+ * Schema migrations, applied once each in order (migrate.ts). Kept in code rather than .sql files so
+ * they're bundled with the web app. Names are permanent: never edit an applied migration, add one.
+ */
+export const MIGRATIONS: { name: string; sql: string }[] = [
+  {
+    name: '001_init.sql',
+    sql: `
 -- M4: users and sessions, saved targets, the job registry, stage runs, the live log, the audit trail.
 -- Job artifacts (snapshots, plans, approval, run state, reports) stay on disk under WM_DATA_DIR.
 
@@ -81,3 +89,6 @@ create table audit (
   at timestamptz not null default now()
 );
 create index audit_job on audit (job_id, id);
+`,
+  },
+];

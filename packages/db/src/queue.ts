@@ -2,7 +2,7 @@ import { PgBoss } from 'pg-boss';
 import { createRun, type Stage, type StageRun } from './jobs.js';
 import { transaction } from './pool.js';
 
-export const STAGE_QUEUE = 'stage';
+export const STAGE_QUEUE = 'stage-runs';
 
 /** What a queued stage job carries: the run row holds everything else. */
 export interface StageJobData {
@@ -20,9 +20,10 @@ export async function queue(): Promise<PgBoss> {
     b.on('error', (err) => console.error('[queue]', err));
     await b.start();
     if (!(await b.getQueue(STAGE_QUEUE))) {
-      // One active stage per job (singleton key = job id); stages aren't retried automatically, and
-      // a migration may run for hours.
-      await b.createQueue(STAGE_QUEUE, { policy: 'singleton', retryLimit: 0, expireInSeconds: 8 * 3600 });
+      // Stages aren't retried automatically, and a migration may run for hours. One active stage per
+      // job is enforced by stage_runs (a unique index), not by the queue: a queue singleton held the
+      // next stage of a chain back until the queue's slow maintenance pass.
+      await b.createQueue(STAGE_QUEUE, { retryLimit: 0, expireInSeconds: 8 * 3600 });
     }
     boss = b;
   }
@@ -39,7 +40,7 @@ export async function enqueueStages(jobId: string, stages: Stage[], requestedBy:
   const b = await queue();
   return transaction(async (client) => {
     const run = await createRun(client, jobId, stages, requestedBy);
-    await b.send(STAGE_QUEUE, { runId: run.id } satisfies StageJobData, { singletonKey: jobId });
+    await b.send(STAGE_QUEUE, { runId: run.id } satisfies StageJobData);
     return run;
   });
 }

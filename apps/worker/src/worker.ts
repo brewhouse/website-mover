@@ -13,7 +13,7 @@ const abandoned = await failAbandonedRuns();
 if (abandoned) console.log(`Marked ${abandoned} interrupted stage run(s) as failed`);
 
 const boss = await queue();
-// Different jobs run side by side; the queue's singleton key keeps each job to one stage at a time.
+// Different jobs run side by side; stage_runs keeps each job to one stage at a time.
 await boss.work<StageJobData>(STAGE_QUEUE, { localConcurrency: 2 }, async ([job]) => {
   if (job) await handle(job.data.runId);
 });
@@ -59,7 +59,7 @@ async function queueNext(run: StageRun): Promise<void> {
   if (!next) return;
   const requestedBy = (await db().query<{ requested_by: number | null }>('select requested_by from stage_runs where id = $1', [run.id])).rows[0]?.requested_by ?? null;
   const nextRun = await createRun(db(), run.jobId, [next, ...rest], requestedBy);
-  await boss.send(STAGE_QUEUE, { runId: nextRun.id } satisfies StageJobData, { singletonKey: run.jobId });
+  await boss.send(STAGE_QUEUE, { runId: nextRun.id } satisfies StageJobData);
 }
 
 function fail(message: string): never {
