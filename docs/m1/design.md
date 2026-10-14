@@ -41,7 +41,7 @@ pnpm --filter @wm/worker wm <command> --job jha
 
 - `@wm/core`: `SnapshotPage`, `SnapshotFile`, `ExtractedPage`, `sourceKey()`, job-directory helpers.
 - **Source keys:** host without `www.` + lowercased path + sorted non-tracking query (`jaxha.org/hcv-landlords`, `jaxha.org/news-view?id=263`). Stored on every created object as `_wm_source_key` (with `_wm_job_id`). Re-runs update in place.
-- **Platform profiles** (`@wm/extractor`) know a CMS's content selectors and URL patterns. `bjm` covers jaxha.org; a generic profile handles unknown sites with `<main>`/`<article>`/density heuristics.
+- **Site profiles** know a CMS's URL rules (`@wm/crawler`: discovery seeds, skip rules, file URLs) and its content selectors and kind rules (`@wm/extractor`). `bjm` covers jaxha.org; `generic` handles unknown sites with `<main>`/`<article>`/repeated-block heuristics.
 
 ## Decisions for JHA in M1
 

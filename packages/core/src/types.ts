@@ -11,6 +11,15 @@
  *   report   → report/*
  */
 
+/** `job.json`: what the scan was run against. */
+export interface JobInfo {
+  id: string;
+  origin: string;
+  /** Site profile name (e.g. "bjm", "generic"). */
+  profile: string;
+  scannedAt: string;
+}
+
 /** One fetched HTML URL. */
 export interface SnapshotPage {
   /** URL as discovered (absolute). */
@@ -22,7 +31,7 @@ export interface SnapshotPage {
   fetchedAt: string;
   /** Path of the raw HTML, relative to the job directory; null when there is no body. */
   html: string | null;
-  /** How the URL was found: 'seed', 'sitemap', 'site-map', 'link'. */
+  /** How the URL was found: 'seed', 'sitemap', 'site-map', 'link', 'profile' (profile-specific seeds), 'redirect' (a redirect target nothing else links to). */
   via: string;
 }
 
@@ -31,8 +40,9 @@ export interface SnapshotFile {
   url: string;
   finalUrl: string;
   status: number;
+  /** MIME type implied by the filename when the server sends a generic one (BJM sends Word files as application/octet-stream). */
   contentType: string;
-  /** From Content-Disposition, else the URL path. */
+  /** From Content-Disposition, else the URL path; null when neither gives one (BJM images). */
   filename: string | null;
   bytes: number;
   sha256: string | null;
@@ -76,9 +86,10 @@ export interface ExtractedPage {
   /** Main content HTML with the page title removed and every URL made absolute. */
   contentHtml: string;
   wordCount: number;
+  /** Other http(s) links (not files). mailto: and tel: links are in neither list. */
   links: { href: string; text: string }[];
   images: { src: string; alt: string }[];
-  /** Links to document files (PDF, Word, Excel, ...), including the file library. */
+  /** Links to files: every file-library link (images included) and document-extension links on any host. */
   documents: { href: string; text: string }[];
   /** Things a reviewer should know (empty content, dead links, embedded forms, ...). */
   warnings: string[];

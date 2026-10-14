@@ -10,7 +10,7 @@
  */
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { jobPath, readJson, readJsonl, type ExtractedPage, type SnapshotFile, type SnapshotPage } from '@wm/core';
+import { jobPath, readJson, readJsonl, type ExtractedPage, type JobInfo, type SnapshotFile, type SnapshotPage } from '@wm/core';
 import { scanSite } from '@wm/crawler';
 import { extractJob } from '@wm/extractor';
 import { approvePlan, buildPlan, latestPlanVersion, loadPlan, savePlan } from '@wm/planner';
@@ -50,7 +50,7 @@ switch (command) {
     console.log(await extractJob({ jobId, log: console.log }));
     break;
   case 'plan': {
-    const job = await readJson<{ origin: string; profile: string }>(jobPath(jobId, 'job.json'));
+    const job = await readJson<JobInfo>(jobPath(jobId, 'job.json'));
     const client = connectTarget(target);
     const { info, existing } = await probeTarget(client, target);
     const plan = buildPlan({

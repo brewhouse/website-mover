@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import * as cheerio from 'cheerio';
-import { jobPath, sourceKey, writeJson, writeJsonl, type SnapshotFile, type SnapshotPage } from '@wm/core';
+import { jobPath, sourceKey, writeJson, writeJsonl, type JobInfo, type SnapshotFile, type SnapshotPage } from '@wm/core';
 import { PoliteFetcher, RobotsDisallowedError, type FetchResult } from './polite-fetch.js';
 import { getSiteProfile, type SiteProfile } from './profiles.js';
 import { readSitemaps } from './sitemaps.js';
@@ -41,13 +41,6 @@ export interface ScanSummary {
   /** Requests that went over the network (the rest came from the caches). */
   networkRequests: number;
   durationMs: number;
-}
-
-export interface JobInfo {
-  id: string;
-  origin: string;
-  profile: string;
-  scannedAt: string;
 }
 
 const DEFAULT_USER_AGENT = 'website-mover/0.1 (+internal migration tool)';

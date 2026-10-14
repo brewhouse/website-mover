@@ -8,11 +8,12 @@ import {
   sourceKey,
   writeJsonl,
   type ExtractedPage,
+  type JobInfo,
   type PageKind,
   type SnapshotFile,
   type SnapshotPage,
 } from '@wm/core';
-import { DOC_EXT, getSiteProfile, isSameSite, type JobInfo } from '@wm/crawler';
+import { DOC_EXT, getSiteProfile, isSameSite } from '@wm/crawler';
 import { classify } from './classify.js';
 import { cleanContent, removeLeadingTitle } from './clean.js';
 import { createExtractProfile } from './profiles/index.js';
