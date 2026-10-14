@@ -111,7 +111,10 @@ export function buildPlan(input: BuildPlanInput): Plan {
       categories: page.kind === 'post' ? page.categories : [],
       parentKey: page.parentKey,
       redirectFrom: [...new Set(redirectFrom)],
-      warnings: page.warnings,
+      warnings:
+        page.kind === 'post' && page.date && new Date(`${page.date}T00:00:00`) > new Date()
+          ? [...page.warnings, `future-date: source date ${page.date} is in the future; published with the migration date`]
+          : page.warnings,
     });
   }
   const included = new Set(items.map((i) => i.sourceKey));

@@ -65,11 +65,19 @@ export class WpClient {
     const url = new URL(this.root + path);
     for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, String(v));
 
-    const res = await fetch(url, {
-      method,
-      headers: { Authorization: this.auth, Accept: 'application/json', ...headers },
-      body,
-    });
+    const init = { method, headers: { Authorization: this.auth, Accept: 'application/json', ...headers }, body };
+    // Reads are retried on network errors. Writes are not (a dropped connection may still have
+    // been processed); callers make writes idempotent instead.
+    const attempts = method === 'GET' ? 3 : 1;
+    let res: Response | undefined;
+    for (let attempt = 1; !res; attempt++) {
+      try {
+        res = await fetch(url, init);
+      } catch (err) {
+        if (attempt >= attempts) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      }
+    }
     const text = await res.text();
     const json = text ? safeJson(text) : null;
     if (!res.ok) {

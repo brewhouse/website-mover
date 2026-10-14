@@ -1,9 +1,9 @@
 import { createWriteStream } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { htmlToBlocks, restrictBlocks, serializeBlocks } from '@wm/blocks';
+import { mkdir, readFile } from 'node:fs/promises';
+import { htmlToBlocks, loadWordPress, restrictBlocks, serializeBlocks } from '@wm/blocks';
 import { jobPath, readJson, readJsonl, sourceKey, writeJson, type ExtractedPage } from '@wm/core';
 import { loadApprovedPlan, type Plan, type PlanItem, type PlanMedia } from '@wm/planner';
-import type { WpClient } from '@wm/wp-client';
+import { WpError, type WpClient } from '@wm/wp-client';
 import { LinkMap, rewriteLinks } from './links.js';
 import { probeTarget } from './target.js';
 
@@ -47,7 +47,11 @@ export async function loadRunState(jobId: string): Promise<RunState> {
  */
 export async function executePlan({ jobId, client, log = console.log }: { jobId: string; client: WpClient; log?: (msg: string) => void }): Promise<RunState> {
   const { plan, approval } = await loadApprovedPlan(jobId);
+  // Loading the block library blocks the event loop for seconds. Do it before any request, or
+  // pooled connections the server closes meanwhile get reused and writes fail ("other side closed").
+  loadWordPress();
   const pages = new Map((await readJsonl<ExtractedPage>(jobPath(jobId, 'extract', 'pages.jsonl'))).map((p) => [p.sourceKey, p]));
+  await mkdir(jobPath(jobId, 'run'), { recursive: true });
   const events = createWriteStream(jobPath(jobId, 'run', 'events.jsonl'), { flags: 'a' });
   const event = (type: string, data: object = {}) => events.write(`${JSON.stringify({ at: new Date().toISOString(), type, ...data })}\n`);
 
@@ -66,7 +70,8 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   };
   const save = () => writeJson(stateFile(jobId), state);
   const fail = (key: string, kind: EntityKind, step: string, err: unknown) => {
-    const error = err instanceof Error ? err.message : String(err);
+    const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+    const error = (err instanceof Error ? err.message : String(err)) + (cause ? ` (${cause.code ?? ''} ${cause.message ?? ''})`.replace('( ', '(') : '');
     state.failures.push({ sourceKey: key, kind, step, error });
     event('failure', { sourceKey: key, kind, step, error });
     log(`  ✗ ${step} ${key}: ${error}`);
@@ -146,14 +151,18 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
       meta: meta(item.sourceKey),
       ...(status ? { status } : {}),
       ...(item.type === 'post'
-        ? { date: item.date ? `${item.date}T00:00:00` : undefined, categories: item.categories.map((c) => state.categories[c]!) }
+        ? { ...postDate(item.date), categories: item.categories.map((c) => state.categories[c]!) }
         : {}),
     };
     const route = item.type === 'post' ? '/wp/v2/posts' : '/wp/v2/pages';
-    const post = previous ? await client.post<Post>(`${route}/${previous.id}`, body) : await client.post<Post>(route, body);
+    const post = previous
+      ? await client.post<Post>(`${route}/${previous.id}`, body)
+      : await createOnce(client, route, body, item.sourceKey);
     posts.set(item.sourceKey, post);
     const path = post.status === 'publish' ? new URL(post.link).pathname : item.targetPath;
-    state.entities[item.sourceKey] = { kind: item.type, id: post.id, path, action: previous ? 'updated' : 'created', warnings };
+    // "created" = made by this job (in this run or an earlier one); "updated" = existed before the job.
+    const action = previous && previous.job_id !== jobId ? 'updated' : 'created';
+    state.entities[item.sourceKey] = { kind: item.type, id: post.id, path, action, warnings };
   };
   log(`Content: ${plan.items.length} pages and posts`);
   await mapLimit(plan.items, 4, async (item) => {
@@ -199,7 +208,14 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     if (!entity) continue;
     for (const from of entry.redirectFrom) if (from !== entity.path) state.redirects.push({ from, to: entity.path });
   }
-  if (info.redirection) state.redirectImport = await importRedirects(client, state.redirects, log);
+  if (info.redirection) {
+    try {
+      state.redirectImport = await importRedirects(client, state.redirects, log);
+    } catch (err) {
+      // Redirects are still in the report's redirects.csv.
+      fail('redirects', 'page', 'redirect-import', err);
+    }
+  }
   state.finishedAt = new Date().toISOString();
   await save();
   event('finish', { entities: Object.keys(state.entities).length, failures: state.failures.length });
@@ -207,11 +223,26 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   return state;
 }
 
+/**
+ * Creates a post. If the connection drops (the server may still have saved it), looks the post up
+ * by its source key before trying again, so a retry never makes a duplicate.
+ */
+async function createOnce(client: WpClient, route: string, body: object, key: string): Promise<Post> {
+  try {
+    return await client.post<Post>(route, body);
+  } catch (err) {
+    if (err instanceof WpError) throw err; // the server answered: not a network problem
+    const saved = (await client.get<{ id: number; source_key: string | null }[]>('/website-mover/v1/entities', { types: route.endsWith('posts') ? 'post' : 'page' }))
+      .find((e) => e.source_key === key);
+    return saved ? client.post<Post>(`${route}/${saved.id}`, body) : client.post<Post>(route, body);
+  }
+}
+
 async function uploadMedia(
   client: WpClient,
   jobId: string,
   m: PlanMedia,
-  previous: { id: number; link: string } | undefined,
+  previous: { id: number; link: string; job_id: string | null } | undefined,
   alt: string,
   meta: Record<string, string>,
 ): Promise<RunEntity> {
@@ -232,7 +263,8 @@ async function uploadMedia(
       ...(m.fields.publication_date ? { publication_date: m.fields.publication_date } : {}),
     },
   });
-  return { kind: m.type, id, path: new URL(url!).pathname, action: previous ? 'updated' : 'created', warnings: [] };
+  const action = previous && previous.job_id !== meta._wm_job_id ? 'updated' : 'created';
+  return { kind: m.type, id, path: new URL(url!).pathname, action, warnings: [] };
 }
 
 /** Imports redirects into the Redirection plugin (301, exact query match), skipping ones already there. */
@@ -289,6 +321,18 @@ function imageAlts(pages: Map<string, ExtractedPage>): Map<string, string> {
     }
   }
   return alts;
+}
+
+/**
+ * Post date for a source date. WordPress schedules posts dated in the future instead of
+ * publishing them; the source shows them now, so those get the migration time (the plan flags
+ * them). That one is sent as GMT: `date` is read in the site's timezone.
+ */
+function postDate(date: string | null): { date?: string; date_gmt?: string } {
+  if (!date) return {};
+  const now = new Date();
+  // An explicit current date also publishes a post an earlier run left scheduled.
+  return new Date(`${date}T00:00:00`) > now ? { date_gmt: now.toISOString().slice(0, 19) } : { date: `${date}T00:00:00` };
 }
 
 function safeKey(url: string): string {
