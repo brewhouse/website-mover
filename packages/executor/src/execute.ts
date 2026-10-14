@@ -32,6 +32,8 @@ export interface RunState {
   failures: { sourceKey: string; kind: EntityKind | 'redirects' | 'setup'; step: string; error: string }[];
   redirects: { from: string; to: string }[];
   redirectImport: { imported: number; updated: number; skipped: number; failed: number } | null;
+  /** Site structure applied (M3): menu name → item count, options result, homepage slides set. */
+  site: { menus: Record<string, number>; options: Record<string, string>; homeSlides: number } | null;
 }
 
 type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
@@ -101,6 +103,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     failures: [],
     redirects: [],
     redirectImport: null,
+    site: null,
   };
   const save = () => writeJson(stateFile(jobId), state);
   const fail = (key: string, kind: RunState['failures'][number]['kind'], step: string, err: unknown) => {
@@ -431,6 +434,21 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   });
   await save();
 
+  // 9b. Site structure: title, theme options, homepage fields, menus (after everything they link to exists).
+  if (plan.site) {
+    try {
+      state.site = await applySite(client, plan, state, {
+        frontPage: existing.find((e) => e.front_page)?.id ?? null,
+        homeGroup: groupFor('page_template', 'template-home.php')?.key ?? null,
+        mediaId,
+        postTypeOf: (key) => plan.records.find((r) => r.sourceKey === key)?.postType ?? (plan.items.find((i) => i.sourceKey === key)?.type === 'post' ? 'post' : 'page'),
+        log,
+      });
+    } catch (err) {
+      fail('site', 'setup', 'site', err);
+    }
+  }
+
   // 10. Publish the drafts.
   const drafts = docs.filter((d) => posts.get(d.key)?.status === 'draft');
   log(`Publish: ${drafts.length} items`);
@@ -503,6 +521,67 @@ async function assertTagged(client: WpClient, post: Post, key: string, postType:
     await client.post('/website-mover/v1/trash', { ids: [post.id] }).catch(() => {});
     throw new Error(`The target did not store the source key on this ${postType} (is the bridge active and up to date?); the object was moved to the trash`);
   }
+}
+
+/** Site title, theme options, homepage slides and the framework's named menus. */
+async function applySite(
+  client: WpClient,
+  plan: Plan,
+  state: RunState,
+  ctx: {
+    frontPage: number | null;
+    homeGroup: string | null;
+    mediaId: (url: string | null) => number | undefined;
+    postTypeOf: (key: string) => string;
+    log: (msg: string) => void;
+  },
+): Promise<NonNullable<RunState['site']>> {
+  const site = plan.site!;
+  if (site.title) await client.post('/wp/v2/settings', { title: site.title });
+  const options = await client.post<Record<string, string>>('/website-mover/v1/acf/options', { values: site.options });
+
+  let homeSlides = 0;
+  if (ctx.frontPage && ctx.homeGroup && site.home.banner.length) {
+    await client.post(`/website-mover/v1/acf/field-groups/${ctx.homeGroup}/show-in-rest`, {});
+    const banner = site.home.banner.map((b) => ({
+      select_image: ctx.mediaId(b.image) ?? '',
+      title: b.title,
+      link: { title: b.linkTitle ?? '', url: (b.linkKey && state.entities[b.linkKey]?.path) || b.linkUrl || '', target: '' },
+    }));
+    await client.post(`/wp/v2/pages/${ctx.frontPage}`, { acf: { banner } });
+    homeSlides = banner.length;
+  }
+
+  // Named menus are replaced as a whole: the seed's items are demo links.
+  const menus: Record<string, number> = {};
+  const existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
+  for (const menu of site.menus) {
+    const id = existingMenus.find((m) => m.name === menu.name)?.id ?? (await client.post<{ id: number }>('/wp/v2/menus', { name: menu.name })).id;
+    for (const old of await client.get<{ id: number }[]>('/wp/v2/menu-items', { menus: id, per_page: 100 })) {
+      await client.delete(`/wp/v2/menu-items/${old.id}`, { force: 'true' });
+    }
+    const ids: number[] = [];
+    for (const [order, item] of menu.items.entries()) {
+      const entity = item.key ? state.entities[item.key] : undefined;
+      // Link to the object itself where it's a page, post or entry, so the menu follows slug changes.
+      const target =
+        entity && (entity.kind === 'page' || entity.kind === 'post' || entity.kind === 'record')
+          ? { type: 'post_type', object: ctx.postTypeOf(item.key!), object_id: entity.id }
+          : { type: 'custom', url: entity?.path || item.url };
+      const created = await client.post<{ id: number }>('/wp/v2/menu-items', {
+        title: item.title,
+        menus: id,
+        menu_order: order + 1,
+        parent: item.parent === null ? 0 : ids[item.parent] ?? 0,
+        status: 'publish',
+        ...target,
+      });
+      ids.push(created.id);
+    }
+    menus[menu.name] = ids.length;
+  }
+  ctx.log(`Site: title, ${Object.keys(site.options).length} options, ${homeSlides} homepage slides, menus ${Object.entries(menus).map(([n, c]) => `${n} (${c})`).join(', ')}`);
+  return { menus, options, homeSlides };
 }
 
 function entryRedirects(plan: Plan, key: string): string[] {

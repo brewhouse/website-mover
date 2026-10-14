@@ -1,4 +1,4 @@
-import type { ExtractedPage, FormAnalysis, FormRecord, MeetingAnalysis, RecordAnalysis, SnapshotFile, SnapshotPage } from '@wm/core';
+import type { ExtractedPage, FormAnalysis, FormRecord, MeetingAnalysis, NavLink, RecordAnalysis, SiteAnalysis, SnapshotFile, SnapshotPage } from '@wm/core';
 import { sourceKey } from '@wm/core';
 import {
   Plan,
@@ -10,7 +10,9 @@ import {
   type PlanMedia,
   type PlanPerson,
   type PlanRecord,
+  type PlanMenuItem,
   type PlanSetting,
+  type PlanSite,
   type PlanSkip,
   type PlanTable,
   type TargetInfo,
@@ -42,7 +44,7 @@ export interface BuildPlanInput {
   files: SnapshotFile[];
   existing: TargetEntity[];
   /** Output of the analyze stage (M2); without it, structured content is listed as not migrated. */
-  analysis?: { meetings?: MeetingAnalysis; forms?: FormAnalysis; records?: RecordAnalysis };
+  analysis?: { meetings?: MeetingAnalysis; forms?: FormAnalysis; records?: RecordAnalysis; site?: SiteAnalysis };
   /** Site timezone the target should have (IANA name). */
   timezone?: string;
 }
@@ -339,12 +341,15 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const alts = new Map<string, string>();
   for (const p of pages) if (included.has(p.sourceKey)) for (const img of p.images) if (img.alt) alts.set(safeKey(img.src), img.alt);
   const docInfo = new Map((records?.documents ?? []).map((d) => [safeKey(d.url), d]));
+  const slideImages = new Set((input.analysis?.site?.home.slides ?? []).map((s) => (s.image ? safeKey(s.image) : '')).filter(Boolean));
+  for (const s of input.analysis?.site?.home.slides ?? []) if (s.image && s.alt) alts.set(safeKey(s.image), s.alt);
   const media: PlanMedia[] = [];
   const byHash = new Map<string, PlanMedia>();
   for (const f of input.files) {
     if (f.status !== 200 || !f.path || !f.sha256) continue;
     const key = sourceKey(f.url);
     const usedBy = f.referencedBy.filter((k) => included.has(k));
+    if (slideImages.has(key)) usedBy.push('home');
     if (!usedBy.length) {
       notMigrated.push({
         sourceKey: key,
@@ -386,6 +391,23 @@ export function buildPlan(input: BuildPlanInput): Plan {
     settings.push({ key: 'timezone', from: target.timezone || '(UTC offset)', to: input.timezone, reason: 'Event and meeting times are in the organization\'s local time' });
   }
 
+  const site = input.analysis?.site
+    ? planSite(input.analysis.site, {
+        origin: input.source.origin,
+        keep,
+        target,
+        entries: [
+          ...items.map((i) => ({ key: i.sourceKey, path: i.targetPath, from: [pathAndQuery(i.sourceUrl), ...i.redirectFrom] })),
+          ...events.map((e) => ({ key: e.key, path: e.targetPath, from: e.redirectFrom })),
+          ...recordsPlan.map((r) => ({ key: r.sourceKey, path: r.targetPath, from: [pathAndQuery(r.sourceUrl), ...r.redirectFrom] })),
+          ...tables.map((t) => ({ key: `table:${t.key}`, path: t.targetPath, from: t.redirectFrom })),
+          ...contentTypes.map((c) => ({ key: `listing:${c.postType}`, path: c.listing.targetPath, from: c.listing.redirectFrom })),
+        ],
+        pages,
+        warnings,
+      })
+    : null;
+
   const categories = [...new Set(items.flatMap((i) => i.categories))].sort();
   const eventCategories = [...new Set(events.map((e) => e.category))].sort();
   const documentTypes = [...new Set(media.map((m) => m.documentType).filter((t): t is string => !!t))].sort();
@@ -420,6 +442,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     tables,
     documentTypes,
     settings,
+    site,
     cleanup,
     keep,
     notMigrated,
@@ -439,6 +462,78 @@ export function buildPlan(input: BuildPlanInput): Plan {
     },
     warnings,
   });
+}
+
+/** The framework's named menus and the source menus that feed them. */
+const MENUS: [name: string, from: keyof SiteAnalysis['menus']][] = [
+  ['Main Menu', 'main'],
+  ['Top Menu', 'top'],
+  ['Footer Menu', 'footer'],
+  ['Social Menu', 'social'],
+  ['Explore Menu', 'explore'],
+];
+
+interface SiteContext {
+  origin: string;
+  keep: Plan['keep'];
+  target: TargetInfo;
+  entries: { key: string; path: string; from: string[] }[];
+  pages: ExtractedPage[];
+  warnings: string[];
+}
+
+/** Menus, footer options, homepage fields and the site title from the source's shared structure. */
+function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
+  const byKey = new Map<string, { key: string | null; path: string }>();
+  for (const e of ctx.entries) for (const from of e.from) byKey.set(safeKey(new URL(from, ctx.origin).href), { key: e.key, path: e.path });
+  // Listings the framework replaces with its own pages.
+  const newsPage = ctx.keep.find((k) => /News listing/.test(k.reason));
+  const replacements: [RegExp, string | null][] = [
+    [/^\/$/, '/'],
+    [/^\/(news|press_full_list\.php)$/, newsPage ? new URL(newsPage.link).pathname : null],
+    [/^\/calendar$/, ctx.target.reservedSlugs.includes('event') ? '/events/' : null],
+  ];
+  const resolve = (href: string): { key: string | null; url: string } | null => {
+    const url = new URL(href);
+    if (url.hostname.replace(/^www\./, '') !== new URL(ctx.origin).hostname.replace(/^www\./, '')) return { key: null, url: href };
+    const hit = byKey.get(safeKey(href));
+    if (hit) return { key: hit.key, url: hit.path + url.hash };
+    for (const [re, to] of replacements) if (re.test(url.pathname.toLowerCase()) && to) return { key: null, url: to };
+    return null;
+  };
+
+  const dropped: string[] = [];
+  const menus = MENUS.map(([name, from]) => {
+    const items: PlanMenuItem[] = [];
+    const add = (link: NavLink, parent: number | null) => {
+      const target = resolve(link.href);
+      if (!target) {
+        dropped.push(`${name}: "${link.label}" (${link.href})`);
+        return;
+      }
+      items.push({ title: link.label, sourceUrl: link.href, key: target.key, url: target.url, parent });
+      const index = items.length - 1;
+      for (const child of link.children ?? []) add(child, index);
+    };
+    for (const link of site.menus[from]) add(link, null);
+    return { name, items };
+  }).filter((m) => m.items.length);
+  if (dropped.length) ctx.warnings.push(`Menu links to content that isn't migrated were left out: ${dropped.join('; ')}`);
+
+  const options: Record<string, string> = {
+    footer_address: site.contact.address ?? '',
+    footer_phone: site.contact.phone ?? '',
+    footer_email: site.contact.email ?? '',
+    footer_fax: site.contact.fax ?? '',
+  };
+  if (site.contact.hours) ctx.warnings.push(`Office hours ("${site.contact.hours}") have no place in the framework footer (theme change).`);
+  if (site.footerNotices.length) ctx.warnings.push(`${site.footerNotices.length} footer notice(s) (e.g. fair-housing statements) have no place in the framework footer (theme change).`);
+
+  const banner = site.home.slides.map((s) => {
+    const target = s.link ? resolve(s.link) : null;
+    return { title: s.title, image: s.image, linkUrl: target?.url ?? null, linkKey: target?.key ?? null, linkTitle: s.subtitle };
+  });
+  return { title: site.siteName, menus, options, home: { banner } };
 }
 
 /** Entries of forms with sensitive fields are deleted after this many days. */

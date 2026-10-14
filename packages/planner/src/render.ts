@@ -31,6 +31,21 @@ export function renderPlan(plan: Plan): string {
     out.push('## Site settings changed', '', '| Setting | Now | Becomes | Why |', '|---|---|---|---|');
     out.push(...plan.settings.map((s) => `| ${s.key} | ${s.from} | ${s.to} | ${cell(s.reason)} |`), '');
   }
+  if (plan.site) {
+    const s = plan.site;
+    out.push('## Site structure', '');
+    if (s.title) out.push(`Site title: "${cell(s.title)}".`, '');
+    for (const menu of s.menus) {
+      out.push(`**${menu.name}** (replaced):`, '');
+      for (const item of menu.items) {
+        const depth = item.parent === null ? 0 : 1 + (menu.items[item.parent]!.parent === null ? 0 : 1);
+        out.push(`${'  '.repeat(depth)}- ${cell(item.title)} → \`${item.url}\``);
+      }
+      out.push('');
+    }
+    out.push('**Theme options:** ' + Object.entries(s.options).map(([k, v]) => `${k} = ${v ? `"${cell(v)}"` : '(cleared)'}`).join(' · '), '');
+    out.push(`**Homepage slides:** ${s.home.banner.map((b) => `"${cell(b.title)}" → \`${b.linkUrl ?? '—'}\``).join(' · ')}`, '');
+  }
   if (plan.categories.length) out.push('## News categories', '', plan.categories.join(' · '), '');
 
   if (plan.events.length) {
