@@ -15,6 +15,7 @@ import {
   type PlanSite,
   type PlanSkip,
   type PlanTable,
+  type ReviewDecisions,
   type TargetInfo,
 } from './schema.js';
 import { SlugRegistry, wpSlug } from './slug.js';
@@ -47,7 +48,11 @@ export interface BuildPlanInput {
   analysis?: { meetings?: MeetingAnalysis; forms?: FormAnalysis; records?: RecordAnalysis; site?: SiteAnalysis };
   /** Site timezone the target should have (IANA name). */
   timezone?: string;
+  /** The reviewer's changes (M4). */
+  decisions?: ReviewDecisions;
 }
+
+const EXCLUDED = 'Excluded by the reviewer';
 
 /** Why a page kind isn't migrated in this milestone. */
 const NOT_MIGRATED: Record<string, string> = {
@@ -82,6 +87,14 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const records = input.analysis?.records;
   const warnings: string[] = [];
   const pageByKey = new Map(pages.map((p) => [p.sourceKey, p]));
+  const d = input.decisions;
+  const decisions = d && (d.exclude.length || d.include.length || Object.keys(d.type).length || Object.keys(d.slug).length || d.keep.length) ? d : undefined;
+  const excluded = new Set(decisions?.exclude ?? []);
+  const includedByReviewer = new Set(decisions?.include ?? []);
+  const typeOverride = decisions?.type ?? {};
+  const slugOverride = decisions?.slug ?? {};
+  // Source pages left out because the reviewer excluded them or the structured record they feed.
+  const excludedPages = new Set([...excluded].filter((k) => pageByKey.has(k)));
 
   // Existing content: keep the front page and reused framework pages; trash other demo content.
   const keep: Plan['keep'] = [];
@@ -94,24 +107,25 @@ export function buildPlan(input: BuildPlanInput): Plan {
     }
     if (!OWNED_TYPES.has(e.type)) continue;
     const entry = { id: e.id, type: e.type, title: e.title, link: e.link };
-    if (e.front_page) keep.push({ ...entry, reason: 'Front page (homepage template)' });
+    if (decisions?.keep.includes(e.id)) keep.push({ ...entry, reason: 'Kept by the reviewer' });
+    else if (e.front_page) keep.push({ ...entry, reason: 'Front page (homepage template)' });
     else if (e.template && KEEP_TEMPLATES[e.template]) keep.push({ ...entry, reason: KEEP_TEMPLATES[e.template]! });
     else cleanup.push(entry);
   }
 
   // Custom types this plan creates (their URL bases are ours, not reserved by something else).
-  const communities = (records?.communities ?? []).filter((c) => pageByKey.has(c.sourceKey));
+  const communities = (records?.communities ?? []).filter((c) => pageByKey.has(c.sourceKey) && !excluded.has(c.sourceKey));
+  const meetingList = (meetings?.meetings ?? []).filter((m) => !excluded.has(m.key));
+  const tableList = (records?.tables ?? []).filter((t) => !excluded.has(`table:${t.key}`));
+  for (const m of meetings?.meetings ?? []) if (excluded.has(m.key)) for (const k of m.sourceKeys) excludedPages.add(k);
+  for (const t of records?.tables ?? []) if (excluded.has(`table:${t.key}`)) for (const k of t.sourceKeys) excludedPages.add(k);
   const contentTypes: PlanContentType[] = [];
   const ownBases = new Set(communities.length ? ['communities'] : []);
 
   const keptSlugs = existing.filter((e) => keep.some((k) => k.id === e.id)).map((e) => e.slug);
   // Old single-segment URLs that will redirect somewhere else (meeting pages merged into events,
   // community pages, table sources) must not be handed out as new slugs: the redirect would win.
-  const movedAway = new Set([
-    ...(meetings?.meetings ?? []).flatMap((m) => m.sourceKeys),
-    ...communities.map((c) => c.sourceKey),
-    ...(records?.tables ?? []).flatMap((t) => t.sourceKeys),
-  ]);
+  const movedAway = new Set([...meetingList.flatMap((m) => m.sourceKeys), ...communities.map((c) => c.sourceKey), ...tableList.flatMap((t) => t.sourceKeys)]);
   const sourcePaths = [...movedAway].map((k) => pageByKey.get(k)).filter((p): p is ExtractedPage => !!p).map((p) => pathAndQuery(p.url));
   // Aliases (URLs that already redirected on the source) and listing pages that redirect to a
   // listing are redirect sources too.
@@ -126,7 +140,8 @@ export function buildPlan(input: BuildPlanInput): Plan {
     .map((path) => path.toLowerCase().replace(/^\/|\/$/g, ''))
     .filter((s) => s && !s.includes('/'));
   const slugs = new SlugRegistry([...WP_RESERVED, ...target.reservedSlugs.filter((s) => !ownBases.has(s)), ...keptSlugs, ...movedAwaySlugs]);
-  const claim = (key: string, preferred: string, registry = slugs) => registry.claim(ours.get(key)?.slug || preferred);
+  // An object an earlier run created keeps its slug, unless the reviewer chose a new one.
+  const claim = (key: string, preferred: string, registry = slugs) => registry.claim((!slugOverride[key] && ours.get(key)?.slug) || preferred);
 
   // Source URLs that redirected to another page are aliases of it.
   const aliases = new Map<string, string[]>();
@@ -149,34 +164,41 @@ export function buildPlan(input: BuildPlanInput): Plan {
   for (const f of forms?.forms ?? []) formsByPage.set(f.pageKey, [...(formsByPage.get(f.pageKey) ?? []), f]);
   const rebuiltForms = (key: string) => (formsByPage.get(key) ?? []).filter((f) => f.kind === 'form');
   const asItem = (p: ExtractedPage): boolean =>
-    p.kind === 'page' ||
-    p.kind === 'post' ||
-    (p.kind === 'meeting' && (indexPages.has(p.sourceKey) || unresolvedMeetings.has(p.sourceKey))) ||
-    (p.kind === 'utility' && rebuiltForms(p.sourceKey).length > 0);
+    !excludedPages.has(p.sourceKey) &&
+    (p.kind === 'page' ||
+      p.kind === 'post' ||
+      (p.kind === 'meeting' && (indexPages.has(p.sourceKey) || unresolvedMeetings.has(p.sourceKey))) ||
+      (p.kind === 'utility' && rebuiltForms(p.sourceKey).length > 0) ||
+      // The reviewer can bring in a page the rules left out, unless a structured record uses it.
+      (includedByReviewer.has(p.sourceKey) && !movedAway.has(p.sourceKey)));
+  const typeOf = (p: ExtractedPage): 'page' | 'post' => typeOverride[p.sourceKey] ?? (p.kind === 'post' ? 'post' : 'page');
 
   // Pages with a source slug first, so they keep their URL; then id-only pages; then posts.
   const migrated = pages.filter(asItem);
-  const order = (p: ExtractedPage) => (p.kind === 'post' ? 2 : p.slug ? 0 : 1);
+  const order = (p: ExtractedPage) => (typeOf(p) === 'post' ? 2 : p.slug ? 0 : 1);
   migrated.sort((a, b) => order(a) - order(b) || a.sourceKey.localeCompare(b.sourceKey));
 
   const items: PlanItem[] = [];
   for (const page of migrated) {
-    const slug = claim(page.sourceKey, wpSlug(page.slug ?? page.title));
+    const type = typeOf(page);
+    const requested = slugOverride[page.sourceKey] ? wpSlug(slugOverride[page.sourceKey]!) : null;
+    const slug = claim(page.sourceKey, requested || wpSlug(page.slug ?? page.title));
+    if (requested && slug !== requested) warnings.push(`The slug "${requested}" chosen for "${page.title}" is taken: it gets "${slug}".`);
     const targetPath = `/${slug}/`;
     const itemWarnings = [...page.warnings];
-    if (page.kind === 'post' && page.date && new Date(`${page.date}T00:00:00`) > new Date()) {
+    if (type === 'post' && page.date && new Date(`${page.date}T00:00:00`) > new Date()) {
       itemWarnings.push(`future-date: source date ${page.date} is in the future; published with the migration date`);
     }
     if (unresolvedMeetings.has(page.sourceKey)) itemWarnings.push('needs-review: meeting page the rules could not place; migrated as a page');
     items.push({
       sourceKey: page.sourceKey,
       sourceUrl: page.url,
-      type: page.kind === 'post' ? 'post' : 'page',
+      type,
       title: page.title,
       slug,
       targetPath,
       date: page.date,
-      categories: page.kind === 'post' ? page.categories : [],
+      categories: type === 'post' ? page.categories : [],
       parentKey: page.parentKey,
       redirectFrom: redirectsFor(page.sourceKey, targetPath),
       forms: rebuiltForms(page.sourceKey).map((f) => f.key),
@@ -186,7 +208,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
 
   // Events: one per meeting (The Events Calendar, single URLs under /event/).
   const eventSlugs = new SlugRegistry([]);
-  const events: PlanEvent[] = (meetings?.meetings ?? []).map((m) => {
+  const events: PlanEvent[] = meetingList.map((m) => {
     const slug = claim(m.key, wpSlug(m.title), eventSlugs);
     const targetPath = `/event/${slug}/`;
     return {
@@ -214,7 +236,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
 
   // People (board, staff): the seed's people type, single URLs under /people/.
   const peopleSlugs = new SlugRegistry([]);
-  const people: PlanPerson[] = (records?.people ?? []).map((p) => ({
+  const people: PlanPerson[] = (records?.people ?? []).filter((p) => !excluded.has(p.key)).map((p) => ({
     key: p.key,
     pageKey: p.pageKey,
     group: p.group,
@@ -296,7 +318,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const recordPages = new Set(recordsPlan.map((r) => r.sourceKey));
 
   // Tables assembled from many pages (payment standards): one page each.
-  const tables: PlanTable[] = (records?.tables ?? []).map((t) => {
+  const tables: PlanTable[] = tableList.map((t) => {
     const slug = claim(`table:${t.key}`, wpSlug(t.title));
     const targetPath = `/${slug}/`;
     return {
@@ -326,15 +348,21 @@ export function buildPlan(input: BuildPlanInput): Plan {
     ...tables.map((t) => `table:${t.key}`),
     ...contentTypes.map((c) => `listing:${c.postType}`),
   ]);
+  // A page the reviewer switched to a post (or back) is created anew; the earlier object goes too.
+  const itemTypes = new Map(items.map((i) => [i.sourceKey, i.type]));
   for (const [key, e] of ours) {
-    if (e.job_id === input.jobId && e.type !== 'attachment' && !plannedKeys.has(key)) {
-      cleanup.push({ id: e.id, type: e.type, title: e.title, link: e.link, reason: 'created by an earlier run of this job; no longer in the plan' });
+    if (e.job_id !== input.jobId || e.type === 'attachment') continue;
+    const switched = itemTypes.has(key) && itemTypes.get(key) !== e.type;
+    if (!plannedKeys.has(key) || switched) {
+      const entry = { id: e.id, type: e.type, title: e.title, link: e.link };
+      if (decisions?.keep.includes(e.id)) keep.push({ ...entry, reason: 'Kept by the reviewer' });
+      else cleanup.push({ ...entry, reason: switched ? `now migrated as a ${itemTypes.get(key)}; the earlier ${e.type} goes` : 'created by an earlier run of this job; no longer in the plan' });
     }
   }
 
   const notMigrated: PlanSkip[] = pages
     .filter((p) => !included.has(p.sourceKey) && !tablePages.has(p.sourceKey))
-    .map((p) => ({ sourceKey: p.sourceKey, sourceUrl: p.url, what: p.kind, title: p.title, reason: skipReason(p, formsByPage.get(p.sourceKey)) }));
+    .map((p) => ({ sourceKey: p.sourceKey, sourceUrl: p.url, what: p.kind, title: p.title, reason: excludedPages.has(p.sourceKey) ? EXCLUDED : skipReason(p, formsByPage.get(p.sourceKey)) }));
 
   // Files: only those used by migrated content; identical files (same hash) become one upload.
   // Image files often have no name (BJM serves them from a script), so name them after their alt text.
@@ -351,13 +379,14 @@ export function buildPlan(input: BuildPlanInput): Plan {
     const key = sourceKey(f.url);
     const usedBy = f.referencedBy.filter((k) => included.has(k));
     if (siteFiles.has(key)) usedBy.push('site');
-    if (!usedBy.length) {
+    if (includedByReviewer.has(key)) usedBy.push('reviewer');
+    if (!usedBy.length || excluded.has(key)) {
       notMigrated.push({
         sourceKey: key,
         sourceUrl: f.url,
         what: isImage(f) ? 'image' : 'document',
         title: f.filename ?? key,
-        reason: f.referencedBy.length ? 'File: only used by content not migrated' : 'File: not linked from any page',
+        reason: excluded.has(key) ? EXCLUDED : f.referencedBy.length ? 'File: only used by content not migrated' : 'File: not linked from any page',
       });
       continue;
     }
@@ -424,6 +453,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
   if (unresolvedMeetings.size) warnings.push(`${unresolvedMeetings.size} meeting pages could not be placed and are migrated as pages: review them.`);
   for (const f of planForms) if (f.sensitive.length || f.action === 'flag') warnings.push(`Form "${f.title}": ${f.reason}`);
   if (!target.redirection) warnings.push('Redirection is not active on the target: redirects are written to redirects.csv only.');
+  if (decisions) warnings.push(...staleDecisions(decisions, input, cleanup, keep));
 
   return Plan.parse({
     schema: 'website-mover/plan@1',
@@ -446,6 +476,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     documentTypes,
     settings,
     site,
+    decisions: decisions ?? null,
     cleanup,
     keep,
     notMigrated,
@@ -558,6 +589,23 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     return target ? [{ title: b.label, url: target.url, key: target.key }] : [];
   });
   return { title: site.siteName, menus, options, home: { banner, quickLinks, clearOthers: true } };
+}
+
+/** Decisions that no longer match anything the job has (the source or the analysis changed). */
+function staleDecisions(d: ReviewDecisions, input: BuildPlanInput, cleanup: PlanCleanup[], keep: Plan['keep']): string[] {
+  const known = new Set([
+    ...input.pages.map((p) => p.sourceKey),
+    ...input.files.map((f) => sourceKey(f.url)),
+    ...(input.analysis?.meetings?.meetings ?? []).map((m) => m.key),
+    ...(input.analysis?.records?.people ?? []).map((p) => p.key),
+    ...(input.analysis?.records?.tables ?? []).map((t) => `table:${t.key}`),
+  ]);
+  const ids = new Set([...cleanup, ...keep].map((e) => e.id));
+  const stale = [
+    ...[...d.exclude, ...d.include, ...Object.keys(d.type), ...Object.keys(d.slug)].filter((k) => !known.has(k)),
+    ...d.keep.filter((id) => !ids.has(id)).map((id) => `#${id}`),
+  ];
+  return stale.length ? [`Reviewer decisions that no longer match anything (ignored): ${[...new Set(stale)].join(', ')}`] : [];
 }
 
 /** Every URL the site structure points at: menu links, slide images and links, homepage tiles. */

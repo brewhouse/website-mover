@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { jobPath, readJson, writeJson } from '@wm/core';
-import { Approval, Plan } from './schema.js';
+import { Approval, Plan, ReviewDecisions } from './schema.js';
 import { renderPlan } from './render.js';
 
 const planFile = (jobId: string, version: number) => jobPath(jobId, 'plan', `plan.v${version}.json`);
@@ -54,6 +54,25 @@ export async function loadApprovedPlan(jobId: string): Promise<{ plan: Plan; app
     );
   }
   return { plan, approval };
+}
+
+const decisionsFile = (jobId: string) => jobPath(jobId, 'review', 'decisions.json');
+
+/** The reviewer's decisions for the job (empty if there are none yet). */
+export async function loadDecisions(jobId: string): Promise<ReviewDecisions> {
+  return ReviewDecisions.parse(await readJson(decisionsFile(jobId)).catch(() => ({})));
+}
+
+export async function saveDecisions(jobId: string, decisions: ReviewDecisions): Promise<void> {
+  const d = ReviewDecisions.parse(decisions);
+  // Stored sorted, so the same decisions always give the same file (and plan).
+  await writeJson(decisionsFile(jobId), {
+    exclude: [...new Set(d.exclude)].sort(),
+    include: [...new Set(d.include)].sort(),
+    type: Object.fromEntries(Object.entries(d.type).sort()),
+    slug: Object.fromEntries(Object.entries(d.slug).sort()),
+    keep: [...new Set(d.keep)].sort((a, b) => a - b),
+  });
 }
 
 function sha256(data: Buffer | string): string {

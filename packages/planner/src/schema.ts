@@ -205,7 +205,8 @@ export const PlanCleanup = z.object({
 export type PlanCleanup = z.infer<typeof PlanCleanup>;
 
 export const TargetInfo = z.object({
-  name: z.enum(['local', 'seed']),
+  /** Target name: 'local' (the Docker seed, CLI) or a target saved in the web app. */
+  name: z.string(),
   url: z.string(),
   wordpress: z.string(),
   theme: z.string(),
@@ -216,6 +217,24 @@ export const TargetInfo = z.object({
   timezone: z.string().default(''),
 });
 export type TargetInfo = z.infer<typeof TargetInfo>;
+
+/**
+ * A reviewer's changes to what the rules decided (docs/m4/design.md). The planner applies them, so
+ * slugs, redirects, menus and file usage stay consistent; each re-plan is a new version.
+ */
+export const ReviewDecisions = z.object({
+  /** Leave out: pages, posts, meetings (event key), community entries, people (person key), tables (`table:<key>`), files. */
+  exclude: z.array(z.string()).default([]),
+  /** Bring in: pages the rules left out (as pages) and files nothing links to. */
+  include: z.array(z.string()).default([]),
+  /** Page ↔ post, by source key. */
+  type: z.record(z.string(), z.enum(['page', 'post'])).default({}),
+  /** A new slug for a page or post, by source key (the source URL redirects to it). */
+  slug: z.record(z.string(), z.string()).default({}),
+  /** Existing target content (by ID) to keep instead of trashing. */
+  keep: z.array(z.number()).default([]),
+});
+export type ReviewDecisions = z.infer<typeof ReviewDecisions>;
 
 export const Plan = z.object({
   schema: z.literal('website-mover/plan@1'),
@@ -239,6 +258,8 @@ export const Plan = z.object({
   documentTypes: z.array(z.string()).default([]),
   settings: z.array(PlanSetting).default([]),
   site: PlanSite.nullable().default(null),
+  /** The reviewer decisions this version applied. */
+  decisions: ReviewDecisions.nullable().default(null),
   cleanup: z.array(PlanCleanup),
   /** Existing target content that is kept (framework pages the migration reuses). */
   keep: z.array(PlanCleanup.extend({ reason: z.string() })),

@@ -341,7 +341,8 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   const posts = new Map<string, Post>();
   const saveDoc = async (doc: ContentDoc, status?: string) => {
     const { body, warnings } = doc.build();
-    const previous = ours.get(doc.key);
+    // An earlier object of another type (the reviewer switched page ↔ post) is trashed by cleanup.
+    const previous = ours.get(doc.key)?.type === doc.postType ? ours.get(doc.key) : undefined;
     const full = { ...body, slug: doc.slug, meta: meta(doc.key), ...(status ? { status } : {}) };
     const post = previous
       ? await client.post<Post>(`${doc.route}/${previous.id}`, full)
@@ -357,7 +358,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   for (const group of [docs.filter((d) => docOrder(d) === 0), docs.filter((d) => docOrder(d) === 1)]) {
     await mapLimit(group, 4, async (doc) => {
       try {
-        await saveDoc(doc, ours.get(doc.key) ? undefined : 'draft');
+        await saveDoc(doc, ours.get(doc.key)?.type === doc.postType ? undefined : 'draft');
       } catch (err) {
         fail(doc.key, doc.kind, 'create', err);
       }

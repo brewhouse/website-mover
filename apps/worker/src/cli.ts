@@ -30,7 +30,7 @@ import {
 import { scanSite } from '@wm/crawler';
 import { extractJob } from '@wm/extractor';
 import { analyzeForms, analyzeMeetings, analyzeRecords, analyzeSite } from '@wm/analyzer';
-import { approvePlan, buildPlan, latestPlanVersion, loadPlan, savePlan } from '@wm/planner';
+import { approvePlan, buildPlan, latestPlanVersion, loadDecisions, loadPlan, savePlan } from '@wm/planner';
 import { buildReport, connectTarget, executePlan, probeTarget, type TargetName } from '@wm/executor';
 
 const { positionals, values } = parseArgs({
@@ -113,6 +113,7 @@ switch (command) {
       existing,
       analysis,
       timezone: values.timezone,
+      decisions: await loadDecisions(jobId),
     });
     const sha = await savePlan(plan);
     console.log(`Plan v${plan.version} (${sha.slice(0, 12)}):`, plan.expected);
