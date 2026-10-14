@@ -121,6 +121,9 @@ export function buildPlan(input: BuildPlanInput): Plan {
     .map((p) => ({ sourceKey: p.sourceKey, sourceUrl: p.url, what: p.kind, title: p.title, reason: NOT_MIGRATED[p.kind] ?? p.kind }));
 
   // Files: only those used by migrated content; identical files (same hash) become one upload.
+  // Image files often have no name (BJM serves them from a script), so name them after their alt text.
+  const alts = new Map<string, string>();
+  for (const p of migrated) for (const img of p.images) if (img.alt) alts.set(safeKey(img.src), img.alt);
   const media: PlanMedia[] = [];
   const byHash = new Map<string, PlanMedia>();
   for (const f of input.files) {
@@ -147,7 +150,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
       sourceKey: key,
       sourceUrl: f.url,
       type: isImage(f) ? 'image' : 'document',
-      filename: f.filename ?? key.split('/').pop()!,
+      filename: f.filename ?? fallbackName(key, alts.get(key), f.contentType),
       contentType: f.contentType,
       bytes: f.bytes,
       sha256: f.sha256,
@@ -191,6 +194,21 @@ export function buildPlan(input: BuildPlanInput): Plan {
     },
     warnings,
   });
+}
+
+/** "<alt-text-slug>.<ext>", else "<last path part>-<id>.<ext>". */
+function fallbackName(key: string, alt: string | undefined, contentType: string): string {
+  const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/bmp': 'bmp', 'image/webp': 'webp', 'application/pdf': 'pdf' }[contentType] ?? 'bin';
+  const base = (alt && wpSlug(alt, 60)) || wpSlug(key.split('/').pop()!.replace(/\.\w+(?=\?|$)/, '').replace(/[?&=]/g, '-'), 60);
+  return `${base}.${ext}`;
+}
+
+function safeKey(url: string): string {
+  try {
+    return sourceKey(url);
+  } catch {
+    return url;
+  }
 }
 
 function isImage(f: SnapshotFile): boolean {

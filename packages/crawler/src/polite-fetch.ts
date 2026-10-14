@@ -1,7 +1,12 @@
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { appendFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import robotsParserModule from 'robots-parser';
+import { dispositionFilename, extensionForMime, extensionOf } from './urls.js';
 
 // robots-parser is CommonJS (module.exports = fn) but its types declare an ES
 // default export, so under NodeNext the default import is typed as the namespace.
@@ -21,6 +26,21 @@ export interface FetchResult {
   fromCache: boolean;
 }
 
+/** A file fetched with download(): the body is streamed to disk, never held in memory. */
+export interface DownloadResult {
+  url: string;
+  /** URL after redirects. */
+  finalUrl: string;
+  status: number;
+  headers: Record<string, string>;
+  /** Basename of the saved body inside the download directory (`<sha256>.<ext>`); null when nothing was saved. */
+  file: string | null;
+  bytes: number;
+  sha256: string | null;
+  fetchedAt: string;
+  fromCache: boolean;
+}
+
 export interface PoliteFetcherOptions {
   userAgent: string;
   /** Max requests in flight at once. */
@@ -30,6 +50,8 @@ export interface PoliteFetcherOptions {
   /** Retries for network errors, 429 and 5xx. */
   retries?: number;
   timeoutMs?: number;
+  /** Timeout for one download() attempt, body included. */
+  downloadTimeoutMs?: number;
   /** When set, responses are cached here and reused on later runs. */
   cacheDir?: string;
 }
@@ -41,6 +63,14 @@ export class RobotsDisallowedError extends Error {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Remembers what download() saved in a directory (one JSON line per URL; later lines win). */
+const DOWNLOAD_INDEX = '.index.jsonl';
+
+/** Extensions of server scripts that serve files (show_image.php?id=N): never a file's own extension. */
+const SCRIPT_EXT = /^(php\d?|aspx?|ashx|jsp|cfm|cgi|pl)$/;
+
+const sizeOf = (file: string) => stat(file).then((s) => s.size, () => -1);
 
 /** Network errors (status 0), 429s and 5xx aren't cached, so a re-run tries them again. */
 const isCacheable = (status: number) => status > 0 && status !== 429 && status < 500;
@@ -55,6 +85,7 @@ export class PoliteFetcher {
   private readonly concurrency: number;
   private readonly retries: number;
   private readonly timeoutMs: number;
+  private readonly downloadTimeoutMs: number;
   private readonly cacheDir?: string;
   private intervalMs: number;
 
@@ -62,6 +93,9 @@ export class PoliteFetcher {
   private readonly waiting: (() => void)[] = [];
   private nextStartAt = 0;
   private readonly robots = new Map<string, Promise<Robots>>();
+  /** Per download directory: URL → earlier result, from that directory's index file. */
+  private readonly downloadIndexes = new Map<string, Promise<Map<string, DownloadResult>>>();
+  private indexWrites: Promise<void> = Promise.resolve();
 
   /** Requests that actually went over the network (not served from cache). */
   networkRequests = 0;
@@ -72,6 +106,7 @@ export class PoliteFetcher {
     this.intervalMs = opts.minIntervalMs ?? 250;
     this.retries = opts.retries ?? 4;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.downloadTimeoutMs = opts.downloadTimeoutMs ?? 300_000;
     this.cacheDir = opts.cacheDir;
   }
 
@@ -81,6 +116,39 @@ export class PoliteFetcher {
 
   head(url: string): Promise<FetchResult> {
     return this.request('HEAD', url);
+  }
+
+  /**
+   * GET a file and stream its body into `dir` as `<sha256>.<ext>` (extension from
+   * Content-Disposition, else the content type, else the URL unless it's a script
+   * like show_image.php). Same politeness as get(): robots.txt, concurrency
+   * slots, spacing and retries.
+   *
+   * Downloads are remembered in `dir/.index.jsonl` (URL → result), so a re-run
+   * into the same directory doesn't download again while the saved file is still
+   * there. Empty and text/html bodies aren't saved (an HTML answer means "no file").
+   */
+  async download(url: string, dir: string): Promise<DownloadResult> {
+    const robots = await this.robotsFor(url);
+    if (robots.isAllowed(url, this.userAgent) === false) throw new RobotsDisallowedError(url);
+
+    const index = await this.downloadIndex(dir);
+    const known = index.get(url);
+    if (known && (known.file === null || (await sizeOf(path.join(dir, known.file))) === known.bytes)) {
+      return { ...known, fromCache: true };
+    }
+
+    await mkdir(dir, { recursive: true });
+    const result = await this.withSlot(() => this.downloadWithRetry(url, dir));
+    if (isCacheable(result.status)) {
+      index.set(url, result);
+      const line = `${JSON.stringify({ ...result, fromCache: undefined })}\n`;
+      // Appends are chained so concurrent downloads don't interleave lines.
+      const write = this.indexWrites.then(() => appendFile(path.join(dir, DOWNLOAD_INDEX), line));
+      this.indexWrites = write.catch(() => undefined);
+      await write;
+    }
+    return result;
   }
 
   /** Parsed robots.txt for the URL's origin (fetched once per origin). */
@@ -183,6 +251,101 @@ export class PoliteFetcher {
         await sleep(this.backoffMs(attempt, null));
       }
     }
+  }
+
+  private async downloadWithRetry(url: string, dir: string): Promise<DownloadResult> {
+    for (let attempt = 0; ; attempt++) {
+      const tmp = path.join(dir, `.tmp-${randomUUID()}`);
+      try {
+        this.networkRequests++;
+        const res = await fetch(url, {
+          redirect: 'follow',
+          headers: { 'User-Agent': this.userAgent, Accept: '*/*' },
+          signal: AbortSignal.timeout(this.downloadTimeoutMs),
+        });
+        const headers = Object.fromEntries(res.headers);
+        const done = (extra: Partial<DownloadResult>): DownloadResult => ({
+          url,
+          finalUrl: res.url,
+          status: res.status,
+          headers,
+          file: null,
+          bytes: 0,
+          sha256: null,
+          fetchedAt: new Date().toISOString(),
+          fromCache: false,
+          ...extra,
+        });
+        const retryable = res.status === 429 || res.status >= 500;
+        if (retryable && attempt < this.retries) {
+          await res.body?.cancel();
+          await sleep(this.backoffMs(attempt, res.headers.get('retry-after')));
+          continue;
+        }
+        if (res.status !== 200 || !res.body) {
+          await res.body?.cancel();
+          return done({});
+        }
+
+        const hash = createHash('sha256');
+        let bytes = 0;
+        const meter = new Transform({
+          transform(chunk: Buffer, _encoding, callback) {
+            hash.update(chunk);
+            bytes += chunk.length;
+            callback(null, chunk);
+          },
+        });
+        await pipeline(Readable.fromWeb(res.body as unknown as NodeReadableStream<Uint8Array>), meter, createWriteStream(tmp));
+        const contentType = headers['content-type'] ?? '';
+        if (bytes === 0 || contentType.toLowerCase().startsWith('text/html')) {
+          await unlink(tmp);
+          return done({ bytes });
+        }
+        const sha256 = hash.digest('hex');
+        const urlExt = extensionOf(new URL(res.url || url).pathname);
+        const ext =
+          extensionOf(dispositionFilename(headers['content-disposition'])) ??
+          extensionForMime(contentType) ??
+          (urlExt && !SCRIPT_EXT.test(urlExt) ? urlExt : undefined) ??
+          'bin';
+        const file = `${sha256}.${ext}`;
+        // Same content already saved (another URL, or an earlier run): keep that copy.
+        if ((await sizeOf(path.join(dir, file))) === bytes) await unlink(tmp);
+        else await rename(tmp, path.join(dir, file));
+        return done({ file, bytes, sha256 });
+      } catch (err) {
+        await unlink(tmp).catch(() => undefined);
+        if (attempt >= this.retries) {
+          return {
+            url,
+            finalUrl: url,
+            status: 0,
+            headers: { 'x-error': String((err as Error).cause ?? err) },
+            file: null,
+            bytes: 0,
+            sha256: null,
+            fetchedAt: new Date().toISOString(),
+            fromCache: false,
+          };
+        }
+        await sleep(this.backoffMs(attempt, null));
+      }
+    }
+  }
+
+  private downloadIndex(dir: string): Promise<Map<string, DownloadResult>> {
+    let index = this.downloadIndexes.get(dir);
+    if (!index) {
+      index = readFile(path.join(dir, DOWNLOAD_INDEX), 'utf8')
+        .then((text) => {
+          const rows = text.split('\n').filter((line) => line.trim());
+          return new Map(rows.map((line) => JSON.parse(line) as DownloadResult).map((row) => [row.url, row]));
+        })
+        .catch(() => new Map<string, DownloadResult>());
+      this.downloadIndexes.set(dir, index);
+    }
+    return index;
   }
 
   private backoffMs(attempt: number, retryAfter: string | null): number {

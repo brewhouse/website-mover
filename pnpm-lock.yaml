@@ -330,6 +330,9 @@ importers:
       '@wm/core':
         specifier: workspace:*
         version: link:../core
+      '@wm/crawler':
+        specifier: workspace:*
+        version: link:../crawler
       cheerio:
         specifier: ^1.2.0
         version: 1.2.0

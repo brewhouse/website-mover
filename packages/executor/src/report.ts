@@ -24,7 +24,8 @@ export interface Report {
   target: string;
   counts: Record<EntityKind, KindCounts>;
   cleanup: { planned: number; trashed: number };
-  redirects: { total: number; imported: number | null };
+  /** `working`: answered 301 to the expected path (checked only when imported into Redirection). */
+  redirects: { total: number; imported: number | null; working: number | null; broken: { from: string; to: string; got: string }[] };
   failures: { sourceKey: string; kind: string; step: string; error: string }[];
   notLive: { sourceKey: string; path: string; status: number }[];
   invalid: { sourceKey: string; errors: string[] }[];
@@ -68,6 +69,18 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
     }
   });
 
+  let working: number | null = null;
+  const broken: Report['redirects']['broken'] = [];
+  if (state.redirectImport) {
+    working = 0;
+    await mapLimit(state.redirects, 6, async (r) => {
+      const res = await fetch(client.baseUrl + r.from, { redirect: 'manual' });
+      const location = res.headers.get('location') ?? '';
+      if (res.status === 301 && new URL(location, client.baseUrl).pathname === r.to) working!++;
+      else broken.push({ ...r, got: `${res.status} ${location}` });
+    });
+  }
+
   const report: Report = {
     jobId,
     planVersion: state.planVersion,
@@ -76,7 +89,7 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
     target: client.baseUrl,
     counts,
     cleanup: { planned: plan.cleanup.length, trashed: Object.values(state.cleanup).filter((s) => s === 'trashed' || s === 'already-trashed').length },
-    redirects: { total: state.redirects.length, imported: state.redirectImport?.imported ?? null },
+    redirects: { total: state.redirects.length, imported: state.redirectImport ? state.redirectImport.imported + state.redirectImport.skipped : null, working, broken },
     failures: state.failures,
     notLive,
     invalid,
@@ -109,11 +122,14 @@ export function renderReport(r: Report): string {
     ...rows,
     '',
     `Existing content trashed: ${r.cleanup.trashed} of ${r.cleanup.planned}. Redirects: ${r.redirects.total}` +
-      (r.redirects.imported === null ? ' (written to redirects.csv; Redirection is not active).' : `, ${r.redirects.imported} imported into Redirection.`),
+      (r.redirects.imported === null
+        ? ' (written to redirects.csv; Redirection is not active).'
+        : `, ${r.redirects.imported} in Redirection, ${r.redirects.working} answering 301 to the right page.`),
     '',
   ];
   if (r.failures.length) out.push('## Failures', '', ...r.failures.map((f) => `- ${f.kind} \`${f.sourceKey}\` at ${f.step}: ${f.error}`), '');
   if (r.notLive.length) out.push('## Not answering 200', '', ...r.notLive.map((n) => `- \`${n.path}\` → ${n.status} (${n.sourceKey})`), '');
+  if (r.redirects.broken.length) out.push('## Redirects not working', '', ...r.redirects.broken.map((b) => `- \`${b.from}\` → expected \`${b.to}\`, got ${b.got}`), '');
   if (r.invalid.length) out.push('## Block problems', '', ...r.invalid.map((i) => `- \`${i.sourceKey}\`: ${i.errors.join('; ')}`), '');
   const w = Object.entries(r.warnings).sort((a, b) => b[1] - a[1]);
   if (w.length) out.push('## Warnings', '', '| Warning | Items |', '|---|---|', ...w.map(([k, n]) => `| ${k} | ${n} |`), '');
