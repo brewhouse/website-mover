@@ -10,6 +10,7 @@
     "wm": "tsx --env-file=../../.env src/cli.ts"
   },
   "dependencies": {
+    "@wm/analyzer": "workspace:*",
     "@wm/core": "workspace:*",
     "@wm/crawler": "workspace:*",
     "@wm/executor": "workspace:*",

@@ -1,0 +1,20 @@
+{
+  "name": "@wm/analyzer",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wm/core": "workspace:*",
+    "@wm/crawler": "workspace:*",
+    "cheerio": "^1.2.0"
+  },
+  "devDependencies": {
+    "@wm/wp-client": "workspace:*"
+  }
+}

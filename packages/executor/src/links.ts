@@ -33,11 +33,21 @@ export class LinkMap {
     return /^https?:\/\//.test(urlOrKey) ? sourceKey(urlOrKey) : urlOrKey;
   }
 
+  /** Register every source path (path + query) that now lives at `target`. */
+  addPaths(paths: string[], target: string): void {
+    for (const from of paths) this.set(new URL(from, this.origin).href, target);
+  }
+
   static forPlan(plan: Plan): LinkMap {
     const map = new LinkMap(plan.source.origin);
     // The target keeps its own front page.
     map.set(new URL('/', plan.source.origin).href, '/');
     for (const item of plan.items) map.add(item, item.targetPath);
+    // Meetings, community entries, tables and listings: their source URLs are all redirect sources.
+    for (const ev of plan.events) map.addPaths(ev.redirectFrom, ev.targetPath);
+    for (const r of plan.records) map.add(r, r.targetPath);
+    for (const t of plan.tables) map.addPaths(t.redirectFrom, t.targetPath);
+    for (const ct of plan.contentTypes) map.addPaths(ct.listing.redirectFrom, ct.listing.targetPath);
     return map;
   }
 }

@@ -9,6 +9,7 @@ interface BridgeStatus {
   active_plugins: Record<string, string>;
   disabled_blocks: string[];
   permalinks: string;
+  timezone: string;
   reserved_slugs: string[];
 }
 
@@ -42,6 +43,7 @@ export async function probeTarget(
       disabledBlocks: status.disabled_blocks,
       reservedSlugs: status.reserved_slugs,
       redirection: 'redirection' in status.active_plugins,
+      timezone: status.timezone,
     },
     existing,
   };

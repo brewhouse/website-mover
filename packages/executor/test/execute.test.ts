@@ -17,7 +17,7 @@ it('refuses to execute content that changed after the plan was approved', async 
     version: 1,
     source: { origin: 'https://example.org', profile: 'generic' },
     inputs: { extractSha256: createHash('sha256').update(await import('node:fs').then((fs) => fs.readFileSync(extract))).digest('hex') },
-    target: { name: 'local', url: 'http://localhost:8088', wordpress: '7.0.4', theme: 't', permalinks: '/%postname%/', disabledBlocks: [], reservedSlugs: [], redirection: false },
+    target: { name: 'local', url: 'http://localhost:8088', wordpress: '7.0.4', theme: 't', permalinks: '/%postname%/', disabledBlocks: [], reservedSlugs: [], redirection: false, timezone: 'UTC' },
     pages: [],
     snapshotPages: [],
     files: [],

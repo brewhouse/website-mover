@@ -93,6 +93,7 @@ function wm_bridge_status() {
 		'disabled_blocks' => array_values( (array) get_option( 'dubeb_disabled_blocks', array() ) ),
 		'upload_max_size' => wp_max_upload_size(),
 		'permalinks'      => get_option( 'permalink_structure' ),
+		'timezone'        => get_option( 'timezone_string' ) ?: 'UTC' . ( (float) get_option( 'gmt_offset' ) >= 0 ? '+' : '' ) . get_option( 'gmt_offset' ),
 		'front_page'      => (int) get_option( 'page_on_front' ),
 		// Slugs WordPress uses for post type and taxonomy URLs; pages must not take them.
 		'reserved_slugs'  => wm_bridge_reserved_slugs(),

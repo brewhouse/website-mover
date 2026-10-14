@@ -9,6 +9,13 @@ defined( 'ABSPATH' ) || exit;
 add_action(
 	'init',
 	function () {
+		// Core REST only exposes `meta` for post types that support custom fields (the seed's
+		// `people` type doesn't). While the bridge is active, every public type does.
+		foreach ( get_post_types( array( 'public' => true ) ) as $post_type ) {
+			if ( ! post_type_supports( $post_type, 'custom-fields' ) ) {
+				add_post_type_support( $post_type, 'custom-fields' );
+			}
+		}
 		foreach ( array( '_wm_source_key', '_wm_job_id' ) as $key ) {
 			register_post_meta(
 				'',

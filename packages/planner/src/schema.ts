@@ -15,6 +15,8 @@ export const PlanItem = z.object({
   parentKey: z.string().nullable(),
   /** Source URLs (path + query) that must 301 here because the URL changes. */
   redirectFrom: z.array(z.string()),
+  /** Forms (FormRecord keys) rebuilt in the forms plugin and placed where the source form was. */
+  forms: z.array(z.string()).default([]),
   warnings: z.array(z.string()),
 });
 export type PlanItem = z.infer<typeof PlanItem>;
@@ -32,10 +34,125 @@ export const PlanMedia = z.object({
   path: z.string(),
   usedBy: z.array(z.string()),
   /** Values for the seed's "Media Library" field group. */
-  fields: z.object({ index_for_library: z.boolean(), publication_date: z.string().nullable() }),
+  fields: z.object({
+    index_for_library: z.boolean(),
+    publication_date: z.string().nullable(),
+    /** The seed's library_select choice. */
+    library_select: z.string().nullable().default(null),
+  }),
+  /** resource_type term (Document Directory). */
+  documentType: z.string().nullable().default(null),
   redirectFrom: z.array(z.string()),
 });
 export type PlanMedia = z.infer<typeof PlanMedia>;
+
+/** A meeting or event: an Events Calendar event (M2). */
+export const PlanEvent = z.object({
+  /** MeetingRecord key; also the event's `_wm_source_key`. */
+  key: z.string(),
+  title: z.string(),
+  slug: z.string(),
+  targetPath: z.string(),
+  date: z.string(),
+  startTime: z.string().nullable(),
+  endTime: z.string().nullable(),
+  category: z.string(),
+  kind: z.string(),
+  location: z.string().nullable(),
+  cancelled: z.boolean(),
+  /** Merged source pages (first = primary); all redirect here. */
+  sourceKeys: z.array(z.string()),
+  newsKeys: z.array(z.string()),
+  documents: z.array(z.object({ url: z.string(), text: z.string(), role: z.string() })),
+  recordings: z.array(z.string()),
+  redirectFrom: z.array(z.string()),
+  confidence: z.enum(['high', 'low']),
+  warnings: z.array(z.string()),
+});
+export type PlanEvent = z.infer<typeof PlanEvent>;
+
+/** A person (board member, staff): the seed's `people` type. */
+export const PlanPerson = z.object({
+  key: z.string(),
+  pageKey: z.string(),
+  group: z.enum(['board', 'staff']),
+  name: z.string(),
+  slug: z.string(),
+  role: z.string().nullable(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  /** Source URL of the photo (a planned media entry). */
+  photo: z.string().nullable(),
+  bio: z.string().nullable(),
+  order: z.number(),
+});
+export type PlanPerson = z.infer<typeof PlanPerson>;
+
+/** A web form rebuilt in the forms plugin (or flagged). */
+export const PlanForm = z.object({
+  key: z.string(),
+  pageKey: z.string(),
+  action: z.enum(['rebuild', 'flag']),
+  title: z.string(),
+  description: z.string().nullable(),
+  fields: z.array(z.record(z.string(), z.unknown())),
+  sensitive: z.array(z.string()),
+  /** Entries deleted after this many days (forms with sensitive fields). */
+  retentionDays: z.number().nullable(),
+  uploads: z.boolean(),
+  /** Add the forms plugin's CAPTCHA (the source form had one). */
+  captcha: z.boolean().default(false),
+  reason: z.string(),
+});
+export type PlanForm = z.infer<typeof PlanForm>;
+
+/** An entry of a custom type the tool creates (M2: communities). */
+export const PlanRecord = z.object({
+  sourceKey: z.string(),
+  sourceUrl: z.string(),
+  postType: z.string(),
+  title: z.string(),
+  slug: z.string(),
+  targetPath: z.string(),
+  /** ACF values, keyed by field name. */
+  fields: z.record(z.string(), z.string()),
+  term: z.string().nullable(),
+  photo: z.string().nullable(),
+  redirectFrom: z.array(z.string()),
+});
+export type PlanRecord = z.infer<typeof PlanRecord>;
+
+/** A custom post type + taxonomy + field group the bridge creates through ACF. */
+export const PlanContentType = z.object({
+  postType: z.string(),
+  label: z.string(),
+  singular: z.string(),
+  rewriteSlug: z.string(),
+  taxonomy: z.object({ name: z.string(), label: z.string(), singular: z.string() }).nullable(),
+  /** field name → label (verbatim source label). */
+  fields: z.record(z.string(), z.string()),
+  /** Listing page for the type (title, slug, path) and the source URLs redirected to it. */
+  listing: z.object({ title: z.string(), slug: z.string(), targetPath: z.string(), redirectFrom: z.array(z.string()) }),
+});
+export type PlanContentType = z.infer<typeof PlanContentType>;
+
+/** A page holding a table assembled from many source pages. */
+export const PlanTable = z.object({
+  key: z.string(),
+  title: z.string(),
+  slug: z.string(),
+  targetPath: z.string(),
+  columns: z.array(z.string()),
+  rows: z.array(z.array(z.string())),
+  notes: z.array(z.string()),
+  sourceKeys: z.array(z.string()),
+  redirectFrom: z.array(z.string()),
+});
+export type PlanTable = z.infer<typeof PlanTable>;
+
+/** A site setting the plan changes (shown with its current value for review). */
+export const PlanSetting = z.object({ key: z.string(), from: z.string(), to: z.string(), reason: z.string() });
+export type PlanSetting = z.infer<typeof PlanSetting>;
 
 /** Source content this plan leaves out, and why. */
 export const PlanSkip = z.object({
@@ -53,6 +170,8 @@ export const PlanCleanup = z.object({
   type: z.string(),
   title: z.string(),
   link: z.string(),
+  /** Why it goes (default: seed demo content). */
+  reason: z.string().optional(),
 });
 export type PlanCleanup = z.infer<typeof PlanCleanup>;
 
@@ -65,6 +184,7 @@ export const TargetInfo = z.object({
   disabledBlocks: z.array(z.string()),
   reservedSlugs: z.array(z.string()),
   redirection: z.boolean(),
+  timezone: z.string().default(''),
 });
 export type TargetInfo = z.infer<typeof TargetInfo>;
 
@@ -75,11 +195,20 @@ export const Plan = z.object({
   createdAt: z.string(),
   source: z.object({ origin: z.string(), profile: z.string() }),
   /** sha256 of extract/pages.jsonl: execution refuses content other than what was planned and approved. */
-  inputs: z.object({ extractSha256: z.string() }),
+  inputs: z.object({ extractSha256: z.string(), analysisSha256: z.record(z.string(), z.string()).default({}) }),
   target: TargetInfo,
   items: z.array(PlanItem),
   media: z.array(PlanMedia),
   categories: z.array(z.string()),
+  events: z.array(PlanEvent).default([]),
+  eventCategories: z.array(z.string()).default([]),
+  people: z.array(PlanPerson).default([]),
+  forms: z.array(PlanForm).default([]),
+  contentTypes: z.array(PlanContentType).default([]),
+  records: z.array(PlanRecord).default([]),
+  tables: z.array(PlanTable).default([]),
+  documentTypes: z.array(z.string()).default([]),
+  settings: z.array(PlanSetting).default([]),
   cleanup: z.array(PlanCleanup),
   /** Existing target content that is kept (framework pages the migration reuses). */
   keep: z.array(PlanCleanup.extend({ reason: z.string() })),
@@ -92,6 +221,11 @@ export const Plan = z.object({
     categories: z.number(),
     redirects: z.number(),
     cleanup: z.number(),
+    events: z.number().default(0),
+    people: z.number().default(0),
+    forms: z.number().default(0),
+    records: z.number().default(0),
+    tables: z.number().default(0),
   }),
   warnings: z.array(z.string()),
 });

@@ -240,6 +240,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@wm/analyzer':
+        specifier: workspace:*
+        version: link:../../packages/analyzer
       '@wm/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -267,6 +270,22 @@ importers:
       playwright:
         specifier: 1.64.0
         version: 1.64.0
+
+  packages/analyzer:
+    dependencies:
+      '@wm/core':
+        specifier: workspace:*
+        version: link:../core
+      '@wm/crawler':
+        specifier: workspace:*
+        version: link:../crawler
+      cheerio:
+        specifier: ^1.2.0
+        version: 1.2.0
+    devDependencies:
+      '@wm/wp-client':
+        specifier: workspace:*
+        version: link:../wp-client
 
   packages/blocks:
     dependencies:
@@ -339,6 +358,9 @@ importers:
 
   packages/planner:
     dependencies:
+      '@wm/analyzer':
+        specifier: workspace:*
+        version: link:../analyzer
       '@wm/core':
         specifier: workspace:*
         version: link:../core

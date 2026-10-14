@@ -1,5 +1,5 @@
 import { writeFile } from 'node:fs/promises';
-import { validateSerialized } from '@wm/blocks';
+import { externalBlock, validateSerialized } from '@wm/blocks';
 import { jobPath, writeJson } from '@wm/core';
 import { loadPlan } from '@wm/planner';
 import type { WpClient } from '@wm/wp-client';
@@ -37,11 +37,19 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
   const state = await loadRunState(jobId);
   const { plan } = await loadPlan(jobId, state.planVersion);
   const blank = (): KindCounts => ({ planned: 0, created: 0, updated: 0, failed: 0, live: 0, invalidBlocks: 0 });
-  const counts: Record<EntityKind, KindCounts> = { page: blank(), post: blank(), document: blank(), image: blank() };
+  const counts: Record<EntityKind, KindCounts> = {
+    page: blank(), post: blank(), document: blank(), image: blank(), event: blank(), person: blank(), form: blank(), record: blank(),
+  };
   counts.page.planned = plan.expected.pages;
   counts.post.planned = plan.expected.posts;
   counts.document.planned = plan.expected.documents;
   counts.image.planned = plan.expected.images;
+  counts.event.planned = plan.expected.events;
+  counts.person.planned = plan.expected.people;
+  counts.form.planned = plan.expected.forms;
+  counts.record.planned = plan.expected.records;
+  // Plugin blocks the content uses (forms) must be known to the validator.
+  if (plan.forms.some((f) => f.action === 'rebuild')) externalBlock('gravityforms/form', { formId: '', title: false });
   // An item failed if the run left nothing for it; later-step failures (relink, publish, redirect
   // import) are listed in the report but don't make an existing object count as failed.
   for (const key of new Set(state.failures.filter((f) => f.kind in counts && !state.entities[f.sourceKey]).map((f) => f.sourceKey))) {
@@ -59,9 +67,13 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
       const kind = w.replace(/\d+/g, 'N').replace(/:.*$/, '');
       warnings[kind] = (warnings[kind] ?? 0) + 1;
     }
-    const res = await fetch(client.baseUrl + e.path, { method: e.kind === 'page' || e.kind === 'post' ? 'GET' : 'HEAD', redirect: 'manual' });
-    if (res.status === 200) counts[e.kind].live++;
-    else notLive.push({ sourceKey: key, path: e.path, status: res.status });
+    if (e.path) {
+      const res = await fetch(client.baseUrl + e.path, { method: e.kind === 'document' || e.kind === 'image' ? 'HEAD' : 'GET', redirect: 'manual' });
+      if (res.status === 200) counts[e.kind].live++;
+      else notLive.push({ sourceKey: key, path: e.path, status: res.status });
+    } else {
+      counts[e.kind].live++; // no URL of its own (forms): existence is what was checked
+    }
     if (e.kind === 'page' || e.kind === 'post') {
       const post = await client.get<{ content: { raw: string } }>(`/wp/v2/${e.kind}s/${e.id}`, { context: 'edit', _fields: 'content' });
       const v = validateSerialized(post.content.raw);
@@ -118,7 +130,7 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
 }
 
 export function renderReport(r: Report): string {
-  const rows = (Object.entries(r.counts) as [EntityKind, KindCounts][]).map(
+  const rows = (Object.entries(r.counts) as [EntityKind, KindCounts][]).filter(([, c]) => c.planned || c.created || c.updated || c.failed).map(
     ([kind, c]) => `| ${kind} | ${c.planned} | ${c.created} | ${c.updated} | ${c.failed} | ${c.planned - c.created - c.updated - c.failed} | ${c.live} | ${c.invalidBlocks} |`,
   );
   const out = [
