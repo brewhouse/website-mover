@@ -6,6 +6,11 @@
  * manual check in the WordPress 7.0 editor.
  *
  *   pnpm --filter @wm/blocks exec tsx scripts/sample-post.ts
+ *
+ * With --seed, only blocks the local seed allows are used (its disabled list is read
+ * through the bridge), as the real migration does:
+ *
+ *   pnpm --filter @wm/blocks exec tsx --env-file=../../.env scripts/sample-post.ts --seed
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import {
@@ -15,10 +20,12 @@ import {
   group,
   htmlToBlocks,
   loadWordPress,
+  restrictBlocks,
   serializeBlocks,
   validateSerialized,
   type Block,
 } from '../src/index.js';
+import { localSeedClient } from '@wm/wp-client';
 
 const source = new URL('../test/fixtures/sample-post.html', import.meta.url);
 const outDir = new URL('../../../snapshots/blocks/', import.meta.url);
@@ -64,6 +71,12 @@ for (const node of Array.from(doc.body.childNodes)) {
   }
 }
 flush();
+
+if (process.argv.includes('--seed')) {
+  const { disabled_blocks } = await localSeedClient().get<{ disabled_blocks: string[] }>('/website-mover/v1/status');
+  const restricted = restrictBlocks(blocks, disabled_blocks, (w) => console.log(`  ${w}`));
+  blocks.splice(0, blocks.length, ...restricted);
+}
 
 const markup = serializeBlocks(blocks);
 const convertMs = performance.now() - t;

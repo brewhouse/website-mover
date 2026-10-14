@@ -136,7 +136,20 @@ A screenshot is written to `snapshots/editor-check/editor.png`.
 
 **With the seed's real settings (seed DB imported): FAIL, because blocks are disabled, not because they're invalid.** The seed's `disable-unused-block-editor-blocks` setting turns off `core/cover`, `core/button`, `core/separator`, `core/preformatted`, `core/code`, `core/details`, `core/gallery`, `core/file`, `core/video`, `core/audio`, `core/pullquote` and others. The same post then has `invalid: []` but `missing: 5`: the editor shows "Your site doesn't include support for the "core/cover" block" for the cover, separator, preformatted block and both buttons.
 
-Either the seed re-enables the blocks we use, or the converter only emits blocks the seed allows (preflight reads `dubeb_disabled_blocks`). This is waiting on a decision; see PLAN §3.
+**Decided: honor the seed's settings.** `restrictBlocks(blocks, disabled)` (`src/restrict.ts`) rebuilds each disabled block from allowed ones with `createBlock`, and reports every substitution as a warning:
+- cover → image + its content
+- buttons/button → one link paragraph per button
+- separator → dropped
+- preformatted/code → paragraph
+- embed → link
+- any other type → `core/html`, or dropped if that's disabled too
+
+The bridge's `GET /status` now returns the seed's `disabled_blocks`. With the seed's real list applied (`scripts/sample-post.ts --seed`), the editor check passes:
+
+```
+storedExactly: true   blocks: 45   invalid: []   warnings: 0   missing: 0   dirtyOnOpen: false
+PASS
+```
 
 **Seed finding:** opening *any* post in the editor first gave "There has been a critical error". `wp-sheet-editor-media-library-premium` 1.10.1 calls `EnableMediaReplace\Replacer`, which Enable Media Replace 4.1.5 no longer has. The local setup skips that plugin. If both are active on the hosted seed, its post editor is broken too. Check this in M1 preflight.
 

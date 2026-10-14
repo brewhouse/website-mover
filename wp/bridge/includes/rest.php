@@ -79,6 +79,8 @@ function wm_bridge_status() {
 			'version' => GFForms::$version,
 		) : null,
 		'active_plugins'  => $active,
+		// Block types switched off in the editor (Disable Unused Block Editor Blocks).
+		'disabled_blocks' => array_values( (array) get_option( 'dubeb_disabled_blocks', array() ) ),
 		'upload_max_size' => wp_max_upload_size(),
 	);
 }

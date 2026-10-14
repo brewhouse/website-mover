@@ -40,7 +40,7 @@ Optional advanced inputs: approved sitemap (CSV/XLSX), project profile + brief, 
 2. **JHA style guide PDF**: expected the week of 2026-10-13. Needed for M3 only; M1 and M2 don't wait on it.
 3. ~~JHA approved sitemap~~: **decided, there is no separate one.** The goal is a lift-and-shift, so the sitemap *is* the existing site's structure (§6.6).
 4. ~~Seed site URL + Application Password~~: **in `.env` and checked** (administrator, `unfiltered_html`, not password-locked). **Still to do:** the team adds `wp/bridge` to the seed's Pantheon codebase, and activates Redirection (inactive on the seed) before M1 writes to it.
-5. **New, blocks the seed disables.** The seed turns off `core/cover`, `core/button`, `core/separator`, `core/preformatted`, `core/code`, `core/details`, `core/gallery`, `core/file`, `core/video`, `core/audio` and more in the editor. Content using them shows as "not supported" there. Either the team re-enables the ones we need, or the converter avoids them (§6.9). Waiting on a decision.
+5. ~~Blocks the seed disables~~: **decided, honor whatever the seed switches off.** The converter reads the seed's disabled list (bridge `GET /status`) and rebuilds disabled blocks from allowed ones (`restrictBlocks`, §6.9). Each substitution is a warning in the report.
 6. **New, demo content in the seed.** The seed holds city-seed demo/test content: 4 posts, 13 pages, 5 events, 4 alerts, 4 forms, placeholder options. Default: the migration lists it in the plan and removes it on approval.
 7. ~~Seed plugin stack~~: **resolved.** ACF Pro 6.3.8, Gravity Forms 3.1, Redirection 5.5, Yoast 24, Ajax Search Pro 4.27 (search; PDF indexing still to be checked), The Events Calendar (installed but **unused** by the theme).
 8. ~~OpenAI model~~: **resolved** (`gpt-6-astra`).
@@ -205,7 +205,7 @@ Always stripped: `<script>`, inline event handlers, `javascript:` URLs, tracking
 - **Packages:** loaded as CommonJS under jsdom, one registry, about 4.4 s cold start, about 19 ms per 2.5 KB page warm. So the worker keeps one converter per process.
 - **Images and links:** rebuilt on the `Block[]` tree with `createBlock`, never by regex on serialized markup.
 - **Verify:** check `content.raw` byte for byte after saving, then run `validateSerialized`, plus `e2e/editor-check.ts` (the real editor) on a sample.
-- **Preflight:** read the seed's disabled blocks (`dubeb_disabled_blocks`).
+- **Honor the seed's disabled blocks** (decided): `restrictBlocks` replaces each disabled type with allowed blocks, e.g. cover → image + content, buttons → links, separator → dropped, code → paragraph, others → `core/html`. With the JHA seed's list, the sample post passes the real-editor check.
 - **Before M1:** `rawHandler` is not a sanitizer, so M1 adds an allowlist sanitizer.
 - **JHA extras:** about 7,300 inline styles to drop, Outlook Safe Links to unwrap, 195 pages with dead Teams/RingCentral links to flag.
 

@@ -7,6 +7,7 @@ import {
   group,
   htmlToBlocks,
   loadWordPress,
+  restrictBlocks,
   serializeBlocks,
   validateSerialized,
   type Block,
@@ -208,5 +209,33 @@ describe('validateSerialized', () => {
     ]);
     expect(report.errors[0].messages.join('\n')).toContain('<h3 class="wp-block-heading">Wrong level</h3>');
     expect(report.warnings.map((w) => [w.kind, w.path])).toEqual([['html', '5']]);
+  });
+});
+
+describe('restrictBlocks', () => {
+  it('rebuilds blocks the target disables from allowed ones, keeping their content', () => {
+    const tree = [
+      cover({ url: 'https://example.com/hero.jpg', alt: 'Families', innerBlocks: htmlToBlocks('<h2>Find a Home</h2>') }),
+      buttons([{ text: 'Apply now', url: 'https://example.com/apply?a=1&b=2' }]),
+      ...htmlToBlocks(
+        '<hr><pre>line 1\nline 2</pre><pre><code>x = 1</code></pre>' +
+          '<p>https://www.youtube.com/watch?v=dQw4w9WgXcQ</p>' +
+          '<table><tbody><tr><td>Studio</td><td>$900</td></tr></tbody></table>',
+      ),
+    ];
+    // The seed switches off core/button but not core/buttons; core/table has no
+    // dedicated fallback, so it exercises the core/html path.
+    const disabled = ['core/cover', 'core/button', 'core/separator', 'core/preformatted', 'core/code', 'core/embed', 'core/table'];
+    const warnings: string[] = [];
+
+    const { markup, report } = throughEditor(restrictBlocks(tree, disabled, (w) => warnings.push(w)));
+
+    for (const name of [...disabled, 'core/buttons']) expect(report.names).not.toContain(name);
+    for (const kept of ['https://example.com/hero.jpg', 'Find a Home', 'href="https://example.com/apply?a=1&amp;b=2"', 'Apply now', 'line 1<br>line 2', '<code>x = 1</code>', 'dQw4w9WgXcQ', 'Studio']) {
+      expect(markup).toContain(kept);
+    }
+    for (const name of disabled.filter((n) => n !== 'core/button')) {
+      expect(warnings.some((w) => w.startsWith(name))).toBe(true);
+    }
   });
 });
