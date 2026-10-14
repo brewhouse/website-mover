@@ -219,6 +219,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
       sensitive: f.sensitive,
       retentionDays: f.sensitive.length ? SENSITIVE_RETENTION_DAYS : null,
       uploads: f.uploads,
+      captcha: f.captcha,
       reason:
         f.kind === 'form'
           ? f.sensitive.length
@@ -232,7 +233,9 @@ export function buildPlan(input: BuildPlanInput): Plan {
   if (communities.length) {
     const labels = new Map<string, string>();
     for (const c of communities) for (const label of Object.keys(c.fields)) labels.set(fieldName(label), label);
-    const listingPage = pages.find((p) => p.kind === 'listing' && /^\/locations(\/|$)/.test(new URL(p.url).pathname));
+    // Title from the source's list view (the map view is the same data drawn on a map).
+    const listings = pages.filter((p) => p.kind === 'listing' && /^\/locations(\/|$)/.test(new URL(p.url).pathname));
+    const listingPage = listings.find((p) => /\/list$/.test(new URL(p.url).pathname)) ?? listings[0];
     const listingSlug = claim('listing:community', 'communities');
     contentTypes.push({
       postType: 'community',

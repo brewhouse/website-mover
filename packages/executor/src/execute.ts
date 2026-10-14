@@ -222,6 +222,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
         description: f.description ?? '',
         fields: f.fields,
         sensitive_fields: f.sensitive,
+        captcha: f.captcha,
         ...(f.retentionDays ? { retention_days: f.retentionDays } : {}),
       });
       formIds.set(f.key, res.id);
@@ -549,9 +550,14 @@ function placeForms(blocks: Block[], formIds: number[]): Block[] {
     const marker = b.name === 'core/paragraph' && new RegExp(`^${FORM_MARKER}-\\d+$`).test(String(b.attributes.content ?? '').trim());
     if (!marker) return [b];
     const id = remaining.shift();
-    return id === undefined ? [] : [externalBlock('gravityforms/form', { formId: String(id) })];
+    return id === undefined ? [] : [formBlock(id)];
   });
-  return [...out, ...remaining.map((id) => externalBlock('gravityforms/form', { formId: String(id) }))];
+  return [...out, ...remaining.map(formBlock)];
+}
+
+/** The form's block, without its own title (the page already has it). */
+function formBlock(id: number): Block {
+  return externalBlock('gravityforms/form', { formId: String(id), title: false });
 }
 
 function escapeHtml(s: string): string {

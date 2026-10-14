@@ -49,7 +49,7 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
   counts.form.planned = plan.expected.forms;
   counts.record.planned = plan.expected.records;
   // Plugin blocks the content uses (forms) must be known to the validator.
-  if (plan.forms.some((f) => f.action === 'rebuild')) externalBlock('gravityforms/form', { formId: '' });
+  if (plan.forms.some((f) => f.action === 'rebuild')) externalBlock('gravityforms/form', { formId: '', title: false });
   // An item failed if the run left nothing for it; later-step failures (relink, publish, redirect
   // import) are listed in the report but don't make an existing object count as failed.
   for (const key of new Set(state.failures.filter((f) => f.kind in counts && !state.entities[f.sourceKey]).map((f) => f.sourceKey))) {

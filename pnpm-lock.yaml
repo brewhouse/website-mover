@@ -282,6 +282,10 @@ importers:
       cheerio:
         specifier: ^1.2.0
         version: 1.2.0
+    devDependencies:
+      '@wm/wp-client':
+        specifier: workspace:*
+        version: link:../wp-client
 
   packages/blocks:
     dependencies:

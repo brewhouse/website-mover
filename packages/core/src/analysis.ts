@@ -72,6 +72,8 @@ export interface FormRecord {
   sensitive: string[];
   /** The form accepts file uploads. */
   uploads: boolean;
+  /** The source form has a CAPTCHA (rebuilt with the forms plugin's own). */
+  captcha: boolean;
   /** How the source builds it: native <form>, jQuery formBuilder JSON, etc. */
   implementation: string;
   warnings: string[];

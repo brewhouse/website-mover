@@ -100,6 +100,8 @@ export const PlanForm = z.object({
   /** Entries deleted after this many days (forms with sensitive fields). */
   retentionDays: z.number().nullable(),
   uploads: z.boolean(),
+  /** Add the forms plugin's CAPTCHA (the source form had one). */
+  captcha: z.boolean().default(false),
   reason: z.string(),
 });
 export type PlanForm = z.infer<typeof PlanForm>;
