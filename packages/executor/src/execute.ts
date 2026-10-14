@@ -131,7 +131,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   try {
     const before = await client.get<Schema>('/website-mover/v1/schema');
     const homeGroup = before.acf.field_groups.find((g) => g.location.some((rules) => rules.some((r) => r.param === 'page_template' && r.value === 'template-home.php')));
-    await snapshotBefore(client, jobId, plan, { pageId: existing.find((e) => e.front_page)?.id ?? null, groupKey: homeGroup?.key ?? null });
+    await snapshotBefore(client, jobId, plan, { pageId: existing.find((e) => e.front_page)?.id ?? null, groupKey: homeGroup?.key ?? null, fields: homeGroup?.fields });
   } catch (err) {
     fail('before', 'setup', 'snapshot', err);
   }

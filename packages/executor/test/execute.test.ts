@@ -6,7 +6,7 @@ import { expect, it } from 'vitest';
 import { jobPath, writeJsonl } from '@wm/core';
 import { approvePlan, buildPlan, savePlan } from '@wm/planner';
 import type { WpClient } from '@wm/wp-client';
-import { executePlan, homeFieldValues, type SeedField } from '../src/index.js';
+import { executePlan, homeFieldValues, restoreHome, type SeedField } from '../src/index.js';
 
 it('refuses to execute content that changed after the plan was approved', async () => {
   process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
@@ -77,3 +77,29 @@ it('fills the homepage template from the source within its row limits and clears
     'The homepage template requires at least 1 "department_details" row(s): the seed\'s placeholders stay until an editor replaces them.',
   ]);
 });
+
+it('restores the homepage fields in the form ACF accepts: empty repeaters as [], not null', async () => {
+  // Like ACF's REST check: a repeater must be an array (null is refused), a relationship may be null.
+  const repeaters = new Set(['banner', 'featured_program_details']);
+  const posted: Record<string, unknown>[] = [];
+  const client = {
+    post: async (_path: string, body: { acf: Record<string, unknown> }) => {
+      posted.push(body.acf);
+      const bad = Object.entries(body.acf).find(([k, v]) => repeaters.has(k) && !Array.isArray(v));
+      if (bad) throw Object.assign(new Error('400 rest_invalid_param'), { body: { data: { params: { acf: `acf[${bad[0]}] must be of type array or null.` } } } });
+      return {};
+    },
+  } as unknown as WpClient;
+  const acf = { banner: [{ title: 'One' }], featured_program_details: null, news_list: null, sign_up_title: '' };
+
+  // A snapshot with field types gets it right first time.
+  await restoreHome(client, { pageId: 7, acf, types: { banner: 'repeater', featured_program_details: 'repeater', news_list: 'relationship', sign_up_title: 'text' } });
+  expect(posted).toEqual([{ ...acf, featured_program_details: [] }]);
+
+  // An older snapshot (no types) is fixed up from ACF's error.
+  posted.length = 0;
+  await restoreHome(client, { pageId: 7, acf });
+  expect(posted.at(-1)).toEqual({ ...acf, featured_program_details: [] });
+  expect(posted).toHaveLength(2);
+});
+
