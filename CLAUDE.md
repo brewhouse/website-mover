@@ -2,7 +2,7 @@
 
 Internal tool that migrates a website into a blank WordPress "seed" site: scans the source, proposes a migration plan for human approval, then rebuilds everything as Gutenberg content styled from a brand style guide PDF.
 
-**The full design is in `docs/PLAN.md` — read it before starting work.** Status: plan approved, nothing implemented yet. **Next: M0** (see PLAN §10).
+**The full design is in `docs/PLAN.md` — read it before starting work.** Status: M0 done (results in `docs/m0/`; style guide extraction is waiting on the PDF). **Next: M1** (see PLAN §10).
 
 ## Key decisions (don't re-litigate)
 - Flow: Scan → Plan (versioned JSON) → Approve → Execute → Verify → QA → Report. Execution only follows the approved plan, using scan-time snapshots.
@@ -19,4 +19,5 @@ Internal tool that migrates a website into a blank WordPress "seed" site: scans 
 ## Local setup
 - Node 22+, pnpm, Docker (for the test WordPress and Postgres).
 - Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` (never commit `.env`).
+- Local seed site: `e2e/seed/setup.sh` copies `SEED_CODE_PATH` into `.local/seed` and runs it on `http://localhost:8088` (Docker).
 - Client inputs (framework theme, style guide PDFs, sitemaps) go under `inputs/`. Everything there is gitignored except `inputs/README.md`, which lists exactly what's needed and where it goes.

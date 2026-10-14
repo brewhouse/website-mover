@@ -1,6 +1,6 @@
 # Website Mover — Technical Plan
 
-Status: **approved for implementation, M0 next.** First real job: Jacksonville Housing Authority (JHA), source `https://www.jaxha.org/`.
+Status: **M0 done** (2026-10-13), except style guide extraction, which is waiting on the PDF. Results are in `docs/m0/`. **Next: M1.** First real job: Jacksonville Housing Authority (JHA), source `https://www.jaxha.org/`.
 
 ## 1. What we're building
 
@@ -29,15 +29,26 @@ Optional advanced inputs: approved sitemap (CSV/XLSX), project profile + brief, 
 | AI rules | Rules first, AI only for judgement. **AI never writes or rewrites content.** Any value AI extracts must appear verbatim in the source (checked). |
 | URLs | Keep slugs and hierarchy, unless the approved sitemap moves a page (then 301). Keep document upload paths. |
 | Language/stack | TypeScript end to end (pnpm workspaces). |
+| Template strategy *(M0)* | PlaneteriaWeb is a **classic PHP child theme of a block theme** (TT2), i.e. a hybrid, so we use the **classic/hybrid path** (§6.7). Design, header, footer and homepage go through the framework's own ACF options, named menus, page templates and ACF fields. See `docs/m0/framework-assessment.md`. |
+| Content model *(M0)* | **Target the framework's own types and field names** (`post`, `events` + `meeting_event_type`, `people`, `resource_library` and library attachments, `departments`, `faqs`, `alert`). Create new ACF types only when nothing fits (§6.4). Field definitions are read from the seed through the bridge (`GET /schema`), never guessed. |
+| Block conversion *(M0)* | `@wordpress/blocks` + `@wordpress/block-library` **pinned to the seed's WordPress release** (`wp-X.Y` dist-tags, every `@wordpress/*` package pinned via pnpm overrides) under jsdom. Pipeline: our normalize → `rawHandler` → our tidy → `createBlock` builders. Validated in Node, plus a real-editor check with Playwright. See `docs/m0/blocks-spike.md`. |
+| OpenAI model *(M0)* | **`gpt-6-astra`**, OpenAI's top tier. It passed a Responses API + strict JSON schema + PDF input test. `gpt-6.1-sol` (≈5× cheaper, "near-Astra") is the fallback for bulk/Batch work if cost matters. |
 
 ## 3. Open items / inputs needed
 
-1. **Planeteria framework** — provided as a local clone of the JHA seed site's Pantheon repo (`SEED_CODE_PATH`). Need to determine: block theme (theme.json / Site Editor), classic theme, or classic + page builder (decides §6.7), and which post types/fields the framework already defines (may replace parts of the §6.4 presets).
-2. **JHA style guide PDF.**
-3. **JHA approved sitemap** — and its format.
+1. ~~Planeteria framework~~: **resolved in M0** (hybrid; see §2). **New: we need the seed's database** (a Pantheon backup) **or an ACF export** (field groups, post types and taxonomies), plus its menus and options. The framework keeps all post types, field groups, options and menus in the DB, not in git (blocks M1).
+2. **JHA style guide PDF**: still needed (M0 spike 6 is waiting on it).
+3. **JHA approved sitemap**, and its format. More important now: the source's tree is odd (582 of 597 nodes sit under "About Us").
 4. **Seed site** URL + Application Password (needed from M1).
-5. **Seed plugin stack** — defaults unless Planeteria's standard differs: The Events Calendar (events), a PDF-indexing search plugin (search), Redirection (redirects), ACF, forms plugin TBD.
-6. **Which OpenAI model** — list models available to the key, pin in config.
+5. ~~Seed plugin stack~~: **resolved.** ACF Pro 6.3.8, Gravity Forms 3.1, Redirection 5.5, Yoast 24, Ajax Search Pro 4.27 (search; PDF indexing still to be checked), The Events Calendar (installed but **unused** by the theme).
+6. ~~OpenAI model~~: **resolved** (`gpt-6-astra`).
+7. **New, from the JHA inventory:**
+   - Ask Brooks Jeffrey Marketing (BJM) for a content export?
+   - Migrate the 720 files nothing links to?
+   - Rebuild the direct-deposit form (SSN and bank details)?
+   - Who supplies the quick links? (`/quick-links` is empty.)
+   - Confirm content ownership, given BJM's "proprietary" notice.
+8. **New, theme code changes for the team** (T1–T7 in `docs/m0/framework-assessment.md` §6): placeholder logo text, homepage lorem ipsum, missing `index.php`/archives, a Pantheon-only call, hard-coded fonts, two meeting models, broken patterns.
 
 ## 4. Pipeline
 
@@ -70,6 +81,11 @@ Form with the three required inputs + Advanced section. App Password encrypted a
 ### 6.2 Source acquisition
 - **WordPress sources (primary):** detect via `<link rel="https://api.w.org/">`. Pull pages, posts, public CPTs, categories, tags, authors, and the **full media library** (`/wp/v2/media`, catches unlinked PDFs). Use `content.rendered` (raw needs auth).
 - **Other sources:** robots.txt → sitemaps (incl. indexes, `/wp-sitemap.xml`) → same-host BFS with depth/page limits. Platform fingerprinting (Squarespace, Wix, Webflow, Shopify, static).
+- **JHA is not WordPress** *(M0)*. jaxha.org runs a proprietary CMS from Brooks Jeffrey Marketing (BJM). For JHA, the HTML path *is* the main path, so the generic extractor moves into M1.
+  - **Seed the crawl from `sitemap.xml` *and* any HTML site map.** JHA's `sitemap.xml` is stale and is missing 82 live pages.
+  - **Per-platform content selectors.** For BJM: `#bodyContainer`, `#cms_body_content`, `#cms-content`, `#interior section`.
+  - **Find unlinked files where the file endpoint uses sequential ids** by HEAD-sweeping the id range.
+  - `docs/m0/jha-inventory.md` has the numbers.
 - **JS-rendered pages:** Playwright fallback when static HTML has little content.
 - URL normalization: canonical, strip tracking params, trailing slash, dedupe by content hash. Skip feeds, pagination, tag archives, search, login, cart.
 - Polite: concurrency 4, crawl-delay respected, retries with backoff. **SSRF guard:** block private/link-local/metadata IPs, re-checked after DNS and on every redirect.
@@ -92,7 +108,21 @@ Form with the three required inputs + Advanced section. App Password encrypted a
 | Documents | ACF `document` | file, document type (taxonomy), department, date, language, extracted text |
 | Forms & quick links | Forms plugin + ACF `resource_link` | forms; external portals (applications, tenant/landlord portals) |
 
-Inference then proposes **extra** types for review (e.g. properties/communities, procurement/bids, careers):
+**On the Planeteria framework, the presets map to the framework's existing types** *(M0, `docs/m0/framework-assessment.md` §5)*:
+
+| Preset | Framework target |
+|---|---|
+| News | `post` + `category`. Listing page uses the News template |
+| Events | Framework `events` + `event_type`, **not** The Events Calendar (installed but unused by the theme) |
+| Board meetings | Provisionally `events` tagged `meeting_event_type`="Meetings". It has a full single template with agenda, packet, minutes, video and supplemental files. Kind and committee go into `event_type` terms. Final choice between this and the framework's separate `meetings` type waits for the seed DB (theme change T6) |
+| Board members | `people` (`first_name`, `last_name`, `title`, `biography`, photo), shown on a page through a people-grid ACF block. Term dates need a small extra field group |
+| Documents | Library **attachments** (`index_for_library`, `publication_date`, `resource_type`, `related_depts`) for single files. `resource_library` posts for multi-file or external resources |
+| Forms | Gravity Forms, plus the framework's Forms directory (`resource_type` form/application) |
+| Quick links | Homepage `banner_icon` repeater and Buttons List / Icon Button blocks. External portals → `resource_library` with external links. **No `resource_link` type** |
+
+JHA inventory: news 256; events 0 (the calendar is empty); meetings ≈206, spread over 397 URLs (notice/agenda/minutes pages, notice news items, files) that must be **merged by date + kind**; board 6 + CEO; documents 996 (409 referenced); forms 7.
+
+Inference then proposes **extra** types for review (e.g. properties/communities, procurement/bids, careers). For JHA these are: communities (29 pages with labelled fields) and ZIP payment standards (47 pages that are really one table):
 - Cluster by URL prefix + layout fingerprint + JSON-LD type; ≥3 similar pages = candidate.
 - Fields from DOM diffs across the cluster + label patterns (`Label:`, `dt/dd`, table rows) + type detection (image, date, email, phone, URL, price, number, rich text).
 - AI gets 3–5 samples per cluster → schema with confidence and per-field coverage %.
@@ -101,8 +131,9 @@ Inference then proposes **extra** types for review (e.g. properties/communities,
 
 ### 6.5 Documents (first-class)
 - Inventory = full source media library + every document link in content (PDF, DOC/X, XLS/X, PPT/X).
-- **Preserve original upload paths** (`/wp-content/uploads/YYYY/MM/file.pdf`) via a bridge endpoint → old links in emails/other sites keep working with no redirects.
-- Each document becomes a `document` post (listable, filterable, searchable); PDF text extracted for search.
+- **Preserve original upload paths** (`/wp-content/uploads/YYYY/MM/file.pdf`) via a bridge endpoint → old links in emails/other sites keep working with no redirects. *This only applies to WordPress sources.* JHA serves every file as `/plugins/show_image.php?id=N` (1,281 live files), so old document links need **query-string redirects** (§6.14).
+- On Planeteria, each document is a library **attachment** (`index_for_library=1`, `publication_date`, `resource_type`, `related_depts`) listed by the framework's Document Directory. Multi-file resources become `resource_library` posts. PDF text is extracted for search.
+- Files nothing links to (JHA: 720, 195 MB of documents) are listed in the plan with a default of **skip**. The reviewer can include them or mark them as Archive.
 - Search: core WP search doesn't read PDFs → PDF-indexing search plugin by default; fallback stores extracted text where core search looks.
 - Report counts documents by type; flags untagged (inaccessible) PDFs; reviewer can mark old documents as **Archive**.
 
@@ -115,9 +146,18 @@ Inference then proposes **extra** types for review (e.g. properties/communities,
 ### 6.7 Design system & templates
 **Tokens from the style guide:** palette (primary, secondary, accent, text, background + derived tints), heading/body fonts, fluid type scale, spacing scale, button/link/heading styles, content widths. Button text colour picked for WCAG AA contrast; link colour darkened if needed.
 
-**Applying them depends on the Planeteria framework (decide in M0):**
+**Applying them depends on the Planeteria framework. M0 decided: classic/hybrid** (`docs/m0/framework-assessment.md` §6):
 - *Block theme:* write global styles (theme.json) via REST, templates/template parts via `/wp/v2/templates` and `/wp/v2/template-parts`, navigation via `/wp/v2/navigation`, fonts via the Font Library REST API, site settings via `/wp/v2/settings`.
-- *Classic / hybrid theme:* content still Gutenberg; header/footer/templates/menus set through the framework's theme options / PHP templates via bridge endpoints; menus via `/wp/v2/menus`.
+- **Classic / hybrid theme (PlaneteriaWeb):**
+  - **Content:** Gutenberg.
+  - **Colours and heading sizes:** ACF options on "Theme Settings" (`primary_color`… `h6_font_size`), written by the bridge, which then calls the theme's `generate_options_css()`. Mirror the same `:root` variables into Global Styles custom CSS, because the CSS file is written into the theme directory, which is read-only on Pantheon test/live.
+  - **Fonts:** Global Styles custom CSS + Font Library. The theme hard-codes Open Sans/Ubuntu.
+  - **Header/footer menus:** named menus "Main Menu", "Top Menu", "Explore Menu", "Footer Menu", "Social Menu" via `/wp/v2/menus` + `/wp/v2/menu-items`. The item description is a Font Awesome class.
+  - **Footer contact:** `footer_*` ACF options.
+  - **Logo:** `site_logo`. It needs theme change T1 to be displayed.
+  - **Listing pages:** framework page templates set via the REST `template` field (News, Events, Meetings, Document Directory, Forms & Application, Department Directory).
+  - **Homepage:** filled through `template-home.php`'s ACF fields (`banner`, `banner_icon` quick links, featured programs, news/events relationships). That replaces generated homepage patterns.
+  - **Archives:** CPT and category archives fall back to the parent's block templates (theme change T3), so keep them out of nav.
 
 **Templates/parts to produce:** header (logo, nav, CTA), footer (logo/blurb, link columns, contact info, social, copyright), front page, page (title band → content → CTA band), full-width page, single post, blog index/archive/search/404, `single-{cpt}` + `archive-{cpt}` per type (meetings list grouped by year, document library with filters, events calendar/list), contact page (form + address/phone/email/hours + map).
 
@@ -150,8 +190,21 @@ Inference then proposes **extra** types for review (e.g. properties/communities,
 
 Always stripped: `<script>`, inline event handlers, `javascript:` URLs, tracking pixels; iframes allowlisted. Content H1s demoted (template supplies the H1).
 
+**Approach (proved in M0, `docs/m0/blocks-spike.md`):**
+- **Pipeline:** our DOM normalize (strip classes/styles, resolve lazy `data-src`, iframes → embed URLs, unwrap layout wrappers, keep table captions) → WordPress's `rawHandler` → our tidy pass (embed provider attributes, quote citations) → `createBlock` builders for structure the extractor finds (cover, columns, group, buttons).
+- **Packages:** loaded as CommonJS under jsdom, one registry, about 4.4 s cold start, about 19 ms per 2.5 KB page warm. So the worker keeps one converter per process.
+- **Images and links:** rebuilt on the `Block[]` tree with `createBlock`, never by regex on serialized markup.
+- **Verify:** check `content.raw` byte for byte after saving, then run `validateSerialized`, plus `e2e/editor-check.ts` (the real editor) on a sample.
+- **Preflight:** read the seed's disabled blocks (`dubeb_disabled_blocks`).
+- **Before M1:** `rawHandler` is not a sanitizer, so M1 adds an allowlist sanitizer.
+- **JHA extras:** about 7,300 inline styles to drop, Outlook Safe Links to unwrap, 195 pages with dead Teams/RingCentral links to flag.
+
 ### 6.10 Forms
 Extract fields (label, type, required, options) → recreate via per-plugin adapter (CF7 and Gravity Forms have REST create; WPForms/Fluent Forms via bridge calling their PHP APIs). Notifications → site admin email, flagged. Third-party embeds (HubSpot, Mailchimp, Typeform) carried over as embeds, flagged.
+
+**Gravity Forms first** *(M0)*: the bridge's `POST /forms` takes a plugin-neutral spec, calls `GFAPI`, is idempotent by `source_key`, and returns the `gravityforms/form` block to insert. JHA forms are native HTML (2) and jQuery formBuilder (3, with an inline JSON definition we can parse).
+- **Forms that collect SSNs, bank details or file uploads are never recreated automatically.** They are flagged for a human decision (JHA: direct deposit, vendor application).
+- SMS/email alert sign-ups need the client's new tool.
 
 ### 6.11 Review screen
 Tabs: **Summary** (expected counts, warnings) · **Content** (every URL → type/slug/parent, include toggle, reclassify) · **Sitemap mapping** · **Post types & fields** (rename/merge/split, sample values, coverage %) · **Templates** · **Design** (swatches, fonts, logo, header/footer preview) · **Forms** · **Menus** · **Warnings**. **Approve & run** records approver, time, plan version.
@@ -176,6 +229,10 @@ Concurrency adapts to the host (back off on 429/503).
 ### 6.14 Redirects
 Full old→new map always. Priority = old nav/sitemap URLs, any changed path, documents, top pages from GA/Search Console export. Import into Redirection plugin if present; otherwise CSV for server-level.
 
+**Id- and query-string URLs** *(M0, JHA)*: about 1,800 legacy URLs are `show_image.php?id=N`, `upages.php?id=N` or `news-view?id=N`. Redirection must match on the query string. For files, prefer one rule per pattern that looks up the id in stored meta (`_wm_source_key`) rather than 1,281 rows.
+- Case-insensitive matching (the source server is case-insensitive).
+- Clean up 10 non-WordPress-safe slugs.
+
 ### 6.15 Analytics & launch support
 - Optional GA4 ID → installed (Site Kit if present, else bridge snippet) and verified on the homepage.
 - **Delta sync:** re-scan before launch and migrate only new/changed items (agendas, news) instead of a long content freeze.
@@ -189,6 +246,9 @@ Full old→new map always. Priority = old nav/sitemap URLs, any changed path, do
 - **AI:** `openai` SDK behind a thin internal interface (`structured(schema, input)`), ~5 call sites.
 - **Deploy:** Docker Compose (web, worker, postgres).
 - **Local test WordPress:** Docker, running a copy of the seed site's Pantheon codebase (exact theme + plugins) with a local DB, plus the bridge plugin mounted in.
+  - Built in M0 as `e2e/seed/setup.sh`: PHP 8.2 + MariaDB 10.4 on `localhost:8088`, with `wp-config-local.php`.
+  - It skips plugins that call outside services, and WP Sheet Editor – Media Library, which crashes the post editor.
+  - Until we have a seed DB export, its database is empty apart from what tests create.
 
 ```
 apps/web            Next.js UI + API
@@ -229,7 +289,17 @@ Encrypted credentials; SSRF guard; HTML sanitized before saving to WordPress; PD
 | M4 | **Review UI:** editable plan, sitemap mapping, extra-type inference, design preview | Approval gate as specified | S–M |
 | M5 | **Finish:** homepage patterns, verification, a11y/responsive QA, redirects, GA4, delta sync, post-launch check, rollback, hardening | Production-ready | M |
 
-Re-estimate after M0.
+### Re-estimate after M0
+
+| # | Was | Now | Why |
+|---|---|---|---|
+| M1 | M | **M–L** | jaxha.org isn't WordPress, so the generic HTML extractor (BJM selectors, boilerplate removal, allowlist sanitizer) comes into M1 instead of reading WP REST. Documents have no upload paths to keep: they become library attachments plus id-based redirects. 561 referenced files to upload. Blocked until we have the seed DB/ACF export and seed credentials. Less risk on conversion (done) and the bridge (done) |
+| M2 | M | **M–L** | Merging meetings is the hard part: 397 URLs (notice/agenda/minutes pages, notice news items, files) → ≈206 meetings, 87 with no date in the title. Lighter elsewhere: events 0, board 6, quick links come from the client, forms 7 (3 with parseable JSON). Communities (29) and the ZIP table are optional extras |
+| M3 | M | **M** | No block templates to build: the framework's PHP templates, ACF options, named menus and homepage ACF fields do it. New work: CSS overrides for hard-coded fonts and the Pantheon read-only CSS file. Depends on the style guide PDF and on the team making theme changes T1–T7 |
+| M4 | S–M | **S–M** | Unchanged. The sitemap mapping tab matters more, since the source tree has almost everything under "About Us" |
+| M5 | M | **M** | Redirects are bigger (≈1,800 id/query-string URLs). The homepage is ACF field mapping rather than patterns (smaller). GA4 property known (`G-ZHVZNQBLZ8`) |
+
+Net: about one size larger overall, mostly because the first client isn't a WordPress source. Order unchanged.
 
 ## 11. Risks
 
@@ -243,6 +313,11 @@ Re-estimate after M0.
 | Source blocks bots / JS-rendered | Playwright fallback; blocked pages flagged, never silently dropped |
 | Complex widgets (sliders, tabs, calculators) | Nearest core block or HTML fallback, counted as warnings |
 | Content changes before launch | Delta sync |
+| *(M0)* Seed content model only in the DB, so it gets guessed wrong | Read definitions from the seed via the bridge's `GET /schema`. Local tests use an ACF export of the seed. M0 hit this: a guessed field type crashed a framework template |
+| *(M0)* Framework needs theme code changes we can't make (placeholder logo text, lorem ipsum, missing archives, Pantheon-only call) | T1–T7 list handed to the team. The report flags any that are still open |
+| *(M0)* Generated CSS file can't be written on Pantheon test/live | Mirror tokens into Global Styles custom CSS |
+| *(M0)* Seed plugins that break wp-admin (WP Sheet Editor Media Library vs Enable Media Replace) or disable blocks | Preflight opens one post in the editor and reads `dubeb_disabled_blocks` |
+| *(M0)* Sensitive forms (SSN, bank details) | Never recreated automatically; human decision |
 
 ## 12. Not in v1
 Pixel-perfect visual cloning · WooCommerce · memberships / gated content · multilingual · comments (except WP sources, later) · creating user accounts (content attributed to one user, original author name kept).
