@@ -86,7 +86,7 @@ export async function listJobs(): Promise<(Job & { lastRun: StageRun | null })[]
 
 // ---------- Stage runs ----------
 
-export const STAGES = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report'] as const;
+export const STAGES = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'] as const;
 export type Stage = (typeof STAGES)[number];
 
 export interface StageRun {

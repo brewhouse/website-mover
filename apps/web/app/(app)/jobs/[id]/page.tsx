@@ -11,7 +11,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: (await params).id };
 }
 
-const STEPS = ['scan', 'extract', 'analyze', 'plan', 'approve', 'execute', 'report'] as const;
+const STEPS = ['scan', 'extract', 'analyze', 'plan', 'approve', 'execute', 'report', 'qa'] as const;
 
 export default async function JobPage({ params }: { params: Promise<{ id: string }> }) {
   await requireUser();
@@ -43,11 +43,12 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
     {
       run: 'execute',
       label: 'Run the migration',
-      help: `Writes approved plan v${plan?.plan.version} to ${job.targetName}, then builds the report.`,
+      help: `Writes approved plan v${plan?.plan.version} to ${job.targetName}, then builds the report and runs QA.`,
       primary: true,
       disabled: !plan ? 'Needs a plan.' : !plan.approved ? `Plan v${plan.plan.version} needs approval first (Review).` : false,
     },
     { run: 'report', label: 'Rebuild the report', help: 'Re-check the target: live URLs, blocks, redirects.', disabled: lastOf('execute') || onDisk.has('execute') ? false : 'Run the migration first.' },
+    { run: 'qa', label: 'Run QA', help: 'Accessibility (WCAG 2.1 AA) and phone/tablet/desktop checks with screenshots.', disabled: lastOf('execute') || onDisk.has('execute') ? false : 'Run the migration first.' },
   ];
 
   return (
@@ -71,13 +72,13 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         }
       />
 
-      <ol className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+      <ol className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
         {STEPS.map((s, i) => {
           const st = step(s);
           return (
             <li key={s} className="rounded-lg border border-line bg-panel px-3 py-2">
               <div className="text-xs text-muted">
-                {i + 1}. {s === 'approve' ? 'Review & approve' : s[0]!.toUpperCase() + s.slice(1)}
+                {i + 1}. {s === 'approve' ? 'Review & approve' : s === 'qa' ? 'QA' : s[0]!.toUpperCase() + s.slice(1)}
               </div>
               <div className="mt-1">
                 <Badge tone={st.tone}>{st.text}</Badge>

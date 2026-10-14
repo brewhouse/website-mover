@@ -277,6 +277,9 @@ importers:
       '@wm/executor':
         specifier: workspace:*
         version: link:../../packages/executor
+      '@wm/qa':
+        specifier: workspace:*
+        version: link:../../packages/qa
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
@@ -304,6 +307,9 @@ importers:
       '@wm/planner':
         specifier: workspace:*
         version: link:../../packages/planner
+      '@wm/qa':
+        specifier: workspace:*
+        version: link:../../packages/qa
       '@wm/wp-client':
         specifier: workspace:*
         version: link:../../packages/wp-client
@@ -445,6 +451,21 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
+  packages/qa:
+    dependencies:
+      '@axe-core/playwright':
+        specifier: 4.13.0
+        version: 4.13.0(playwright-core@1.64.0)
+      '@wm/core':
+        specifier: workspace:*
+        version: link:../core
+      '@wm/planner':
+        specifier: workspace:*
+        version: link:../planner
+      playwright:
+        specifier: 1.64.0
+        version: 1.64.0
+
   packages/styleguide:
     dependencies:
       '@wm/llm':
@@ -504,6 +525,11 @@ packages:
   '@asamuzakjp/dom-selector@9.2.4':
     resolution: {integrity: sha512-YnVzxDxLaqL0t7Q4wfcgHZjg55Wm6y5EaO7Bhu3q9J7wq/8iw3PhsnWiOQhYekx4VexnbkgWpTT6n+QIV7kczw==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
+
+  '@axe-core/playwright@4.13.0':
+    resolution: {integrity: sha512-6YLx+kxXu5GJceG4ozFg+33a2EMTdjYwWGloJ3sb9Kta5pp+ZNS53uxGVog5JetIY8s++P5UrtX+cri+u0VAVg==}
+    peerDependencies:
+      playwright-core: '>= 1.0.0'
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -2026,6 +2052,10 @@ packages:
   autosize@4.0.4:
     resolution: {integrity: sha512-5yxLQ22O0fCRGoxGfeLSNt3J8LB1v+umtpMnPW6XjkTWXKoN0AmXAIhelJcDtFT/Y/wYWmfE+oqU10Q0b8FhaQ==}
 
+  axe-core@4.13.0:
+    resolution: {integrity: sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==}
+    engines: {node: '>=4'}
+
   babel-plugin-macros@3.1.0:
     resolution: {integrity: sha512-Cg7TFGpIr01vOQNODXOOaGz2NpCU5gl8x1qJFbb6hbZxR7XrcE2vtbAsTAbJ7/xwJtUuJEw8K8Zr/AE0LHlesg==}
     engines: {node: '>=10', npm: '>=6'}
@@ -3455,6 +3485,11 @@ snapshots:
       css-tree: 3.2.1
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.3
+
+  '@axe-core/playwright@4.13.0(playwright-core@1.64.0)':
+    dependencies:
+      axe-core: 4.13.0
+      playwright-core: 1.64.0
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -5078,6 +5113,8 @@ snapshots:
   assertion-error@2.0.1: {}
 
   autosize@4.0.4: {}
+
+  axe-core@4.13.0: {}
 
   babel-plugin-macros@3.1.0:
     dependencies:

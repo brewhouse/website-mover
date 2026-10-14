@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getJob } from '@wm/db';
 import { Badge, Card, Empty, LinkButton, Notice, PageHeader, Stat, when } from '@/components/ui';
-import { DOWNLOADS, loadReport } from '@/lib/job-files';
+import { DOWNLOADS, loadQa, loadReport } from '@/lib/job-files';
+import type { QaReport } from '@wm/qa';
 import { requireUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -15,7 +16,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   await requireUser();
   const { id } = await params;
   if (!(await getJob(id))) notFound();
-  const r = await loadReport(id);
+  const [r, qa] = await Promise.all([loadReport(id), loadQa(id)]);
   if (!r) {
     return (
       <>
@@ -134,6 +135,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
             </ul>
           </Card>
         )}
+        {qa ? <QaSection jobId={id} qa={qa} /> : <Notice tone="info">No QA yet: run it from the job page (accessibility and phone/tablet/desktop checks).</Notice>}
         <Card title="Warnings">
           {Object.keys(r.warnings).length ? (
             <table className="data">
@@ -153,6 +155,99 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
           )}
         </Card>
       </div>
+    </>
+  );
+}
+
+const IMPACT_TONE = { critical: 'bad', serious: 'bad', moderate: 'warn', minor: 'neutral' } as const;
+
+function QaSection({ jobId, qa }: { jobId: string; qa: QaReport }) {
+  const templates = qa.pages.filter((p) => p.template && Object.keys(p.screenshots).length);
+  const failedPages = qa.pages.filter((p) => p.status !== 200);
+  return (
+    <>
+      <Card title={`Accessibility (WCAG 2.1 AA, axe-core): ${qa.pages.length} pages checked ${when(qa.ranAt)}`}>
+        <p className="border-b border-line px-4 py-2 text-xs text-muted">
+          One page per template plus {qa.pages.filter((p) => !p.template).length} sampled pages. <strong>Site-wide</strong> means every checked page has it: it comes from the theme, not the content.
+          {failedPages.length > 0 && <span className="text-bad"> {failedPages.length} page(s) didn’t load: {failedPages.map((p) => `${p.path} (${p.status})`).join(', ')}.</span>}
+        </p>
+        {qa.rules.length ? (
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Impact</th>
+                <th>Rule</th>
+                <th>Pages</th>
+                <th>Example</th>
+              </tr>
+            </thead>
+            <tbody>
+              {qa.rules.map((rule) => (
+                <tr key={rule.id}>
+                  <td>
+                    <Badge tone={IMPACT_TONE[rule.impact as keyof typeof IMPACT_TONE] ?? 'neutral'}>{rule.impact ?? 'n/a'}</Badge>
+                  </td>
+                  <td className="max-w-sm">
+                    {rule.helpUrl ? (
+                      <a href={rule.helpUrl} target="_blank" rel="noreferrer" className="font-medium text-brand hover:underline">
+                        {rule.help}
+                      </a>
+                    ) : (
+                      <span className="font-medium">{rule.help}</span>
+                    )}
+                    <div className="font-mono text-xs text-muted">{rule.id}</div>
+                  </td>
+                  <td className="max-w-xs text-xs">
+                    {rule.siteWide ? <Badge tone="warn">site-wide</Badge> : rule.pages.map((p) => <div key={p} className="font-mono">{p}</div>)}
+                  </td>
+                  <td className="max-w-md">
+                    <code className="block truncate font-mono text-xs text-muted" title={rule.sample}>
+                      {rule.sample}
+                    </code>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <Empty>No WCAG A/AA violations found on the checked pages.</Empty>
+        )}
+      </Card>
+      <Card title="Phone, tablet and desktop">
+        <div className="grid gap-1 border-b border-line px-4 py-3 text-sm">
+          {Object.entries(qa.overflow).map(([viewport, pages]) => (
+            <div key={viewport}>
+              <span className="font-medium capitalize">{viewport}:</span>{' '}
+              {pages.length ? (
+                <span className="text-warn">
+                  sideways scrolling on {pages.length} page(s): <span className="font-mono text-xs">{pages.join(' ')}</span>
+                </span>
+              ) : (
+                <span className="text-ok">every page fits</span>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-6 p-4">
+          {templates.map((p) => (
+            <figure key={p.path}>
+              <figcaption className="mb-2 text-sm">
+                <span className="font-medium">{p.template}</span> <span className="font-mono text-xs text-muted">{p.path}</span>
+              </figcaption>
+              <div className="flex items-start gap-3 overflow-x-auto">
+                {(['mobile', 'tablet', 'desktop'] as const).map((v) =>
+                  p.screenshots[v] ? (
+                    <a key={v} href={`/api/jobs/${jobId}/qa/${p.screenshots[v]}`} target="_blank" rel="noreferrer" className="shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={`/api/jobs/${jobId}/qa/${p.screenshots[v]}`} alt={`${p.template} at ${v} width`} loading="lazy" className={`rounded border border-line ${v === 'mobile' ? 'w-28' : v === 'tablet' ? 'w-48' : 'w-72'}`} />
+                    </a>
+                  ) : null,
+                )}
+              </div>
+            </figure>
+          ))}
+        </div>
+      </Card>
     </>
   );
 }

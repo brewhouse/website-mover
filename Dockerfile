@@ -16,6 +16,9 @@ RUN pnpm install --frozen-lockfile
 FROM deps AS worker
 # poppler-utils: style guide PDF facts (pdfinfo, pdftotext, pdffonts, pdfimages, pdftoppm).
 RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils ca-certificates && rm -rf /var/lib/apt/lists/*
+# Chromium for the QA stage (Playwright + axe-core), in a folder the node user can read.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN pnpm --filter @wm/qa exec playwright install --with-deps chromium
 ENV NODE_ENV=production WM_DATA_DIR=/data
 USER node
 CMD ["node", "--import", "tsx", "apps/worker/src/worker.ts"]

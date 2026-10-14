@@ -25,7 +25,7 @@ import {
   type StageRun,
 } from '@wm/db';
 import { WpClient } from '@wm/wp-client';
-import { runStage } from './stages.js';
+import { runStage, type StageName } from './stages.js';
 
 await migrate();
 const boss = await queue();
@@ -60,8 +60,8 @@ async function handle(runId: number): Promise<void> {
   try {
     log(`Started ${run.stage}${run.requestedBy ? ` (requested by ${run.requestedBy})` : ''}`);
     const job = (await getJob(run.jobId)) ?? fail(`Job ${run.jobId} is not registered`);
-    const needsTarget = ['plan', 'execute', 'report'].includes(run.stage);
-    const summary = await runStage(run.stage, {
+    const needsTarget = ['plan', 'execute', 'report', 'qa'].includes(run.stage);
+    const summary = await runStage(run.stage as StageName, {
       jobId: job.id,
       source: { origin: job.sourceUrl, profile: job.profile },
       target: needsTarget ? { name: job.targetName, client: new WpClient(await targetCredentials(job.targetId)) } : undefined,

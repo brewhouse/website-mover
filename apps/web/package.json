@@ -24,6 +24,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@wm/executor": "workspace:*",
+    "@wm/qa": "workspace:*",
     "tailwindcss": "4.3.3"
   }
 }

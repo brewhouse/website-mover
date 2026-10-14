@@ -98,4 +98,13 @@ create index audit_job on audit (job_id, id);
 alter table stage_runs add column heartbeat_at timestamptz;
 `,
   },
+  {
+    name: '003_m5_stages.sql',
+    sql: `
+-- M5: accessibility/responsive QA, the post-launch check, and rollback run as stages too.
+alter table stage_runs drop constraint stage_runs_stage_check;
+alter table stage_runs add constraint stage_runs_stage_check
+  check (stage in ('scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'));
+`,
+  },
 ];

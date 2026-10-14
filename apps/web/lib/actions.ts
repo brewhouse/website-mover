@@ -155,8 +155,9 @@ const RUNS: Record<string, Stage[]> = {
   'through-plan': ['scan', 'extract', 'analyze', 'plan'],
   analyze: ['analyze', 'plan'],
   plan: ['plan'],
-  execute: ['execute', 'report'],
+  execute: ['execute', 'report', 'qa'],
   report: ['report'],
+  qa: ['qa'],
 };
 
 export async function runStages(_: FormState, form: FormData): Promise<FormState> {

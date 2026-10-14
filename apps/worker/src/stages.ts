@@ -23,9 +23,10 @@ import { extractJob } from '@wm/extractor';
 import { analyzeForms, analyzeMeetings, analyzeRecords, analyzeSite } from '@wm/analyzer';
 import { buildPlan, latestPlanVersion, loadDecisions, savePlan } from '@wm/planner';
 import { buildReport, executePlan, probeTarget } from '@wm/executor';
+import { runQa } from '@wm/qa';
 import type { WpClient } from '@wm/wp-client';
 
-export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report';
+export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa';
 
 export interface StageContext {
   jobId: string;
@@ -112,6 +113,10 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
       const report = await buildReport({ jobId, client: target().client, log });
       log(`Report: ${jobPath(jobId, 'report', 'report.md')}`);
       return { counts: report.counts, failures: report.failures.length };
+    }
+    case 'qa': {
+      const qa = await runQa({ jobId, baseUrl: target().client.baseUrl, log });
+      return { pages: qa.pages.length, rules: qa.rules.length, siteWide: qa.rules.filter((r) => r.siteWide).length, overflowMobile: qa.overflow.mobile?.length ?? 0 };
     }
   }
 }

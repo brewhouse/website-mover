@@ -8,6 +8,7 @@
  *   wm approve --job jha --by "Name"
  *   wm execute --job jha [--target local]
  *   wm report  --job jha [--target local]
+ *   wm qa      --job jha [--target local]      accessibility and responsive checks (Playwright + axe-core)
  *
  * --target local is the Docker seed configured in .env; any other name is a target saved in the
  * web app (needs DATABASE_URL).
@@ -49,14 +50,14 @@ const [command, sub] = positionals;
 // pnpm runs scripts in the package directory; resolve user paths against where the command was typed.
 const cwd = process.env.INIT_CWD ?? process.cwd();
 
-const STAGES: StageName[] = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report'];
+const STAGES: StageName[] = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa'];
 
 if (command && (STAGES as string[]).includes(command)) {
   const jobId = values.job ?? fail('--job is required');
   const summary = await runStage(command as StageName, {
     jobId,
     source: command === 'scan' ? { origin: values.origin ?? fail('--origin is required'), profile: values.profile!, cacheDir: values.cache ? path.resolve(cwd, values.cache) : undefined } : undefined,
-    target: ['plan', 'execute', 'report'].includes(command) ? await cliTarget(values.target!) : undefined,
+    target: ['plan', 'execute', 'report', 'qa'].includes(command) ? await cliTarget(values.target!) : undefined,
     timezone: values.timezone,
     log: console.log,
   });
