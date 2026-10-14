@@ -17,7 +17,6 @@ import path from 'node:path';
 import * as cheerio from 'cheerio';
 import { type FetchResult, PoliteFetcher } from '../src/polite-fetch.js';
 import { readSitemaps } from '../src/sitemaps.js';
-import { probeWpApi, wpPaginate, wpTotal } from '../src/wp-rest.js';
 
 const ORIGIN = 'https://www.jaxha.org';
 const SITE_HOSTS = new Set(['www.jaxha.org', 'jaxha.org']);
@@ -622,47 +621,6 @@ function boardMembers(html: string): { name: string; role: string }[] {
   });
 }
 
-// ---------------------------------------------------------------- WordPress (only if an API exists)
-
-async function wpInventory(apiRoot: string) {
-  const types = JSON.parse((await fetcher.get(`${apiRoot.replace(/\/?$/, '/')}wp/v2/types`)).body) as Record<
-    string,
-    { rest_base: string; rest_namespace?: string }
-  >;
-  const typeCounts: Record<string, number | null> = {};
-  for (const [slug, type] of Object.entries(types)) {
-    typeCounts[slug] = (await wpTotal(fetcher, apiRoot, `${type.rest_namespace ?? 'wp/v2'}/${type.rest_base}`)).total;
-  }
-  const taxonomies = JSON.parse((await fetcher.get(`${apiRoot.replace(/\/?$/, '/')}wp/v2/taxonomies`)).body) as Record<
-    string,
-    { rest_base: string; rest_namespace?: string }
-  >;
-  const termCounts: Record<string, number | null> = {};
-  for (const [slug, tax] of Object.entries(taxonomies)) {
-    termCounts[slug] = (await wpTotal(fetcher, apiRoot, `${tax.rest_namespace ?? 'wp/v2'}/${tax.rest_base}`)).total;
-  }
-  const users = await wpTotal(fetcher, apiRoot, 'wp/v2/users');
-
-  const media: { mime_type: string; post: number; source_url: string; date: string; media_details?: { filesize?: number } }[] = [];
-  for await (const item of wpPaginate<(typeof media)[number]>(fetcher, apiRoot, 'wp/v2/media', {
-    _fields: 'id,date,slug,mime_type,source_url,media_details,title,post',
-  })) {
-    media.push(item);
-  }
-  return {
-    typeCounts,
-    termCounts,
-    users,
-    media: {
-      total: media.length,
-      byMime: countBy(media, (m) => m.mime_type),
-      unattached: media.filter((m) => !m.post).length,
-      dateRange: [media.map((m) => m.date).sort()[0], media.map((m) => m.date).sort().at(-1)],
-      uploadPathPattern: countBy(media, (m) => (/\/wp-content\/uploads\/\d{4}\/\d{2}\//.test(m.source_url) ? 'uploads/YYYY/MM' : 'other')),
-    },
-  };
-}
-
 // ---------------------------------------------------------------- main
 
 async function main() {
@@ -670,24 +628,16 @@ async function main() {
   await mkdir(OUT, { recursive: true });
   console.log(`Inventory of ${ORIGIN} → ${path.relative(process.cwd(), OUT)}`);
 
-  // 1. robots.txt and platform fingerprint
+  // 1. robots.txt and platform fingerprint (which CMS, for choosing content selectors)
   const robotsRes = await fetcher.get(`${ORIGIN}/robots.txt`);
   await save('robots.txt', robotsRes.body);
   const robots = await fetcher.robotsFor(ORIGIN);
 
   const home = await fetcher.get(`${ORIGIN}/`);
   await save('pages/home.html', home.body);
-  const wp = await probeWpApi(fetcher, ORIGIN, home.body);
-
-  const probes: Record<string, string> = {};
-  for (const probe of ['/wp-login.php', '/wp-admin/', '/wp-includes/', '/xmlrpc.php', '/feed/', '/wp-json/wp/v2/menus', '/wp-json/wp/v2/menu-items', '/wp-json/wp/v2/navigation', '/does-not-exist-wm-probe']) {
-    const res = await fetcher.get(`${ORIGIN}${probe}`);
-    probes[probe] = res.status ? `${res.status} ${res.headers['content-type'] ?? ''}`.trim() : `no response (${res.headers['x-error']})`;
-  }
 
   const platform = {
     generatorMeta: home.body.match(/<meta[^>]+name=["']generator["'][^>]*>/i)?.[0] ?? null,
-    wpContentRefs: (home.body.match(/wp-content|wp-includes/g) ?? []).length,
     templatePath: home.body.match(/\/templates\/([^/"']+)\//)?.[0] ?? null,
     designCredit: home.body.match(/aria-label="(Site Design[^"]+)"/)?.[1] ?? null,
     proprietaryComment: home.body.match(/<!--\s*(PROPRIETARY[^>]*?)\s*-->/)?.[1] ?? null,
@@ -695,11 +645,10 @@ async function main() {
       Object.entries(home.headers).filter(([k]) => ['server', 'unit', 'x-powered-by', 'access-control-allow-origin', 'cache-control', 'set-cookie', 'strict-transport-security', 'x-frame-options'].includes(k)),
     ),
     analyticsIds: [...new Set(home.body.match(/\b(G-[A-Z0-9]{8,}|UA-\d+-\d+|GTM-[A-Z0-9]+)\b/g) ?? [])],
-    probes,
   };
 
   // 2. Sitemaps
-  const sitemapRoots = [...new Set([...robots.getSitemaps(), `${ORIGIN}/sitemap.xml`, `${ORIGIN}/sitemap_index.xml`, `${ORIGIN}/wp-sitemap.xml`])];
+  const sitemapRoots = [...new Set([...robots.getSitemaps(), `${ORIGIN}/sitemap.xml`])];
   const sitemaps = await readSitemaps(fetcher, sitemapRoots);
   for (const sitemap of sitemaps.filter((s) => s.raw)) {
     await save(`sitemaps/${new URL(sitemap.url).pathname.replace(/^\/+/, '').replace(/[^\w.-]+/g, '_')}`, sitemap.raw);
@@ -715,10 +664,7 @@ async function main() {
   const treeUrls = treeFlat.map(({ item }) => resolveUrl(item.href, `${ORIGIN}/site-map`)).filter((u): u is URL => !!u);
   await save('site-map-tree.json', tree);
 
-  // 4. WordPress REST inventory, if there is one
-  const wpData = wp.apiRoot ? await wpInventory(wp.apiRoot) : null;
-
-  // 5. Crawl: homepage + sitemap + site-map tree, following same-site links
+  // 4. Crawl: homepage + sitemap + site-map tree, following same-site links
   console.log('Crawling…');
   const pages = new Map<string, PageRecord>();
   const discoveredFrom = new Map<string, string>();
@@ -728,14 +674,14 @@ async function main() {
   const broken = pageList.filter((p) => p.status !== 200);
   console.log(`Crawled ${pageList.length} URLs (${okPages.length} OK).`);
 
-  // 6. Navigation (homepage + one inner page)
+  // 5. Navigation (homepage + one inner page)
   const innerUrl = `${ORIGIN}/hcv-program`;
   const inner = await fetcher.get(innerUrl);
   await save('pages/hcv-program.html', inner.body);
   const nav = { home: extractNav(home.body), inner: extractNav(inner.body) };
   const sameHeaderOnInner = JSON.stringify(nav.home.main) === JSON.stringify(nav.inner.main);
 
-  // 7. File library (show_image.php ids): HEAD every referenced id, then sample the rest
+  // 6. File library (show_image.php ids): HEAD every referenced id, then sample the rest
   // asLink: linked (<a href>) from page content, as opposed to only shown as an image.
   const references = new Map<number, { pages: Set<string>; asLink: boolean }>();
   for (const page of okPages) {
@@ -768,7 +714,7 @@ async function main() {
   const linkedDocs = liveFiles.filter((f) => references.get(f.id)!.asLink);
   const largest = [...liveFiles].sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0)).slice(0, 10);
 
-  // 8. Document links in content: file library vs elsewhere
+  // 7. Document links in content: file library vs elsewhere
   const docLinkInstances = okPages.flatMap((p) => [
     ...p.fileLinks.map((l) => ({ page: p.url, where: 'file library (show_image.php)', kind: fileById.get(l.id)?.kind ?? 'unknown', text: l.text })),
     ...p.docLinks.map((l) => ({ page: p.url, where: l.onSite ? 'same host, direct path' : `external: ${new URL(l.href).hostname}`, kind: l.href.match(DOC_EXT)?.[1]?.toLowerCase() ?? 'doc host', text: l.text, href: l.href })),
@@ -781,7 +727,7 @@ async function main() {
     distinctSameHostDirect: [...new Set(okPages.flatMap((p) => p.docLinks.filter((l) => l.onSite).map((l) => l.href)))],
   };
 
-  // 9. Domain content
+  // 8. Domain content
   const news = await newsInventory();
   const calendar = await calendarInventory();
 
@@ -818,7 +764,7 @@ async function main() {
     }
   }
 
-  // 10. Migration risk signals
+  // 9. Migration risk signals
   const slugPages = okPages.filter((p) => p.group === 'page');
   const slugOf = (p: PageRecord) => decodeURIComponent(new URL(p.url).pathname.slice(1));
   const wpSafe = (slug: string) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug);
@@ -870,7 +816,6 @@ async function main() {
     },
     robots: { text: robotsRes.body, crawlDelay: robots.getCrawlDelay(USER_AGENT) ?? null, sitemaps: robots.getSitemaps() },
     platform,
-    wp: { ...wp, inventory: wpData },
     sitemaps: sitemaps.map((s) => ({ url: s.url, status: s.status, kind: s.kind, urls: s.urls.length, children: s.children })),
     sitemapByGroup: countBy(sitemapUrls, (u) => urlGroup(u)),
     siteMapTree: {
@@ -946,7 +891,6 @@ async function main() {
   console.log(
     JSON.stringify(
       {
-        wordpress: !!wp.apiRoot,
         sitemapUrls: sitemapUrls.length,
         crawled: summary.crawl,
         files: { referenced: references.size, byKind: summary.files.byKind, estimatedUnreferenced: summary.files.unreferencedProbe.estimatedLiveUnreferenced },

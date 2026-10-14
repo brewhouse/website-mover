@@ -1,6 +1,6 @@
 # M0 spike: jaxha.org source inventory
 
-**Result: FAIL for "WordPress with a public REST API".** https://www.jaxha.org/ is not WordPress. It runs a proprietary PHP CMS from Brooks Jeffrey Marketing (BJM), who also design and host it. There is no `/wp-json/`, no `api.w.org` link, no feeds and no `wp-content`. The inventory below was therefore built from a polite HTML crawl plus HEAD requests against the CMS's file endpoint. This is the plan's non-WordPress path (§6.2), and it changes several §6.5 / §6.14 assumptions (see Risks).
+**Result: done.** https://www.jaxha.org/ runs a proprietary PHP CMS from Brooks Jeffrey Marketing (BJM), who also design and host it. As expected (sources are never WordPress), there's no API. The inventory below was built from a polite HTML crawl plus HEAD requests against the CMS's file endpoint (§6.2). It shaped PLAN §6.5 and §6.14 (see Risks).
 
 - **Scan date:** 2026-10-13 (the UTC timestamp in `inventory.json` is 2026-10-14T01:28Z).
 - **Re-run** from the repo root: `pnpm exec tsx packages/crawler/scripts/jha-inventory.ts --sweep-file-ids`. Responses are cached in `snapshots/jha/http/`, so a re-run is offline except for anything new. Delete that folder for a fresh scan. Without `--sweep-file-ids` the script HEADs a sample of 120 unreferenced file ids instead of all of them.
@@ -36,7 +36,9 @@
 | Forms | 7 public + staff login | native CMS forms and jQuery formBuilder; no third-party form vendors |
 | Words | ~117k in pages, ~63k in news | median page 305 words |
 
-## 1. Platform and REST API
+## 1. Platform
+
+The WordPress probes below come from the first scan. The script no longer runs them, since sources are never WordPress.
 
 | Check | Result |
 |---|---|
@@ -276,10 +278,10 @@ Many "forms" pages (landlord, public housing, HCV, procurement) are lists of PDF
 
 ## Risks / open questions
 
-1. **Non-WordPress source.** JHA has to use the HTML path (§6.2): a crawl seeded by sitemap.xml *and* `/site-map`, since the sitemap is stale, with the content selectors listed in §8. This is the first client, so the generic HTML extractor moves earlier in the plan.
+1. **Crawl seeding.** Seed the crawl from sitemap.xml *and* `/site-map`, since the sitemap is stale, and use the content selectors listed in §8.
 2. **Ask BJM for an export?** A database or CSV export (pages with ids and parents, news with categories and dates, files with upload dates and original names, alert subscribers, form submissions) would be more complete than the crawl and would give dates the HTML lacks. Contract and ownership terms need checking given the proprietary notice.
 3. **Unreferenced files (720 live, 587 of them documents, 195 MB).** Do we migrate them, migrate them as Archive (§6.5), or skip them? They include old agendas and minutes, duplicates and hash-named files whose context is unknown.
-4. **Redirects.** About 1,800 legacy URLs are query-string or id based (1,281 files, 256 news, 198 pages, 76 communities and ZIPs). §6.5 "preserve upload paths" doesn't apply. We need id-to-URL redirect maps for `show_image.php`, `upages.php` and `news-view`, ideally handled in the bridge rather than as thousands of redirect rows. The redirect tool must match query strings.
+4. **Redirects.** About 1,800 legacy URLs are query-string or id based (1,281 files, 256 news, 198 pages, 76 communities and ZIPs). We need id-to-URL redirect maps for `show_image.php`, `upages.php` and `news-view`, ideally handled in the bridge rather than as thousands of redirect rows. The redirect tool must match query strings.
 5. **Meeting model.** We need rules to merge one meeting's notice page, agenda page, minutes page, news item and files into one `meeting` (date + kind). 87 titles have no date. Do the 128 meeting-notice news items stay as news too?
 6. **Events.** The calendar is empty. Should Events start empty, or should meetings and workshops show on a calendar?
 7. **Forms.** Is the direct deposit form (SSN/EIN and bank details) rebuilt in the WordPress forms plugin, replaced by a PDF, or moved into Rent Café? Where do submissions go today (email or CMS)? The SMS/email alerts subscribers need an export and a new tool.

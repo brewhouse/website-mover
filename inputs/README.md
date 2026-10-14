@@ -12,7 +12,7 @@ inputs/
     fonts/                licensed font files (only if the brand uses commercial fonts)
     sitemap.xlsx          approved sitemap (.csv also fine)
     priority-urls.csv     optional: top pages export
-    jaxha-export.xml      optional: WordPress export of jaxha.org
+    source-export/        optional: content export from jaxha.org's CMS vendor (BJM)
 ```
 
 ## Framework
@@ -43,6 +43,6 @@ inputs/
 
 **Optional**
 - `priority-urls.csv`: a top-pages export from Google Analytics or Search Console. Used to rank which old URLs get 301 redirects first.
-- `jaxha-export.xml`: from jaxha.org admin, Tools → Export → All content. It includes raw content and custom fields that the public API hides.
+- `source-export/`: a content export from Brooks Jeffrey Marketing (jaxha.org's CMS vendor), if they'll provide one: pages with ids and parents, news with dates and categories, files with upload dates and original names. It fills gaps the crawl can't see.
 - GA4 measurement ID (`G-…`). Add it to `.env` as `GA4_MEASUREMENT_ID`.
 - Content rules: pages to leave out, a cutoff date for archiving old documents, which forms are still in use. A short `notes.md` is fine.

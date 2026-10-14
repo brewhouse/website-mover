@@ -23,11 +23,11 @@ Optional advanced inputs: approved sitemap (CSV/XLSX), project profile + brief, 
 | Target theme | **Planeteria framework**, styled to the client's brand from the style guide. Template strategy depends on the framework type — see §6.7. |
 | Seed site | ACF + whatever forms plugin is installed (adapters for the top two). Our **bridge plugin** is installed on the seed. |
 | Bridge plugin | Needed only during migration. Everything it creates is stored natively (ACF post types/field groups, the forms plugin's own forms, templates), so it can be removed afterwards without breaking the site. |
-| Sources | Mostly WordPress → read the source's public WP REST API first; HTML crawl is the fallback. Accept a WXR export file as an optional extra input. |
+| Sources | **Never WordPress** (only the target is). Every source is read by HTML crawl (§6.2). A content export from the source's CMS vendor is an optional extra input. |
 | Users | Internal team tool. Docker Compose deploy behind a login. |
 | AI | **OpenAI** via the official `openai` Node SDK — Responses API, Structured Outputs (strict JSON schema), PDF file input, Batch API for bulk work. Model set by `OPENAI_MODEL` env; key from `OPENAI_API_KEY`. |
 | AI rules | Rules first, AI only for judgement. **AI never writes or rewrites content.** Any value AI extracts must appear verbatim in the source (checked). |
-| URLs | Keep slugs and hierarchy, unless the approved sitemap moves a page (then 301). Keep document upload paths. |
+| URLs | Keep slugs and hierarchy where they're WordPress-safe, unless the approved sitemap moves a page. Every legacy URL that changes, including id/query-string page and file URLs, gets a 301 (§6.14). |
 | Language/stack | TypeScript end to end (pnpm workspaces). |
 | Template strategy *(M0)* | PlaneteriaWeb is a **classic PHP child theme of a block theme** (TT2), i.e. a hybrid, so we use the **classic/hybrid path** (§6.7). Design, header, footer and homepage go through the framework's own ACF options, named menus, page templates and ACF fields. See `docs/m0/framework-assessment.md`. |
 | Content model *(M0)* | **Target the framework's own types and field names** (`post`, `events` + `meeting_event_type`, `people`, `resource_library` and library attachments, `departments`, `faqs`, `alert`). Create new ACF types only when nothing fits (§6.4). Field definitions are read from the seed through the bridge (`GET /schema`), never guessed. |
@@ -54,7 +54,7 @@ Optional advanced inputs: approved sitemap (CSV/XLSX), project profile + brief, 
 
 ```
 1 INTAKE   source URL · target URL + WP user + App Password · style guide PDF · (optional inputs)
-2 SCAN     discover URLs (WP REST / sitemaps / crawl) → snapshot every page + media list → extract → read style guide
+2 SCAN     discover URLs (sitemaps / HTML site map / crawl) → snapshot every page + media list → extract → read style guide
 3 ANALYZE  classify pages → apply content-model preset → cluster leftovers into CPT proposals
            → map to approved sitemap → detect forms/nav → probe target capabilities
 4 PLAN     versioned JSON: every URL → destination, CPTs, fields, templates, design tokens,
@@ -79,12 +79,11 @@ Optional advanced inputs: approved sitemap (CSV/XLSX), project profile + brief, 
 Form with the three required inputs + Advanced section. App Password encrypted at rest (AES-256-GCM, key from env), redacted in logs, can be purged after the run. Required checkbox: "I have the rights to migrate this content."
 
 ### 6.2 Source acquisition
-- **WordPress sources (primary):** detect via `<link rel="https://api.w.org/">`. Pull pages, posts, public CPTs, categories, tags, authors, and the **full media library** (`/wp/v2/media`, catches unlinked PDFs). Use `content.rendered` (raw needs auth).
-- **Other sources:** robots.txt → sitemaps (incl. indexes, `/wp-sitemap.xml`) → same-host BFS with depth/page limits. Platform fingerprinting (Squarespace, Wix, Webflow, Shopify, static).
-- **JHA is not WordPress** *(M0)*. jaxha.org runs a proprietary CMS from Brooks Jeffrey Marketing (BJM). For JHA, the HTML path *is* the main path, so the generic extractor moves into M1.
-  - **Seed the crawl from `sitemap.xml` *and* any HTML site map.** JHA's `sitemap.xml` is stale and is missing 82 live pages.
-  - **Per-platform content selectors.** For BJM: `#bodyContainer`, `#cms_body_content`, `#cms-content`, `#interior section`.
-  - **Find unlinked files where the file endpoint uses sequential ids** by HEAD-sweeping the id range.
+Sources are never WordPress, so the HTML crawl is the only path:
+- robots.txt → sitemaps (incl. indexes) **and any HTML site map** → same-host BFS with depth/page limits. Sitemaps can be stale: JHA's is missing 82 live pages that its HTML site map has.
+- **Platform fingerprinting** picks per-platform content selectors and URL patterns. Examples: BJM (JHA's CMS), Squarespace, Wix, Webflow, Shopify, Drupal, CivicPlus, Granicus, static. For BJM: `#bodyContainer`, `#cms_body_content`, `#cms-content`, `#interior section`. The generic extractor (§6.3) handles unknown platforms.
+- **Documents and media:** every file linked from content, plus, where the file endpoint uses sequential ids (BJM's `show_image.php?id=N`), a HEAD sweep of the id range to find files nothing links to.
+- Dates, categories and authors come from listings and page markup, since there is no API.
   - `docs/m0/jha-inventory.md` has the numbers.
 - **JS-rendered pages:** Playwright fallback when static HTML has little content.
 - URL normalization: canonical, strip tracking params, trailing slash, dedupe by content hash. Skip feeds, pagination, tag archives, search, login, cart.
@@ -130,8 +129,8 @@ Inference then proposes **extra** types for review (e.g. properties/communities,
 - Display: simple fields via **Block Bindings** (`acf/field` source, ACF 6.3+); repeaters/galleries via a small dynamic block (lives in theme, not the bridge) — *revisit once framework is known.*
 
 ### 6.5 Documents (first-class)
-- Inventory = full source media library + every document link in content (PDF, DOC/X, XLS/X, PPT/X).
-- **Preserve original upload paths** (`/wp-content/uploads/YYYY/MM/file.pdf`) via a bridge endpoint → old links in emails/other sites keep working with no redirects. *This only applies to WordPress sources.* JHA serves every file as `/plugins/show_image.php?id=N` (1,281 live files), so old document links need **query-string redirects** (§6.14).
+- Inventory = every document link in content (PDF, DOC/X, XLS/X, PPT/X) plus files found by an id sweep of the source's file endpoint (§6.2).
+- Files get normal WordPress upload paths. Old document URLs (JHA: `/plugins/show_image.php?id=N`, 1,281 live files) keep working through **redirects** (§6.14), so links in emails and other sites don't break.
 - On Planeteria, each document is a library **attachment** (`index_for_library=1`, `publication_date`, `resource_type`, `related_depts`) listed by the framework's Document Directory. Multi-file resources become `resource_library` posts. PDF text is extracted for search.
 - Files nothing links to (JHA: 720, 195 MB of documents) are listed in the plan with a default of **skip**. The reviewer can include them or mark them as Archive.
 - Search: core WP search doesn't read PDFs → PDF-indexing search plugin by default; fallback stores extracted text where core search looks.
@@ -213,7 +212,7 @@ Tabs: **Summary** (expected counts, warnings) · **Content** (every URL → type
 1. **Preflight:** auth, WP version, required plugins active, theme, upload limits, `Authorization` header not stripped, environment lock (e.g. Pantheon basic-auth lock conflicts with App Passwords).
 2. **Design:** tokens, fonts, logo, site title/icon.
 3. **Schema:** CPTs, taxonomies, field groups, forms, permalink structure (match source to avoid redirects).
-4. **Terms → media & documents** (dedupe by hash, preserved paths).
+4. **Terms → media & documents** (dedupe by hash, record each file's legacy URL for redirects).
 5. **Content pass 1:** create as drafts, parents first.
 6. **Content pass 2:** rewrite internal links and media URLs.
 7. **Templates, parts, menus, homepage**, front page / posts page settings.
@@ -283,7 +282,7 @@ Encrypted credentials; SSRF guard; HTML sanitized before saving to WordPress; PD
 | # | Milestone | Demo | Size |
 |---|---|---|---|
 | M0 | **De-risk:** HTML→blocks validity in Node; bridge creating CPTs, ACF groups, forms; style guide extraction on real PDFs; scan jaxha.org → inventory (pages, posts, documents by type, meetings, events, forms); inspect Planeteria framework → pick template strategy | Risky parts proven + JHA inventory | S |
-| M1 | **Thin end-to-end:** pages + news + **documents with preserved paths** → Gutenberg → media → links → read-only plan + approve → count report | JHA pages/news/docs in the seed | M |
+| M1 | **Thin end-to-end:** pages + news + **documents with legacy-URL redirects** → Gutenberg → media → links → read-only plan + approve → count report | JHA pages/news/docs in the seed | M |
 | M2 | **Public-sector model:** meetings, events, document library, board members, quick links, forms | Structured JHA content | M |
 | M3 | **Design:** JHA style guide → Planeteria framework; header/footer/nav from approved sitemap; templates | Branded site | M |
 | M4 | **Review UI:** editable plan, sitemap mapping, extra-type inference, design preview | Approval gate as specified | S–M |
@@ -293,13 +292,13 @@ Encrypted credentials; SSRF guard; HTML sanitized before saving to WordPress; PD
 
 | # | Was | Now | Why |
 |---|---|---|---|
-| M1 | M | **M–L** | jaxha.org isn't WordPress, so the generic HTML extractor (BJM selectors, boilerplate removal, allowlist sanitizer) comes into M1 instead of reading WP REST. Documents have no upload paths to keep: they become library attachments plus id-based redirects. 561 referenced files to upload. Blocked until we have the seed DB/ACF export and seed credentials. Less risk on conversion (done) and the bridge (done) |
+| M1 | M | **M–L** | The original estimate assumed sources with a WordPress REST API. All sources are HTML-crawled, so the HTML extractor (platform selectors, boilerplate removal, allowlist sanitizer) is core M1 work. Documents have no upload paths to keep: they become library attachments plus id-based redirects. 561 referenced files to upload. Blocked until we have the seed DB/ACF export and seed credentials. Less risk on conversion (done) and the bridge (done) |
 | M2 | M | **M–L** | Merging meetings is the hard part: 397 URLs (notice/agenda/minutes pages, notice news items, files) → ≈206 meetings, 87 with no date in the title. Lighter elsewhere: events 0, board 6, quick links come from the client, forms 7 (3 with parseable JSON). Communities (29) and the ZIP table are optional extras |
 | M3 | M | **M** | No block templates to build: the framework's PHP templates, ACF options, named menus and homepage ACF fields do it. New work: CSS overrides for hard-coded fonts and the Pantheon read-only CSS file. Depends on the style guide PDF and on the team making theme changes T1–T7 |
 | M4 | S–M | **S–M** | Unchanged. The sitemap mapping tab matters more, since the source tree has almost everything under "About Us" |
 | M5 | M | **M** | Redirects are bigger (≈1,800 id/query-string URLs). The homepage is ACF field mapping rather than patterns (smaller). GA4 property known (`G-ZHVZNQBLZ8`) |
 
-Net: about one size larger overall, mostly because the first client isn't a WordPress source. Order unchanged.
+Net: about one size larger overall, mostly because every source is HTML-crawled rather than read from an API. Order unchanged.
 
 ## 11. Risks
 
@@ -320,7 +319,7 @@ Net: about one size larger overall, mostly because the first client isn't a Word
 | *(M0)* Sensitive forms (SSN, bank details) | Never recreated automatically; human decision |
 
 ## 12. Not in v1
-Pixel-perfect visual cloning · WooCommerce · memberships / gated content · multilingual · comments (except WP sources, later) · creating user accounts (content attributed to one user, original author name kept).
+Pixel-perfect visual cloning · WooCommerce · memberships / gated content · multilingual · comments · creating user accounts (content attributed to one user, original author name kept).
 
 ## 13. JHA scope traceability
 

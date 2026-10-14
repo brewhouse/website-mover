@@ -80,4 +80,4 @@ form page: 2 gform wrapper line(s)
 
 **Lesson for M1:** in the first run, `location_address` was guessed as a textarea. The framework template expects a google_map array and crashed (`Cannot access offset of type string on string`, single-events.php:134). M1 must read the hosted seed's real definitions with `GET /schema` instead of recreating them. For local tests, the definitions should come from an ACF export of the seed.
 
-**Next for the bridge (M1–M3):** ACF options write (Theme Settings + footer fields, then `generate_options_css()`), Yoast meta, an upload with a preserved path (PLAN §6.5), and Redirection import.
+**Next for the bridge (M1–M3):** ACF options write (Theme Settings + footer fields, then `generate_options_css()`), Yoast meta, legacy-URL redirects for id/query-string URLs (PLAN §6.14), and Redirection import.
