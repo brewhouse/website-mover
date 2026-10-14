@@ -13,11 +13,9 @@ interface BridgeStatus {
   reserved_slugs: string[];
 }
 
-/** REST client for a target. M1 runs against the local Docker seed only. */
+/** REST client for the local Docker seed (.env). Saved targets are built from their stored credentials. */
 export function connectTarget(name: TargetName): WpClient {
-  if (name !== 'local') {
-    throw new Error('Only --target local is enabled in M1. The hosted seed needs the bridge plugin installed first.');
-  }
+  if (name !== 'local') throw new Error(`Only the local seed is configured from .env; "${name}" is a saved target`);
   return localSeedClient();
 }
 

@@ -1,37 +1,31 @@
 /**
- * Website Mover CLI (M1). Each command is one pipeline stage; see docs/m1/design.md.
+ * Website Mover CLI. Each pipeline command is one stage (shared with the queue worker, src/stages.ts).
  *
- *   pnpm --filter @wm/worker wm scan    --job jha --origin https://www.jaxha.org --profile bjm [--cache snapshots/jha/http]
- *   pnpm --filter @wm/worker wm extract --job jha
- *   pnpm --filter @wm/worker wm analyze --job jha
- *   pnpm --filter @wm/worker wm plan    --job jha [--target local] [--timezone America/New_York]
- *   pnpm --filter @wm/worker wm approve --job jha --by "Name"
- *   pnpm --filter @wm/worker wm execute --job jha [--target local]
- *   pnpm --filter @wm/worker wm report  --job jha [--target local]
+ *   wm scan    --job jha --origin https://www.jaxha.org --profile bjm [--cache snapshots/jha/http]
+ *   wm extract --job jha
+ *   wm analyze --job jha
+ *   wm plan    --job jha [--target local] [--timezone America/New_York]
+ *   wm approve --job jha --by "Name"
+ *   wm execute --job jha [--target local]
+ *   wm report  --job jha [--target local]
+ *
+ * --target local is the Docker seed configured in .env; any other name is a target saved in the
+ * web app (needs DATABASE_URL).
+ *
+ * Web app administration (needs DATABASE_URL):
+ *   wm user add      --email a@b.org --name "Full Name" [--password-env VAR]
+ *   wm user password --email a@b.org [--password-env VAR]
+ *   wm target add    --name local --url http://localhost:8088 --user wm-local [--password-env VAR]
+ *   wm job register  --job jha --origin https://www.jaxha.org --profile bjm --target local --by a@b.org [--timezone ...]
+ * Passwords are read from the named environment variable, or prompted for (hidden), never taken as arguments.
  */
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
-import {
-  jobPath,
-  readJson,
-  readJsonl,
-  type ExtractedPage,
-  type FormAnalysis,
-  type JobInfo,
-  type MeetingAnalysis,
-  type RecordAnalysis,
-  type SiteAnalysis,
-  type SnapshotFile,
-  type SnapshotPage,
-} from '@wm/core';
-import { scanSite } from '@wm/crawler';
-import { extractJob } from '@wm/extractor';
-import { analyzeForms, analyzeMeetings, analyzeRecords, analyzeSite } from '@wm/analyzer';
-import { approvePlan, buildPlan, latestPlanVersion, loadDecisions, loadPlan, savePlan } from '@wm/planner';
-import { buildReport, connectTarget, executePlan, probeTarget, type TargetName } from '@wm/executor';
+import { approvePlan, loadPlan } from '@wm/planner';
+import { connectTarget } from '@wm/executor';
+import { WpClient } from '@wm/wp-client';
+import { runStage, type StageName } from './stages.js';
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -43,108 +37,119 @@ const { positionals, values } = parseArgs({
     target: { type: 'string', default: 'local' },
     by: { type: 'string' },
     timezone: { type: 'string' },
+    email: { type: 'string' },
+    name: { type: 'string' },
+    url: { type: 'string' },
+    user: { type: 'string' },
+    'password-env': { type: 'string' },
   },
 });
-const [command] = positionals;
-const jobId = values.job ?? fail('--job is required');
-const target = values.target as TargetName;
+const [command, sub] = positionals;
 // pnpm runs scripts in the package directory; resolve user paths against where the command was typed.
 const cwd = process.env.INIT_CWD ?? process.cwd();
 
-switch (command) {
-  case 'scan': {
-    const origin = values.origin ?? fail('--origin is required');
-    const summary = await scanSite({
-      jobId,
-      origin,
-      profile: values.profile!,
-      cacheDir: values.cache ? path.resolve(cwd, values.cache) : undefined,
-      log: console.log,
-    });
-    console.log(summary);
-    break;
-  }
-  case 'extract':
-    console.log(await extractJob({ jobId, log: console.log }));
-    break;
-  case 'analyze': {
-    const meetings = await analyzeMeetings(jobId, console.log);
-    const forms = await analyzeForms(jobId, console.log);
-    const records = await analyzeRecords(jobId, console.log);
-    const site = await analyzeSite(jobId, console.log);
-    console.log({
-      meetings: meetings.meetings.length,
-      meetingIndexPages: meetings.indexPages.length,
-      unresolvedMeetings: meetings.unresolved.length,
-      forms: forms.forms.length,
-      people: records.people.length,
-      communities: records.communities.length,
-      tables: records.tables.length,
-      documents: records.documents.length,
-      menus: Object.fromEntries(Object.entries(site.menus).map(([k, v]) => [k, v.length])),
-      homeSlides: site.home.slides.length,
-    });
-    break;
-  }
-  case 'plan': {
-    const job = await readJson<JobInfo>(jobPath(jobId, 'job.json'));
-    // Analysis is optional (M1 plans don't have it); when present, its hashes go into the plan.
-    const analysisFiles = { meetings: 'meetings.json', forms: 'forms.json', records: 'records.json', site: 'site.json' } as const;
-    const analysis: { meetings?: MeetingAnalysis; forms?: FormAnalysis; records?: RecordAnalysis; site?: SiteAnalysis } = {};
-    const analysisSha256: Record<string, string> = {};
-    for (const [name, file] of Object.entries(analysisFiles)) {
-      const full = jobPath(jobId, 'analyze', file);
-      if (!existsSync(full)) continue;
-      const raw = await readFile(full);
-      analysisSha256[name] = sha256(raw);
-      (analysis as Record<string, unknown>)[name] = JSON.parse(raw.toString());
+const STAGES: StageName[] = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report'];
+
+if (command && (STAGES as string[]).includes(command)) {
+  const jobId = values.job ?? fail('--job is required');
+  const summary = await runStage(command as StageName, {
+    jobId,
+    source: command === 'scan' ? { origin: values.origin ?? fail('--origin is required'), profile: values.profile!, cacheDir: values.cache ? path.resolve(cwd, values.cache) : undefined } : undefined,
+    target: ['plan', 'execute', 'report'].includes(command) ? await cliTarget(values.target!) : undefined,
+    timezone: values.timezone,
+    log: console.log,
+  });
+  console.log(summary);
+} else {
+  switch (command) {
+    case 'approve': {
+      const jobId = values.job ?? fail('--job is required');
+      const by = values.by ?? fail('--by "<your name>" is required');
+      const { plan } = await loadPlan(jobId);
+      const approval = await approvePlan(jobId, by);
+      console.log(`Approved plan v${approval.planVersion} (${approval.planSha256.slice(0, 12)}) by ${by}:`, plan.expected);
+      break;
     }
-    const client = connectTarget(target);
-    const { info, existing } = await probeTarget(client, target);
-    const plan = buildPlan({
-      jobId,
-      version: (await latestPlanVersion(jobId)) + 1,
-      source: { origin: job.origin, profile: job.profile },
-      inputs: { extractSha256: sha256(await readFile(jobPath(jobId, 'extract', 'pages.jsonl'))), analysisSha256 },
-      target: info,
-      pages: await readJsonl<ExtractedPage>(jobPath(jobId, 'extract', 'pages.jsonl')),
-      snapshotPages: await readJsonl<SnapshotPage>(jobPath(jobId, 'snapshot', 'pages.jsonl')),
-      files: await readJsonl<SnapshotFile>(jobPath(jobId, 'snapshot', 'files.jsonl')),
-      existing,
-      analysis,
-      timezone: values.timezone,
-      decisions: await loadDecisions(jobId),
-    });
-    const sha = await savePlan(plan);
-    console.log(`Plan v${plan.version} (${sha.slice(0, 12)}):`, plan.expected);
-    for (const w of plan.warnings) console.log(`  ! ${w}`);
-    console.log(`Review: ${jobPath(jobId, 'plan', `plan.v${plan.version}.md`)}`);
-    break;
+    case 'user': {
+      const db = await import('@wm/db');
+      await db.migrate();
+      const email = values.email ?? fail('--email is required');
+      if (sub === 'add') {
+        const user = await db.createUser(email, values.name ?? fail('--name is required'), await secret('Password for the new user'));
+        console.log(`Added ${user.name} <${user.email}>`);
+      } else if (sub === 'password') {
+        console.log((await db.setPassword(email, await secret('New password'))) ? 'Password changed; their sessions are ended' : `No user ${email}`);
+      } else fail('wm user add | wm user password');
+      await db.closeDb();
+      break;
+    }
+    case 'target': {
+      if (sub !== 'add') fail('wm target add');
+      const db = await import('@wm/db');
+      await db.migrate();
+      const target = await db.createTarget({
+        name: values.name ?? fail('--name is required'),
+        url: values.url ?? fail('--url is required'),
+        wpUser: values.user ?? fail('--user is required'),
+        appPassword: await secret('Application Password'),
+        createdBy: null,
+      });
+      console.log(`Added target ${target.name}: ${target.url} as ${target.wpUser}`);
+      await db.closeDb();
+      break;
+    }
+    case 'job': {
+      if (sub !== 'register') fail('wm job register');
+      // A job the CLI already ran (files under data/jobs/<id>) becomes visible in the web app.
+      const db = await import('@wm/db');
+      await db.migrate();
+      const id = values.job ?? fail('--job is required');
+      const target = (await db.listTargets()).find((t) => t.name === values.target) ?? fail(`No saved target "${values.target}" (wm target add)`);
+      const by = (await db.listUsers()).find((u) => u.email === values.by?.toLowerCase()) ?? fail('--by <email of a web app user> is required');
+      await db.createJob({
+        id,
+        sourceUrl: values.origin ?? fail('--origin is required'),
+        profile: values.profile!,
+        targetId: target.id,
+        timezone: values.timezone ?? null,
+        ga4Id: null,
+        styleGuide: null,
+        userId: by.id,
+      });
+      await db.audit(id, by.id, 'job.register', { target: target.name });
+      console.log(`Registered job ${id} (target ${target.name})`);
+      await db.closeDb();
+      break;
+    }
+    default:
+      fail(`Unknown command "${command ?? ''}". Commands: ${STAGES.join(', ')}, approve, user, target, job`);
   }
-  case 'approve': {
-    const by = values.by ?? fail('--by "<your name>" is required');
-    const { plan } = await loadPlan(jobId);
-    const approval = await approvePlan(jobId, by);
-    console.log(`Approved plan v${approval.planVersion} (${approval.planSha256.slice(0, 12)}) by ${by}:`, plan.expected);
-    break;
-  }
-  case 'execute': {
-    const state = await executePlan({ jobId, client: connectTarget(target) });
-    console.log(`Done: ${Object.keys(state.entities).length} objects, ${state.failures.length} failures, ${state.redirects.length} redirects`);
-    break;
-  }
-  case 'report': {
-    const report = await buildReport({ jobId, client: connectTarget(target) });
-    console.table(report.counts);
-    console.log(`Report: ${jobPath(jobId, 'report', 'report.md')}`);
-    break;
-  }
-  default:
-    fail(`Unknown command "${command ?? ''}". Commands: scan, extract, analyze, plan, approve, execute, report`);
 }
 
-function sha256(data: Buffer): string {
-  return createHash('sha256').update(data).digest('hex');
+/** 'local' is the Docker seed from .env; other names are targets saved in the web app. */
+async function cliTarget(name: string): Promise<{ name: string; client: WpClient }> {
+  if (name === 'local') return { name, client: connectTarget('local') };
+  const db = await import('@wm/db');
+  const target = (await db.listTargets()).find((t) => t.name === name) ?? fail(`No saved target "${name}"`);
+  const creds = await db.targetCredentials(target.id);
+  await db.closeDb();
+  return { name, client: new WpClient(creds) };
+}
+
+/** A secret from --password-env, else a hidden prompt. */
+async function secret(prompt: string): Promise<string> {
+  const env = values['password-env'];
+  if (env) return process.env[env] ?? fail(`$${env} is not set`);
+  if (!process.stdin.isTTY) fail(`No terminal to ask for the ${prompt.toLowerCase()}: use --password-env VAR`);
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(`${prompt}: `, resolve);
+    // Hide what's typed.
+    (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = () => {};
+  });
+  rl.close();
+  process.stdout.write('\n');
+  return answer;
 }
 
 function fail(message: string): never {

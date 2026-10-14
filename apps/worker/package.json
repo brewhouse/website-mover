@@ -7,12 +7,14 @@
   },
   "scripts": {
     "typecheck": "tsc -p .",
-    "wm": "tsx --env-file=../../.env src/cli.ts"
+    "wm": "tsx --env-file=../../.env src/cli.ts",
+    "worker": "tsx --env-file=../../.env src/worker.ts"
   },
   "dependencies": {
     "@wm/analyzer": "workspace:*",
     "@wm/core": "workspace:*",
     "@wm/crawler": "workspace:*",
+    "@wm/db": "workspace:*",
     "@wm/executor": "workspace:*",
     "@wm/extractor": "workspace:*",
     "@wm/planner": "workspace:*",

@@ -249,6 +249,9 @@ importers:
       '@wm/crawler':
         specifier: workspace:*
         version: link:../../packages/crawler
+      '@wm/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@wm/executor':
         specifier: workspace:*
         version: link:../../packages/executor
