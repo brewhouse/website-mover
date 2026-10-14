@@ -25,7 +25,7 @@ export function renderPlan(plan: Plan): string {
 
   out.push('## Existing content on the target', '');
   out.push('**Kept:**', '', ...plan.keep.map((k) => `- ${k.type} #${k.id} "${k.title}": ${k.reason}`), '');
-  out.push('**Moved to the trash on execute:**', '', ...plan.cleanup.map((c) => `- ${c.type} #${c.id} "${cell(c.title) || '(no title)'}"`), '');
+  out.push('**Moved to the trash on execute:**', '', ...plan.cleanup.map((c) => `- ${c.type} #${c.id} "${cell(c.title) || '(no title)'}"${c.reason ? `: ${c.reason}` : ''}`), '');
 
   if (plan.settings.length) {
     out.push('## Site settings changed', '', '| Setting | Now | Becomes | Why |', '|---|---|---|---|');

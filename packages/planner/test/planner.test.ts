@@ -114,12 +114,15 @@ describe('buildPlan', () => {
         entity(2, { template: 'template-news.php', slug: 'news' }),
         entity(3, { type: 'tribe_events', title: 'Demo event' }),
         entity(4, { type: 'page', slug: 'parks' }),
-        entity(5, { type: 'post', source_key: 'jaxha.org/news-view?id=1', slug: 'news-from-last-run' }),
+        entity(5, { type: 'post', source_key: 'jaxha.org/news-view?id=1', slug: 'news-from-last-run', job_id: 'test' }),
         entity(6, { type: 'attachment' }),
+        // Made by an earlier run of this job, no longer planned: trashed. Another job's: left alone.
+        entity(7, { type: 'tribe_events', source_key: 'meeting:2023-06-03:board', job_id: 'test' }),
+        entity(8, { type: 'page', source_key: 'other.org/page', job_id: 'other' }),
       ],
     });
     expect(p.keep.map((k) => k.id)).toEqual([1, 2]);
-    expect(p.cleanup.map((c) => c.id)).toEqual([3, 4]);
+    expect(p.cleanup.map((c) => c.id)).toEqual([3, 4, 7]);
     // Same source key as an earlier run: keeps that run's slug instead of colliding with the kept "news" page.
     expect(p.items[0]!.targetPath).toBe('/news-from-last-run/');
   });
@@ -172,6 +175,8 @@ describe('buildPlan with analysis (M2)', () => {
   it('turns meeting pages into events, keeps index pages, and places forms', () => {
     const notice = page('/upages.php?id=639', { kind: 'meeting', title: 'May 11th, 2026 - Finance Committee Meeting' });
     const agenda = page('/may-11-2026-agenda', { kind: 'meeting', title: 'May 11, 2026 Agenda' });
+    // A news item whose title-slug equals the agenda page's old URL, which will redirect to the event.
+    const news = page('/news-view?id=51', { kind: 'post', title: 'May 11 2026 Agenda' });
     const index = page('/meetings', { kind: 'meeting', title: 'Meetings' });
     const help = page('/help-center', { kind: 'utility', title: 'Help Center' });
     const signup = page('/sign-up', { kind: 'utility', title: 'Sign Up' });
@@ -192,7 +197,7 @@ describe('buildPlan with analysis (M2)', () => {
       source: { origin, profile: 'bjm' },
       inputs: { extractSha256: 'test' },
       target,
-      pages: [notice, agenda, index, help, signup],
+      pages: [notice, agenda, index, help, signup, news],
       snapshotPages: [],
       files: [agendaFile],
       existing: [],
@@ -233,7 +238,9 @@ describe('buildPlan with analysis (M2)', () => {
     // The merged meeting pages are one event; their URLs redirect to it, and they aren't pages.
     expect(withAnalysis.events).toHaveLength(1);
     expect(withAnalysis.events[0]!.redirectFrom).toEqual(['/upages.php?id=639', '/may-11-2026-agenda']);
-    expect(withAnalysis.items.map((i) => i.sourceUrl.replace(origin, ''))).toEqual(['/help-center', '/meetings']);
+    expect(withAnalysis.items.map((i) => i.sourceUrl.replace(origin, ''))).toEqual(['/help-center', '/meetings', '/news-view?id=51']);
+    // The old agenda URL redirects to the event, so the news post can't take it.
+    expect(withAnalysis.items.find((i) => i.type === 'post')!.targetPath).toBe('/may-11-2026-agenda-2/');
     // Forms go on their page; a subscription sign-up is flagged, and its page isn't migrated.
     expect(withAnalysis.items.find((i) => i.sourceUrl.endsWith('/help-center'))!.forms).toEqual([`${help.sourceKey}#form-1`]);
     expect(withAnalysis.forms.map((f) => [f.title, f.action, f.captcha])).toEqual([['Help Center', 'rebuild', true], ['Sign Up', 'flag', false]]);

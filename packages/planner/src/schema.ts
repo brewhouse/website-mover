@@ -170,6 +170,8 @@ export const PlanCleanup = z.object({
   type: z.string(),
   title: z.string(),
   link: z.string(),
+  /** Why it goes (default: seed demo content). */
+  reason: z.string().optional(),
 });
 export type PlanCleanup = z.infer<typeof PlanCleanup>;
 

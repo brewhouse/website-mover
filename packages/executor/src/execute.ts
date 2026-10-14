@@ -380,7 +380,8 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
       const route = `/wp/v2/${restBase('people')}`;
       const post = previous ? await client.post<Post>(`${route}/${previous.id}`, body) : await createOnce(client, route, body, person.key, 'people');
       assertTagged(post, person.key, 'people');
-      state.entities[person.key] = { kind: 'person', id: post.id, path: new URL(post.link).pathname, action: action(previous), warnings: [] };
+      // The framework's people type has no public page: people appear through blocks on pages.
+      state.entities[person.key] = { kind: 'person', id: post.id, path: '', action: action(previous), warnings: [] };
     } catch (err) {
       fail(person.key, 'person', 'create', err);
     }

@@ -103,7 +103,18 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const ownBases = new Set(communities.length ? ['communities'] : []);
 
   const keptSlugs = existing.filter((e) => keep.some((k) => k.id === e.id)).map((e) => e.slug);
-  const slugs = new SlugRegistry([...WP_RESERVED, ...target.reservedSlugs.filter((s) => !ownBases.has(s)), ...keptSlugs]);
+  // Old single-segment URLs that will redirect somewhere else (meeting pages merged into events,
+  // community pages, table sources) must not be handed out as new slugs: the redirect would win.
+  const movedAway = new Set([
+    ...(meetings?.meetings ?? []).flatMap((m) => m.sourceKeys),
+    ...communities.map((c) => c.sourceKey),
+    ...(records?.tables ?? []).flatMap((t) => t.sourceKeys),
+  ]);
+  const movedAwaySlugs = [...movedAway]
+    .map((k) => pageByKey.get(k))
+    .map((p) => (p && !new URL(p.url).search ? new URL(p.url).pathname.toLowerCase().replace(/^\/|\/$/g, '') : ''))
+    .filter((s) => s && !s.includes('/'));
+  const slugs = new SlugRegistry([...WP_RESERVED, ...target.reservedSlugs.filter((s) => !ownBases.has(s)), ...keptSlugs, ...movedAwaySlugs]);
   const claim = (key: string, preferred: string, registry = slugs) => registry.claim(ours.get(key)?.slug || preferred);
 
   // Source URLs that redirected to another page are aliases of it.
@@ -292,6 +303,23 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const tablePages = new Set(tables.flatMap((t) => t.sourceKeys));
 
   const included = new Set([...items.map((i) => i.sourceKey), ...eventPages, ...recordPages]);
+
+  // Objects an earlier run of this job created that the plan no longer has (e.g. a meeting whose
+  // date was corrected): trash them so they don't linger or hold their slugs. Media stays (WordPress
+  // deletes attachments outright rather than trashing them).
+  const plannedKeys = new Set([
+    ...items.map((i) => i.sourceKey),
+    ...events.map((e) => e.key),
+    ...people.map((p) => p.key),
+    ...recordsPlan.map((r) => r.sourceKey),
+    ...tables.map((t) => `table:${t.key}`),
+    ...contentTypes.map((c) => `listing:${c.postType}`),
+  ]);
+  for (const [key, e] of ours) {
+    if (e.job_id === input.jobId && e.type !== 'attachment' && !plannedKeys.has(key)) {
+      cleanup.push({ id: e.id, type: e.type, title: e.title, link: e.link, reason: 'created by an earlier run of this job; no longer in the plan' });
+    }
+  }
 
   const notMigrated: PlanSkip[] = pages
     .filter((p) => !included.has(p.sourceKey) && !tablePages.has(p.sourceKey))
