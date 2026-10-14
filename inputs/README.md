@@ -15,11 +15,11 @@ inputs/
     jaxha-export.xml      optional: WordPress export of jaxha.org
 ```
 
-## Framework (`inputs/framework/`)
+## Framework
 
 **Needed for M0**
-- The theme folder exactly as it sits in `wp-content/themes/`: the parent theme and any child theme. A folder or a zip is fine.
-- Any plugins the framework depends on (zips), or a list with versions. Include Planeteria-specific plugins and mu-plugins, and say whether it needs ACF Pro or a page builder.
+- **Preferred:** a local git clone of the seed site's Pantheon repo. Set `SEED_CODE_PATH` in `.env` to its path. It already holds the theme(s) and plugins, so nothing needs copying here. Treat it as read-only.
+- **Otherwise:** put the theme folder(s) from `wp-content/themes/` and the plugins they depend on in `inputs/framework/`.
 
 **Helpful**
 - The URL of a finished site built on the framework, ideally another housing authority, so we can see what "done" looks like.

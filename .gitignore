@@ -11,3 +11,4 @@ coverage/
 inputs/*
 !inputs/README.md
 snapshots/
+.local/

@@ -32,7 +32,7 @@ Optional advanced inputs: approved sitemap (CSV/XLSX), project profile + brief, 
 
 ## 3. Open items / inputs needed
 
-1. **Planeteria framework** — the user will provide it. Need to determine: block theme (theme.json / Site Editor), classic theme, or classic + page builder. This decides §6.7.
+1. **Planeteria framework** — provided as a local clone of the JHA seed site's Pantheon repo (`SEED_CODE_PATH`). Need to determine: block theme (theme.json / Site Editor), classic theme, or classic + page builder (decides §6.7), and which post types/fields the framework already defines (may replace parts of the §6.4 presets).
 2. **JHA style guide PDF.**
 3. **JHA approved sitemap** — and its format.
 4. **Seed site** URL + Application Password (needed from M1).
@@ -188,7 +188,7 @@ Full old→new map always. Priority = old nav/sitemap URLs, any changed path, do
 - **Postgres + pg-boss** (data + job queue). Snapshots/media cache on a volume or S3.
 - **AI:** `openai` SDK behind a thin internal interface (`structured(schema, input)`), ~5 call sites.
 - **Deploy:** Docker Compose (web, worker, postgres).
-- **Local test WordPress:** official `wordpress` Docker image + seed kit + ACF + forms plugin.
+- **Local test WordPress:** Docker, running a copy of the seed site's Pantheon codebase (exact theme + plugins) with a local DB, plus the bridge plugin mounted in.
 
 ```
 apps/web            Next.js UI + API

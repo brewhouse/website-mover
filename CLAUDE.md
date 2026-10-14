@@ -7,7 +7,8 @@ Internal tool that migrates a website into a blank WordPress "seed" site: scans 
 ## Key decisions (don't re-litigate)
 - Flow: Scan → Plan (versioned JSON) → Approve → Execute → Verify → QA → Report. Execution only follows the approved plan, using scan-time snapshots.
 - Gutenberg content built with WordPress's own block library (`@wordpress/blocks` `createBlock`/`serialize`, `rawHandler`), never hand-written block markup.
-- Target theme: **Planeteria framework** (user is providing it). Template strategy depends on whether it's a block or classic theme — decide in M0.
+- Target theme: **Planeteria framework**. Template strategy depends on whether it's a block or classic theme — decide in M0.
+- Seed codebase: the user's local git clone of the JHA seed site's Pantheon repo (path in `SEED_CODE_PATH`, e.g. `bases/jha-lift-shift`). It holds the framework theme and plugins. **Read-only: never edit, commit or push there** (a push deploys to Pantheon). Run local WordPress from a copy under `.local/`.
 - Seed site has ACF + a forms plugin + our bridge plugin (`wp/bridge`). The bridge is build-time only: everything it creates is stored natively.
 - Sources are mostly WordPress: use the source's public WP REST API first, HTML crawl as fallback.
 - AI = **OpenAI** (`openai` Node SDK, Responses API, Structured Outputs). Model from `OPENAI_MODEL`, key from `OPENAI_API_KEY`. AI never writes or rewrites content; extracted values must appear verbatim in the source.
