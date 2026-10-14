@@ -5,6 +5,7 @@ import { Badge, Card, LinkButton, Notice, PageHeader, when } from '@/components/
 import { planState, previousPlan } from '@/lib/job-files';
 import { ApproveForm, ReplanButton } from './approve-form';
 import { ChangesTab, CleanupTab, DecisionsTab, FilesTab, FormsTab, MeetingsTab, PagesTab, RecordsTab, SiteTab, SkippedTab, SummaryTab, WarningsTab, type TabProps } from './tabs';
+import { requireUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   return { title: `Review ${(await params).id}` };
@@ -27,6 +28,7 @@ const TABS = {
 type TabName = keyof typeof TABS;
 
 export default async function ReviewPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; q?: string; page?: string }> }) {
+  await requireUser();
   const { id } = await params;
   const sp = await searchParams;
   const job = await getJob(id);
@@ -42,7 +44,8 @@ export default async function ReviewPage({ params, searchParams }: { params: Pro
   }
   const { plan, decisions, approved, approval, pendingDecisions } = state;
   const tab: TabName = sp.tab && sp.tab in TABS ? (sp.tab as TabName) : 'summary';
-  const [previous, runs] = await Promise.all([previousPlan(id, plan.version), listRuns(id, 1)]);
+  // Only the Changes tab compares with the previous version (a plan can be megabytes).
+  const [previous, runs] = await Promise.all([tab === 'changes' ? previousPlan(id, plan.version) : null, listRuns(id, 1)]);
   const busy = runs[0]?.status === 'queued' || runs[0]?.status === 'running';
   const props: TabProps = { jobId: id, plan, decisions, q: sp.q ?? '', page: Number(sp.page) || 1, previous, query: { tab, ...(sp.q ? { q: sp.q } : {}) } };
   const Tab = TABS[tab].render;

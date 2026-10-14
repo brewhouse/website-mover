@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ExtractedPage, SiteAnalysis, SnapshotFile, SnapshotPage } from '@wm/core';
-import { approvePlan, buildPlan, loadApprovedPlan, ReviewDecisions, savePlan, wpSlug, type TargetEntity, type TargetInfo } from '../src/index.js';
+import { approvePlan, buildPlan, loadApprovedPlan, loadDecisions, ReviewDecisions, saveDecisions, savePlan, wpSlug, type TargetEntity, type TargetInfo } from '../src/index.js';
 
 describe('wpSlug', () => {
   // Expected values are WordPress 7.0.4's sanitize_title() output (wp eval on the local seed).
@@ -475,6 +475,22 @@ describe('buildPlan with reviewer decisions (M4)', () => {
 
     expect(result.warnings).toContain('Reviewer decisions that no longer match anything (ignored): jaxha.org/gone');
     expect(result.decisions).toEqual(decisions);
+  });
+
+  it('says when a chosen slug has nothing a URL can use, and keeps the page’s own', () => {
+    const a = page('/residents', { title: 'Residents' });
+    const result = plan2([a], { slug: { [a.sourceKey]: '!!!' } });
+    expect(result.items[0]!.slug).toBe('residents');
+    expect(result.warnings).toContain('The slug "!!!" chosen for "Residents" has no characters a URL can use: the page keeps its own.');
+  });
+
+  it('refuses a damaged decisions file rather than planning as if there were no decisions', async () => {
+    process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
+    expect(await loadDecisions('test')).toEqual({ exclude: [], include: [], type: {}, slug: {}, keep: [] });
+    await saveDecisions('test', ReviewDecisions.parse({ exclude: ['jaxha.org/b', 'jaxha.org/a'] }));
+    expect((await loadDecisions('test')).exclude).toEqual(['jaxha.org/a', 'jaxha.org/b']);
+    await writeFile(path.join(process.env.WM_DATA_DIR, 'jobs/test/review/decisions.json'), '{"exclude": ["jaxha.org/a"');
+    await expect(loadDecisions('test')).rejects.toThrow(/Can't read the reviewer decisions/);
   });
 
   it('gives a chosen slug that is taken a suffix and says so', () => {

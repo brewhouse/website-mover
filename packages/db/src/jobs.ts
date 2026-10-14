@@ -138,8 +138,14 @@ export async function listRuns(jobId: string, limit = 50): Promise<StageRun[]> {
   return (await db().query<StageRun>(`select ${runCols} from stage_runs where job_id = $1 order by id desc limit $2`, [jobId, limit])).rows;
 }
 
-export async function startRun(id: number): Promise<void> {
-  await db().query(`update stage_runs set status = 'running', started_at = now() where id = $1`, [id]);
+/** Claims a queued run for this worker. Only one claimant wins, so a run never runs twice. */
+export async function claimRun(id: number): Promise<boolean> {
+  const { rowCount } = await db().query(`update stage_runs set status = 'running', started_at = now(), heartbeat_at = now() where id = $1 and status = 'queued'`, [id]);
+  return rowCount === 1;
+}
+
+export async function heartbeat(id: number): Promise<void> {
+  await db().query(`update stage_runs set heartbeat_at = now() where id = $1 and status = 'running'`, [id]);
 }
 
 export async function finishRun(id: number, result: { error: string } | { summary: unknown }): Promise<void> {
@@ -147,10 +153,22 @@ export async function finishRun(id: number, result: { error: string } | { summar
   else await db().query(`update stage_runs set status = 'done', finished_at = now(), summary = $2 where id = $1`, [id, JSON.stringify(result.summary ?? null)]);
 }
 
-/** Runs left queued or running by a worker that stopped (crash, deploy): marked failed at start-up. */
-export async function failAbandonedRuns(): Promise<number> {
-  const { rowCount } = await db().query(`update stage_runs set status = 'failed', finished_at = now(), error = 'The worker stopped while this stage was running' where status = 'running'`);
-  return rowCount ?? 0;
+/** A running stage whose worker hasn't sent a heartbeat for this long is treated as stopped. */
+export const STALE_SECONDS = 180;
+
+/**
+ * Housekeeping for runs a worker can't finish: running runs whose worker stopped (stale heartbeat)
+ * are marked failed, and the ids of runs queued longer than `queuedSeconds` are returned so the
+ * caller can check they're still on the queue.
+ */
+export async function sweepRuns(queuedSeconds = 120): Promise<{ failed: number; queued: number[] }> {
+  const { rowCount } = await db().query(
+    `update stage_runs set status = 'failed', finished_at = now(), error = 'The worker stopped while this stage was running'
+     where status = 'running' and coalesce(heartbeat_at, started_at) < now() - make_interval(secs => $1)`,
+    [STALE_SECONDS],
+  );
+  const { rows } = await db().query<{ id: number }>(`select id from stage_runs where status = 'queued' and queued_at < now() - make_interval(secs => $1)`, [queuedSeconds]);
+  return { failed: rowCount ?? 0, queued: rows.map((r) => r.id) };
 }
 
 // ---------- Live log ----------

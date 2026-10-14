@@ -65,9 +65,13 @@ export async function loadApprovedPlan(jobId: string): Promise<{ plan: Plan; app
 
 const decisionsFile = (jobId: string) => jobPath(jobId, 'review', 'decisions.json');
 
-/** The reviewer's decisions for the job (empty if there are none yet). */
+/** The reviewer's decisions for the job (empty if there are none yet). A damaged file is an error, never "no decisions". */
 export async function loadDecisions(jobId: string): Promise<ReviewDecisions> {
-  return ReviewDecisions.parse(await readJson(decisionsFile(jobId)).catch(() => ({})));
+  const raw = await readJson(decisionsFile(jobId)).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return {};
+    throw new Error(`Can't read the reviewer decisions (${decisionsFile(jobId)}): ${err.message}`);
+  });
+  return ReviewDecisions.parse(raw);
 }
 
 export async function saveDecisions(jobId: string, decisions: ReviewDecisions): Promise<void> {

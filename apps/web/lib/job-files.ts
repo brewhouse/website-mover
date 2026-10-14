@@ -36,6 +36,19 @@ export async function planState(jobId: string, version?: number): Promise<PlanSt
 }
 
 /**
+ * Just the latest version and whether it's approved, for lists: the plan's bytes are hashed, not
+ * parsed (a plan can be megabytes).
+ */
+export async function planHeadline(jobId: string): Promise<{ version: number; approved: boolean } | null> {
+  const version = await latestPlanVersion(jobId);
+  if (!version) return null;
+  const approval = await readJson<Approval>(jobPath(jobId, 'plan', 'approval.json')).catch(() => null);
+  if (!approval || approval.planVersion !== version) return { version, approved: false };
+  const bytes = await readFile(jobPath(jobId, 'plan', `plan.v${version}.json`));
+  return { version, approved: createHash('sha256').update(bytes).digest('hex') === approval.planSha256 };
+}
+
+/**
  * Stages whose output is on disk. Jobs the CLI ran before the web app existed have no stage runs in
  * the database, so the job page falls back to this.
  */

@@ -182,6 +182,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
   for (const page of migrated) {
     const type = typeOf(page);
     const requested = slugOverride[page.sourceKey] ? wpSlug(slugOverride[page.sourceKey]!) : null;
+    if (slugOverride[page.sourceKey] && !requested) warnings.push(`The slug "${slugOverride[page.sourceKey]}" chosen for "${page.title}" has no characters a URL can use: the page keeps its own.`);
     const slug = claim(page.sourceKey, requested || wpSlug(page.slug ?? page.title));
     if (requested && slug !== requested) warnings.push(`The slug "${requested}" chosen for "${page.title}" is taken: it gets "${slug}".`);
     const targetPath = `/${slug}/`;

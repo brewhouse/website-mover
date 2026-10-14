@@ -91,4 +91,11 @@ create table audit (
 create index audit_job on audit (job_id, id);
 `,
   },
+  {
+    name: '002_run_heartbeat.sql',
+    sql: `
+-- The worker running a stage updates this every 30 s; a stale heartbeat means the worker stopped.
+alter table stage_runs add column heartbeat_at timestamptz;
+`,
+  },
 ];

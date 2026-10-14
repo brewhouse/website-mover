@@ -5,6 +5,7 @@ import { RunStatus } from '@/components/run-status';
 import { Badge, Card, Empty, LinkButton, PageHeader, when, type Tone } from '@/components/ui';
 import { loadReport, planState, stagesOnDisk } from '@/lib/job-files';
 import { RunButtons, type RunChoice } from './run-buttons';
+import { requireUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   return { title: (await params).id };
@@ -13,6 +14,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 const STEPS = ['scan', 'extract', 'analyze', 'plan', 'approve', 'execute', 'report'] as const;
 
 export default async function JobPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireUser();
   const { id } = await params;
   const job = await getJob(id);
   if (!job) notFound();

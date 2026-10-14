@@ -1,10 +1,12 @@
 import { listTargets } from '@wm/db';
 import { Card, Empty, PageHeader, when } from '@/components/ui';
 import { AddTargetForm, TestTargetButton } from './target-forms';
+import { requireUser } from '@/lib/session';
 
 export const metadata = { title: 'Targets' };
 
 export default async function TargetsPage() {
+  await requireUser();
   const targets = await listTargets();
   return (
     <>

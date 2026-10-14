@@ -1,10 +1,12 @@
 import { listTargets } from '@wm/db';
 import { Notice, PageHeader } from '@/components/ui';
 import { NewJobForm } from './new-job-form';
+import { requireUser } from '@/lib/session';
 
 export const metadata = { title: 'New job' };
 
 export default async function NewJobPage() {
+  await requireUser();
   const targets = await listTargets();
   return (
     <>

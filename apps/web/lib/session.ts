@@ -19,7 +19,10 @@ export async function currentUser(): Promise<User | null> {
   return sessionUser((await cookies()).get(SESSION_COOKIE)?.value);
 }
 
-/** The logged-in user; anyone else goes to the login page. */
+/**
+ * The logged-in user; anyone else goes to the login page. Every page, action and route handler
+ * calls this itself: a layout's check doesn't run when the client navigates between pages.
+ */
 export async function requireUser(): Promise<User> {
   const user = await currentUser();
   if (!user) redirect('/login');

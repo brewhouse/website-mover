@@ -4,33 +4,61 @@
  *
  *   pnpm --filter @wm/worker worker
  */
-import { appendEvent, closeDb, closeQueue, createRun, db, failAbandonedRuns, finishRun, getJob, getRun, migrate, queue, STAGE_QUEUE, startRun, targetCredentials, type StageJobData, type StageRun } from '@wm/db';
+import {
+  appendEvent,
+  claimRun,
+  closeDb,
+  closeQueue,
+  createRun,
+  db,
+  finishRun,
+  getJob,
+  getRun,
+  heartbeat,
+  migrate,
+  queue,
+  recoverRuns,
+  sendRun,
+  STAGE_QUEUE,
+  targetCredentials,
+  type StageJobData,
+  type StageRun,
+} from '@wm/db';
 import { WpClient } from '@wm/wp-client';
 import { runStage } from './stages.js';
 
 await migrate();
-const abandoned = await failAbandonedRuns();
-if (abandoned) console.log(`Marked ${abandoned} interrupted stage run(s) as failed`);
-
 const boss = await queue();
 // Different jobs run side by side; stage_runs keeps each job to one stage at a time.
 await boss.work<StageJobData>(STAGE_QUEUE, { localConcurrency: 2 }, async ([job]) => {
   if (job) await handle(job.data.runId);
 });
+
+// Runs whose worker stopped are failed (stale heartbeat); runs that lost their queue job are re-queued.
+const recover = () =>
+  recoverRuns()
+    .then(({ failed, requeued }) => {
+      if (failed || requeued) console.log(`Recovered runs: ${failed} failed (worker stopped), ${requeued} re-queued`);
+    })
+    .catch((err) => console.error('Run recovery failed', err));
+await recover();
+const sweep = setInterval(recover, 60_000);
 console.log('Worker ready');
 
 async function handle(runId: number): Promise<void> {
-  const run = await getRun(runId);
-  if (!run || run.status !== 'queued') return; // already handled (e.g. a redelivered job)
+  // Claiming is atomic: a run delivered twice (or re-queued by recovery) still runs once.
+  if (!(await claimRun(runId))) return;
+  const run = (await getRun(runId))!;
   // Log lines are written one after another, so the live view shows them in order.
   let written = Promise.resolve();
   const log = (message: string) => {
     console.log(`[${run.jobId} ${run.stage}] ${message}`);
     written = written.then(() => appendEvent(run.jobId, run.id, message, /^\s*!/.test(message) ? 'warn' : 'info')).catch((err) => console.error('log write failed', err));
   };
-  await startRun(run.id);
-  log(`Started ${run.stage}${run.requestedBy ? ` (requested by ${run.requestedBy})` : ''}`);
+  const beat = setInterval(() => void heartbeat(run.id).catch((err) => console.error('heartbeat failed', err)), 30_000);
+  let succeeded = false;
   try {
+    log(`Started ${run.stage}${run.requestedBy ? ` (requested by ${run.requestedBy})` : ''}`);
     const job = (await getJob(run.jobId)) ?? fail(`Job ${run.jobId} is not registered`);
     const needsTarget = ['plan', 'execute', 'report'].includes(run.stage);
     const summary = await runStage(run.stage, {
@@ -43,13 +71,19 @@ async function handle(runId: number): Promise<void> {
     log(`Finished ${run.stage}`);
     await written;
     await finishRun(run.id, { summary });
-    await queueNext(run);
+    succeeded = true;
   } catch (err) {
     const message = describe(err);
     await written;
-    await appendEvent(run.jobId, run.id, `${run.stage} failed: ${message}`, 'error');
+    await appendEvent(run.jobId, run.id, `${run.stage} failed: ${message}`, 'error').catch(() => {});
     await finishRun(run.id, { error: message });
     console.error(`[${run.jobId} ${run.stage}] failed`, err);
+  } finally {
+    clearInterval(beat);
+  }
+  // Outside the stage's try: if the next stage can't be queued, this one still succeeded.
+  if (succeeded) {
+    await queueNext(run).catch((err) => appendEvent(run.jobId, run.id, `Couldn't start the next stage: ${describe(err)}`, 'warn'));
   }
 }
 
@@ -59,7 +93,7 @@ async function queueNext(run: StageRun): Promise<void> {
   if (!next) return;
   const requestedBy = (await db().query<{ requested_by: number | null }>('select requested_by from stage_runs where id = $1', [run.id])).rows[0]?.requested_by ?? null;
   const nextRun = await createRun(db(), run.jobId, [next, ...rest], requestedBy);
-  await boss.send(STAGE_QUEUE, { runId: nextRun.id } satisfies StageJobData);
+  await sendRun(nextRun.id);
 }
 
 /** The error and its causes: "fetch failed" alone doesn't say that the connection was refused. */
@@ -80,6 +114,7 @@ function fail(message: string): never {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, async () => {
     console.log('Stopping: finishing the current stages first');
+    clearInterval(sweep);
     await closeQueue();
     await closeDb();
     process.exit(0);

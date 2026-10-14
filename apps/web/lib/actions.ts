@@ -2,7 +2,7 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { revalidatePath } from 'next/cache';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { jobPath } from '@wm/core';
 import {
@@ -25,6 +25,7 @@ import { assertPublicUrl } from '@wm/net';
 import { approvePlan, latestPlanVersion, loadDecisions, saveDecisions, type ReviewDecisions } from '@wm/planner';
 import { WpClient } from '@wm/wp-client';
 import { planState } from './job-files';
+import { isHttps, safeNext } from './safe-next';
 import { dbReady, requireUser, SESSION_COOKIE } from './session';
 
 export interface FormState {
@@ -51,13 +52,12 @@ export async function login(_: FormState, form: FormData): Promise<FormState> {
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    // Secure whenever the site is reached over https; a Secure cookie on plain http is never stored.
+    secure: isHttps(await headers()),
     path: '/',
     expires: expiresAt,
   });
-  const next = text(form, 'next');
-  // Only paths on this site.
-  redirect(next.startsWith('/') && !next.startsWith('//') ? next : '/');
+  redirect(safeNext(text(form, 'next')));
 }
 
 export async function logout(): Promise<void> {

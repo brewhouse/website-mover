@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { getJob } from '@wm/db';
 import { Badge, Card, Empty, LinkButton, Notice, PageHeader, Stat, when } from '@/components/ui';
 import { DOWNLOADS, loadReport } from '@/lib/job-files';
+import { requireUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   return { title: `Report ${(await params).id}` };
@@ -11,6 +12,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 const LABELS: Record<string, string> = { page: 'Pages', post: 'News posts', document: 'Documents', image: 'Images', event: 'Events', person: 'People', form: 'Forms', record: 'Custom entries' };
 
 export default async function ReportPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireUser();
   const { id } = await params;
   if (!(await getJob(id))) notFound();
   const r = await loadReport(id);

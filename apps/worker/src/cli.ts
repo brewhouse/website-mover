@@ -16,7 +16,7 @@
  *   wm user add      --email a@b.org --name "Full Name" [--password-env VAR]
  *   wm user password --email a@b.org [--password-env VAR]
  *   wm target add    --name local --url http://localhost:8088 --user wm-local [--password-env VAR]
- *   wm job register  --job jha --origin https://www.jaxha.org --profile bjm --target local --by a@b.org [--timezone ...]
+ *   wm job register  --job jha --origin https://www.jaxha.org --profile bjm --target local --by a@b.org --rights-confirmed [--timezone ...]
  * Passwords are read from the named environment variable, or prompted for (hidden), never taken as arguments.
  */
 import path from 'node:path';
@@ -42,6 +42,7 @@ const { positionals, values } = parseArgs({
     url: { type: 'string' },
     user: { type: 'string' },
     'password-env': { type: 'string' },
+    'rights-confirmed': { type: 'boolean', default: false },
   },
 });
 const [command, sub] = positionals;
@@ -106,6 +107,8 @@ if (command && (STAGES as string[]).includes(command)) {
       const id = values.job ?? fail('--job is required');
       const target = (await db.listTargets()).find((t) => t.name === values.target) ?? fail(`No saved target "${values.target}" (wm target add)`);
       const by = (await db.listUsers()).find((u) => u.email === values.by?.toLowerCase()) ?? fail('--by <email of a web app user> is required');
+      // As in the web intake, the person registering confirms we may copy the site's content.
+      if (!values['rights-confirmed']) fail('--rights-confirmed is required: confirm we have the client’s permission to copy this site’s content');
       await db.createJob({
         id,
         sourceUrl: values.origin ?? fail('--origin is required'),
@@ -116,7 +119,7 @@ if (command && (STAGES as string[]).includes(command)) {
         styleGuide: null,
         userId: by.id,
       });
-      await db.audit(id, by.id, 'job.register', { target: target.name });
+      await db.audit(id, by.id, 'job.register', { target: target.name, rightsConfirmed: true });
       console.log(`Registered job ${id} (target ${target.name})`);
       await db.closeDb();
       break;

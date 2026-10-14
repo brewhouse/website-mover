@@ -2,13 +2,15 @@ import Link from 'next/link';
 import { listJobs } from '@wm/db';
 import { RunStatus } from '@/components/run-status';
 import { Badge, Card, Empty, LinkButton, PageHeader, when } from '@/components/ui';
-import { planState } from '@/lib/job-files';
+import { planHeadline } from '@/lib/job-files';
+import { requireUser } from '@/lib/session';
 
 export const metadata = { title: 'Jobs' };
 
 export default async function JobsPage() {
+  await requireUser();
   const jobs = await listJobs();
-  const plans = await Promise.all(jobs.map((j) => planState(j.id).catch(() => null)));
+  const plans = await Promise.all(jobs.map((j) => planHeadline(j.id).catch(() => null)));
   return (
     <>
       <PageHeader
@@ -52,7 +54,7 @@ export default async function JobsPage() {
                       <td>
                         {plan ? (
                           <span className="flex items-center gap-2">
-                            v{plan.plan.version}
+                            v{plan.version}
                             {plan.approved ? <Badge tone="ok">approved</Badge> : <Badge tone="warn">to review</Badge>}
                           </span>
                         ) : (

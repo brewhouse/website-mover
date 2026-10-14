@@ -26,7 +26,7 @@ describe.runIf(available)('db (Postgres)', () => {
   let targetId: number;
 
   beforeAll(async () => {
-    expect(await m.migrate()).toEqual(['001_init.sql']);
+    expect(await m.migrate()).toEqual(['001_init.sql', '002_run_heartbeat.sql']);
     expect(await m.migrate()).toEqual([]); // once only
   });
   afterAll(async () => {
@@ -71,7 +71,9 @@ describe.runIf(available)('db (Postgres)', () => {
     const [job] = await (await m.queue()).fetch<{ runId: number }>(m.STAGE_QUEUE);
     expect(job!.data).toEqual({ runId: run.id });
 
-    await m.startRun(run.id);
+    // Claimed once only, even if the queue delivers it twice.
+    expect(await m.claimRun(run.id)).toBe(true);
+    expect(await m.claimRun(run.id)).toBe(false);
     await m.appendEvent('jha', run.id, 'Scan: 3 pages');
     await m.finishRun(run.id, { summary: { pages: 3 } });
     expect(await m.getRun(run.id)).toMatchObject({ status: 'done', summary: { pages: 3 } });
@@ -80,6 +82,28 @@ describe.runIf(available)('db (Postgres)', () => {
     // Finished: the job can run again.
     expect((await m.enqueueStages('jha', ['plan'], userId)).stage).toBe('plan');
     expect((await m.listJobs())[0]).toMatchObject({ id: 'jha', targetName: 'jha-dev', createdBy: 'Rae Viewer', lastRun: { stage: 'plan', status: 'queued' } });
+  });
+
+  it('fails a stage whose worker stopped, and re-queues a run that lost its queue job', async () => {
+    const boss = await m.queue();
+    while ((await boss.fetch(m.STAGE_QUEUE)).length); // drain earlier tests' jobs
+    const [planRun] = await m.listRuns('jha', 1);
+    if (!planRun) throw new Error('no run');
+
+    // The worker claimed it, then stopped sending heartbeats.
+    await m.claimRun(planRun.id);
+    await m.db().query(`update stage_runs set heartbeat_at = now() - interval '10 minutes' where id = $1`, [planRun.id]);
+    expect(await m.recoverRuns()).toEqual({ failed: 1, requeued: 0 });
+    expect(await m.getRun(planRun.id)).toMatchObject({ status: 'failed', error: 'The worker stopped while this stage was running' });
+
+    // Recorded but never queued (or its queue job was lost), and waiting for minutes.
+    const lost = await m.createRun(m.db(), 'jha', ['report'], userId);
+    await m.db().query(`update stage_runs set queued_at = now() - interval '10 minutes' where id = $1`, [lost.id]);
+    expect(await m.recoverRuns()).toEqual({ failed: 0, requeued: 1 });
+    // Already back on the queue: not queued again.
+    expect(await m.recoverRuns()).toEqual({ failed: 0, requeued: 0 });
+    const [job] = await boss.fetch<{ runId: number }>(m.STAGE_QUEUE);
+    expect(job!.data).toEqual({ runId: lost.id });
   });
 });
 
