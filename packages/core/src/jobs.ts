@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /** Root of all job directories: WM_DATA_DIR, or data/ at the repo root. */
@@ -12,9 +13,15 @@ export function jobPath(jobId: string, ...parts: string[]): string {
   return path.join(dataDir(), 'jobs', jobId, ...parts);
 }
 
+/**
+ * Writes JSON atomically (a temporary file, then a rename), so a reader in another process (the web
+ * app reading a plan the worker is writing) never sees half a file.
+ */
 export async function writeJson(file: string, data: unknown): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(data, null, 2)}\n`);
+  const tmp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
+  await rename(tmp, file);
 }
 
 export async function readJson<T>(file: string): Promise<T> {

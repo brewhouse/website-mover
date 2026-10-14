@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { jobPath, readJson, writeJson } from '@wm/core';
-import { Approval, Plan } from './schema.js';
+import { Approval, Plan, ReviewDecisions } from './schema.js';
 import { renderPlan } from './render.js';
 
 const planFile = (jobId: string, version: number) => jobPath(jobId, 'plan', `plan.v${version}.json`);
@@ -27,8 +27,15 @@ export async function loadPlan(jobId: string, version?: number): Promise<{ plan:
   return { plan: Plan.parse(JSON.parse(raw.toString())), sha256: sha256(raw) };
 }
 
-export async function approvePlan(jobId: string, approvedBy: string): Promise<Approval> {
+/**
+ * Approves the latest plan. With `expect`, only if it's exactly the version and bytes the reviewer
+ * saw; otherwise nothing is written.
+ */
+export async function approvePlan(jobId: string, approvedBy: string, expect?: { version: number; sha256: string }): Promise<Approval> {
   const { plan, sha256: planSha256 } = await loadPlan(jobId);
+  if (expect && (plan.version !== expect.version || planSha256 !== expect.sha256)) {
+    throw new Error(`The latest plan is v${plan.version}, not the one reviewed (v${expect.version}): review it again`);
+  }
   const approval = Approval.parse({
     jobId,
     planVersion: plan.version,
@@ -54,6 +61,29 @@ export async function loadApprovedPlan(jobId: string): Promise<{ plan: Plan; app
     );
   }
   return { plan, approval };
+}
+
+const decisionsFile = (jobId: string) => jobPath(jobId, 'review', 'decisions.json');
+
+/** The reviewer's decisions for the job (empty if there are none yet). A damaged file is an error, never "no decisions". */
+export async function loadDecisions(jobId: string): Promise<ReviewDecisions> {
+  const raw = await readJson(decisionsFile(jobId)).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return {};
+    throw new Error(`Can't read the reviewer decisions (${decisionsFile(jobId)}): ${err.message}`);
+  });
+  return ReviewDecisions.parse(raw);
+}
+
+export async function saveDecisions(jobId: string, decisions: ReviewDecisions): Promise<void> {
+  const d = ReviewDecisions.parse(decisions);
+  // Stored sorted, so the same decisions always give the same file (and plan).
+  await writeJson(decisionsFile(jobId), {
+    exclude: [...new Set(d.exclude)].sort(),
+    include: [...new Set(d.include)].sort(),
+    type: Object.fromEntries(Object.entries(d.type).sort()),
+    slug: Object.fromEntries(Object.entries(d.slug).sort()),
+    keep: [...new Set(d.keep)].sort((a, b) => a - b),
+  });
 }
 
 function sha256(data: Buffer | string): string {

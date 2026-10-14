@@ -1,0 +1,65 @@
+# Website Mover services (docs/m4/design.md).
+#   Development: docker compose up -d postgres   (then run the web app and worker with pnpm)
+#   Everything:  docker compose --profile app up -d --build
+name: website-mover
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: mover
+      POSTGRES_PASSWORD: mover
+      POSTGRES_DB: mover
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mover -d mover"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The worker and the web app share the job files. Each gets only the settings it needs, from
+  # this shell or the .env next to this file (compose substitutes ${...}); the development-only
+  # WM_ALLOW_PRIVATE_HOSTS is not passed on. To reach a WordPress on this machine (e.g. the local
+  # seed on :8088), set WM_DOCKER_ALLOW_PRIVATE_HOSTS=host.docker.internal and save the target
+  # as http://host.docker.internal:8088.
+  worker:
+    profiles: [app]
+    build: { context: ., target: worker }
+    environment:
+      DATABASE_URL: postgres://mover:mover@postgres:5432/mover
+      WM_DATA_DIR: /data
+      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?set CREDENTIALS_ENCRYPTION_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      WM_ALLOW_PRIVATE_HOSTS: ${WM_DOCKER_ALLOW_PRIVATE_HOSTS:-}
+    volumes:
+      - ${WM_DATA_HOST_DIR:-./data}:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  web:
+    profiles: [app]
+    build: { context: ., target: web }
+    environment:
+      DATABASE_URL: postgres://mover:mover@postgres:5432/mover
+      WM_DATA_DIR: /data
+      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?set CREDENTIALS_ENCRYPTION_KEY}
+      WM_ALLOW_PRIVATE_HOSTS: ${WM_DOCKER_ALLOW_PRIVATE_HOSTS:-}
+    volumes:
+      - ${WM_DATA_HOST_DIR:-./data}:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:3100:3100"
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  pgdata:

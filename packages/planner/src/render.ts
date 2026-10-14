@@ -23,6 +23,17 @@ export function renderPlan(plan: Plan): string {
 
   if (plan.warnings.length) out.push('## Warnings', '', ...plan.warnings.map((w) => `- ${w}`), '');
 
+  const d = plan.decisions;
+  if (d) {
+    out.push('## Reviewer decisions', '');
+    if (d.exclude.length) out.push(`- **Excluded:** ${d.exclude.map((k) => `\`${k}\``).join(', ')}`);
+    if (d.include.length) out.push(`- **Included:** ${d.include.map((k) => `\`${k}\``).join(', ')}`);
+    for (const [k, type] of Object.entries(d.type)) out.push(`- \`${k}\` migrated as a ${type}`);
+    for (const [k, slug] of Object.entries(d.slug)) out.push(`- \`${k}\` gets the slug \`${slug}\``);
+    if (d.keep.length) out.push(`- **Kept on the target:** ${d.keep.map((id) => `#${id}`).join(', ')}`);
+    out.push('');
+  }
+
   out.push('## Existing content on the target', '');
   out.push('**Kept:**', '', ...plan.keep.map((k) => `- ${k.type} #${k.id} "${k.title}": ${k.reason}`), '');
   out.push('**Moved to the trash on execute:**', '', ...plan.cleanup.map((c) => `- ${c.type} #${c.id} "${cell(c.title) || '(no title)'}"${c.reason ? `: ${c.reason}` : ''}`), '');

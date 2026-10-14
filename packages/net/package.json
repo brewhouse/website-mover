@@ -1,0 +1,15 @@
+{
+  "name": "@wm/net",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "undici": "8.11.2"
+  }
+}

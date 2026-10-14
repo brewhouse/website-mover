@@ -1,0 +1,29 @@
+{
+  "name": "@wm/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --webpack --port 3100",
+    "build": "next build --webpack",
+    "start": "next start --port 3100",
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wm/core": "workspace:*",
+    "@wm/db": "workspace:*",
+    "@wm/net": "workspace:*",
+    "@wm/planner": "workspace:*",
+    "@wm/wp-client": "workspace:*",
+    "next": "16.3.8",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@wm/executor": "workspace:*",
+    "tailwindcss": "4.3.3"
+  }
+}

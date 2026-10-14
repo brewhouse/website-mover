@@ -2,7 +2,7 @@
 
 Internal tool that migrates a website into a blank WordPress "seed" site: scans the source, proposes a migration plan for human approval, then rebuilds everything as Gutenberg content styled from a brand style guide PDF.
 
-**The full design is in `docs/PLAN.md` — read it before starting work.** Status: M0 done (`docs/m0/`). M1, M2 and M3's site structure pass on the local seed (`docs/m1/results.md`, `docs/m2/results.md`, `docs/m3/results.md`); next: M3 branding (needs the style guide PDF), M4 (review UI), and running on the hosted seed once the bridge is installed there (see PLAN §10).
+**The full design is in `docs/PLAN.md` — read it before starting work.** Status: M0 done (`docs/m0/`). M1, M2, M3's site structure and M4 (review UI and approval gate) pass on the local seed (`docs/m1/` … `docs/m4/` results). Next: M5 (PLAN §10), M3 branding once the style guide PDF arrives, and running on the hosted seed once the bridge is installed there.
 
 ## Key decisions (don't re-litigate)
 - Flow: Scan → Plan (versioned JSON) → Approve → Execute → Verify → QA → Report. Execution only follows the approved plan, using scan-time snapshots.
@@ -15,9 +15,16 @@ Internal tool that migrates a website into a blank WordPress "seed" site: scans 
 - Keep source slugs where they're WordPress-safe; the approved sitemap can override. Every legacy URL that changes (including id/query-string page and file URLs) gets a 301.
 - Public-sector profile (first client: Jacksonville Housing Authority, `https://www.jaxha.org/`): preset types for news, events, board meetings, board members, documents, quick links. See PLAN §6.4 and §13.
 - TypeScript monorepo (pnpm workspaces), Next.js web app, Node worker with Playwright, Postgres + pg-boss, Docker Compose. Internal team tool.
+- M4: Postgres holds users, sessions, targets (encrypted), jobs, stage runs, the log and the audit trail; job artifacts (plans, approval, reports) stay on disk. Reviewers' edits are planner input (`review/decisions.json`), never edits to plan JSON.
 
 ## Local setup
 - Node 22+, pnpm, Docker (for the test WordPress and Postgres).
 - Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` (never commit `.env`).
 - Local seed site: `e2e/seed/setup.sh` copies `SEED_CODE_PATH` into `.local/seed` and runs it on `http://localhost:8088` (Docker).
 - Client inputs (framework theme, style guide PDFs, sitemaps) go under `inputs/`. Everything there is gitignored except `inputs/README.md`, which lists exactly what's needed and where it goes.
+- Web app (M4, `docs/m4/`):
+  - `docker compose up -d postgres`.
+  - Create a login with `pnpm --filter @wm/worker wm user add --email … --name …`. Save the local seed as a target with `wm target add --name local --url http://localhost:8088 --user wm-local --password-env SEED_LOCAL_APP_PASSWORD`.
+  - Then run `pnpm --filter @wm/worker worker` and `pnpm --filter @wm/web dev` (http://localhost:3100).
+  - Jobs the CLI ran: `wm job register`.
+- SSRF guard (`@wm/net`): the tool refuses private addresses. `.env` sets `WM_ALLOW_PRIVATE_HOSTS=localhost` for the local seed (development only).

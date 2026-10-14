@@ -1,3 +1,5 @@
+import { safeFetch } from '@wm/net';
+
 export interface WpClientOptions {
   baseUrl: string;
   user: string;
@@ -69,10 +71,10 @@ export class WpClient {
     // Reads are retried on network errors. Writes are not (a dropped connection may still have
     // been processed); callers make writes idempotent instead.
     const attempts = method === 'GET' ? 3 : 1;
-    let res: Response | undefined;
+    let res: Awaited<ReturnType<typeof safeFetch>> | undefined;
     for (let attempt = 1; !res; attempt++) {
       try {
-        res = await fetch(url, init);
+        res = await safeFetch(url, init);
       } catch (err) {
         if (attempt >= attempts) throw err;
         await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
