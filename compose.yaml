@@ -1,0 +1,24 @@
+# Website Mover services (docs/m4/design.md).
+#   Development: docker compose up -d postgres   (then run the web app and worker with pnpm)
+#   Everything:  docker compose --profile app up -d --build
+name: website-mover
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: mover
+      POSTGRES_PASSWORD: mover
+      POSTGRES_DB: mover
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mover -d mover"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:

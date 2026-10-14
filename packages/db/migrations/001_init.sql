@@ -1,0 +1,83 @@
+-- M4: users and sessions, saved targets, the job registry, stage runs, the live log, the audit trail.
+-- Job artifacts (snapshots, plans, approval, run state, reports) stay on disk under WM_DATA_DIR.
+
+create table users (
+  id serial primary key,
+  email text not null unique,
+  name text not null,
+  password_hash text not null,
+  created_at timestamptz not null default now()
+);
+
+-- The cookie holds a random token; only its sha256 is stored.
+create table sessions (
+  token_hash text primary key,
+  user_id int not null references users (id) on delete cascade,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+create index sessions_user on sessions (user_id);
+
+-- WordPress targets. The Application Password is encrypted (AES-256-GCM, CREDENTIALS_ENCRYPTION_KEY).
+create table targets (
+  id serial primary key,
+  name text not null unique check (name ~ '^[a-z0-9][a-z0-9-]{0,40}$'),
+  url text not null,
+  wp_user text not null,
+  app_password_enc text not null,
+  created_by int references users (id),
+  created_at timestamptz not null default now()
+);
+
+create table jobs (
+  id text primary key check (id ~ '^[a-z0-9][a-z0-9-]{0,40}$'),
+  source_url text not null,
+  profile text not null,
+  target_id int not null references targets (id),
+  timezone text,
+  ga4_id text,
+  -- File name of the style guide PDF in the job's inputs folder, if one was uploaded.
+  style_guide text,
+  rights_confirmed_by int not null references users (id),
+  rights_confirmed_at timestamptz not null default now(),
+  created_by int not null references users (id),
+  created_at timestamptz not null default now()
+);
+
+create table stage_runs (
+  id serial primary key,
+  job_id text not null references jobs (id) on delete cascade,
+  stage text not null check (stage in ('scan', 'extract', 'analyze', 'plan', 'execute', 'report')),
+  status text not null default 'queued' check (status in ('queued', 'running', 'done', 'failed')),
+  -- Stages to queue after this one succeeds ("run through to the plan").
+  then_stages text[] not null default '{}',
+  requested_by int references users (id),
+  queued_at timestamptz not null default now(),
+  started_at timestamptz,
+  finished_at timestamptz,
+  error text,
+  summary jsonb
+);
+create index stage_runs_job on stage_runs (job_id, id desc);
+-- A job runs one stage at a time.
+create unique index stage_runs_one_active on stage_runs (job_id) where status in ('queued', 'running');
+
+create table events (
+  id bigserial primary key,
+  job_id text not null references jobs (id) on delete cascade,
+  run_id int references stage_runs (id) on delete cascade,
+  at timestamptz not null default now(),
+  level text not null default 'info' check (level in ('info', 'warn', 'error')),
+  message text not null
+);
+create index events_job on events (job_id, id);
+
+create table audit (
+  id bigserial primary key,
+  job_id text references jobs (id) on delete cascade,
+  user_id int references users (id),
+  action text not null,
+  detail jsonb,
+  at timestamptz not null default now()
+);
+create index audit_job on audit (job_id, id);
