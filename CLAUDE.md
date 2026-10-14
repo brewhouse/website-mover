@@ -2,7 +2,7 @@
 
 Internal tool that migrates a website into a blank WordPress "seed" site: scans the source, proposes a migration plan for human approval, then rebuilds everything as Gutenberg content styled from a brand style guide PDF.
 
-**The full design is in `docs/PLAN.md` — read it before starting work.** Status: M0 done (`docs/m0/`). M1 thin end-to-end passes on the local seed (`docs/m1/results.md`); next is running it on the hosted seed, then M2 (see PLAN §10).
+**The full design is in `docs/PLAN.md` — read it before starting work.** Status: M0 done (`docs/m0/`). M1 and M2 pass on the local seed (`docs/m1/results.md`, `docs/m2/results.md`); next: M3 (design, needs the style guide), and running on the hosted seed once the bridge is installed there (see PLAN §10).
 
 ## Key decisions (don't re-litigate)
 - Flow: Scan → Plan (versioned JSON) → Approve → Execute → Verify → QA → Report. Execution only follows the approved plan, using scan-time snapshots.
