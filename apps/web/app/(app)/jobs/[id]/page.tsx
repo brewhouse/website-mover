@@ -4,7 +4,7 @@ import { LiveLog } from '@/components/live-log';
 import { RunStatus } from '@/components/run-status';
 import { Badge, Card, Empty, LinkButton, PageHeader, when, type Tone } from '@/components/ui';
 import { loadReport, planState, stagesOnDisk } from '@/lib/job-files';
-import { LiveUrlForm, RunButtons, type RunChoice } from './run-buttons';
+import { LiveUrlForm, RollbackForm, RunButtons, type RunChoice } from './run-buttons';
 import { requireUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -14,7 +14,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 const STEPS = ['scan', 'extract', 'analyze', 'plan', 'approve', 'execute', 'report', 'qa'] as const;
 
 export default async function JobPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await params;
   const job = await getJob(id);
   if (!job) notFound();
@@ -45,7 +45,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
       label: 'Run the migration',
       help: `Writes approved plan v${plan?.plan.version} to ${job.targetName}, then builds the report and runs QA.`,
       primary: true,
-      disabled: !plan ? 'Needs a plan.' : !plan.approved ? `Plan v${plan.plan.version} needs approval first (Review).` : false,
+      disabled: !user.canApprove ? 'Only approvers can run a migration.' : !plan ? 'Needs a plan.' : !plan.approved ? `Plan v${plan.plan.version} needs approval first (Review).` : false,
     },
     { run: 'report', label: 'Rebuild the report', help: 'Re-check the target: live URLs, blocks, redirects.', disabled: lastOf('execute') || onDisk.has('execute') ? false : 'Run the migration first.' },
     {
@@ -108,6 +108,11 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
           <Card title="Live address">
             <LiveUrlForm jobId={id} liveUrl={job.liveUrl} />
           </Card>
+          {user.canApprove && (lastOf('execute') || onDisk.has('execute')) && (
+            <Card title="Roll back">
+              <RollbackForm jobId={id} targetName={job.targetName} busy={!!active} />
+            </Card>
+          )}
           <Card title="Activity">
             {auditTrail.length ? (
               <ul className="divide-y divide-line text-sm">

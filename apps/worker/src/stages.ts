@@ -22,11 +22,11 @@ import { scanSite } from '@wm/crawler';
 import { extractJob } from '@wm/extractor';
 import { analyzeForms, analyzeMeetings, analyzeRecords, analyzeSite } from '@wm/analyzer';
 import { buildPlan, latestPlanVersion, loadDecisions, savePlan } from '@wm/planner';
-import { buildReport, executePlan, probeTarget, runPostLaunch } from '@wm/executor';
+import { buildReport, executePlan, probeTarget, rollbackJob, runPostLaunch } from '@wm/executor';
 import { runQa } from '@wm/qa';
 import type { WpClient } from '@wm/wp-client';
 
-export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa' | 'postlaunch';
+export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa' | 'postlaunch' | 'rollback';
 
 export interface StageContext {
   jobId: string;
@@ -118,6 +118,10 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
       const report = await buildReport({ jobId, client: target().client, log });
       log(`Report: ${jobPath(jobId, 'report', 'report.md')}`);
       return { counts: report.counts, failures: report.failures.length };
+    }
+    case 'rollback': {
+      const r = await rollbackJob({ jobId, client: target().client, log });
+      return { ...r, problems: r.problems.length };
     }
     case 'postlaunch': {
       const r = await runPostLaunch({ jobId, base: ctx.liveUrl || target().client.baseUrl, ga4Id: ctx.ga4Id, log });

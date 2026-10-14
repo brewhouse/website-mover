@@ -15,6 +15,8 @@ import {
   enqueueStages,
   getJob,
   JobBusyError,
+  loginBlocked,
+  recordLogin,
   setLiveUrl,
   listRuns,
   listTargets,
@@ -47,7 +49,12 @@ const text = (form: FormData, name: string) => String(form.get(name) ?? '').trim
 
 export async function login(_: FormState, form: FormData): Promise<FormState> {
   await dbReady();
-  const user = await checkLogin(text(form, 'email'), String(form.get('password') ?? ''));
+  const email = text(form, 'email');
+  const h = await headers();
+  const ip = h.get('x-forwarded-for')?.split(',')[0]?.trim() || h.get('x-real-ip') || null;
+  if (await loginBlocked(email, ip)) return { error: 'Too many failed attempts: try again in 15 minutes.', values: kept(form, 'password') };
+  const user = await checkLogin(email, String(form.get('password') ?? ''));
+  await recordLogin(email, ip, !!user);
   if (!user) return { error: 'That email and password don’t match an account.', values: kept(form, 'password') };
   const { token, expiresAt } = await createSession(user.id);
   (await cookies()).set(SESSION_COOKIE, token, {
@@ -168,6 +175,7 @@ export async function runStages(_: FormState, form: FormData): Promise<FormState
   const which = text(form, 'run');
   const stages = RUNS[which];
   if (!stages || !(await getJob(jobId))) return { error: 'Unknown job or action.' };
+  if (which === 'execute' && !user.canApprove) return { error: 'Only approvers can run a migration.' };
   if (which === 'execute') {
     // Execution follows only an approved plan; the executor checks again before it writes anything.
     const state = await planState(jobId);
@@ -201,6 +209,27 @@ export async function saveLiveUrl(_: FormState, form: FormData): Promise<FormSta
   await audit(jobId, user.id, 'job.live-url', { liveUrl: url || null });
   revalidatePath(`/jobs/${jobId}`);
   return { ok: url ? `Post-launch checks will use ${new URL(url).origin}.` : 'Post-launch checks will use the target.' };
+}
+
+/**
+ * Undoes the job on its target (docs/m5/design.md §5). Approvers only, and only when the job's name
+ * is typed to confirm.
+ */
+export async function rollback(_: FormState, form: FormData): Promise<FormState> {
+  const user = await requireUser();
+  if (!user.canApprove) return { error: 'Only approvers can roll a migration back.' };
+  const jobId = text(form, 'jobId');
+  if (!(await getJob(jobId))) return { error: 'Unknown job.' };
+  if (text(form, 'confirm') !== jobId) return { error: `Type the job name (${jobId}) to confirm.` };
+  try {
+    await enqueueStages(jobId, ['rollback'], user.id);
+  } catch (err) {
+    if (err instanceof JobBusyError) return { error: 'This job is running a stage. Wait for it to finish.' };
+    throw err;
+  }
+  await audit(jobId, user.id, 'rollback', {});
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: 'Rollback queued: follow it in the live log.' };
 }
 
 // ---------- Review decisions ----------
@@ -267,6 +296,7 @@ export async function setKept(jobId: string, id: number, kept: boolean): Promise
 
 export async function approve(_: FormState, form: FormData): Promise<FormState> {
   const user = await requireUser();
+  if (!user.canApprove) return { error: 'Only approvers can approve a plan.' };
   const jobId = text(form, 'jobId');
   const version = Number(form.get('version'));
   const sha = text(form, 'sha256');

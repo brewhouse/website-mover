@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react';
 import { Button, inputClass, Notice } from '@/components/ui';
-import { runStages, saveLiveUrl, type FormState } from '@/lib/actions';
+import { rollback, runStages, saveLiveUrl, type FormState } from '@/lib/actions';
 
 export interface RunChoice {
   run: string;
@@ -50,6 +50,31 @@ export function LiveUrlForm({ jobId, liveUrl }: { jobId: string; liveUrl: string
         <input id="liveUrl" name="liveUrl" type="url" placeholder="https://www.example.org" defaultValue={state.values?.liveUrl ?? liveUrl ?? ''} className={inputClass} />
         <Button size="sm" type="submit" disabled={pending}>
           Save
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Undoes the job on its target; the job's name must be typed to confirm. */
+export function RollbackForm({ jobId, targetName, busy }: { jobId: string; targetName: string; busy: boolean }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(rollback, {});
+  return (
+    <form action={action} className="grid gap-2 p-4 text-sm">
+      {state.error && <Notice tone="bad">{state.error}</Notice>}
+      {state.ok && <Notice tone="ok">{state.ok}</Notice>}
+      <input type="hidden" name="jobId" value={jobId} />
+      <p className="text-xs text-muted">
+        Removes what this job put on {targetName}: its redirects, pages, posts, events, entries and forms (to the trash), its uploaded files (deleted), and its content types.
+        Puts back the menus, theme options, homepage and settings as they were before its first run, and the seed content it trashed.
+      </p>
+      <label htmlFor="confirm" className="text-xs">
+        Type <strong>{jobId}</strong> to confirm.
+      </label>
+      <div className="flex gap-2">
+        <input id="confirm" name="confirm" autoComplete="off" className={inputClass} />
+        <Button size="sm" variant="danger" type="submit" disabled={pending || busy}>
+          Roll back
         </Button>
       </div>
     </form>

@@ -18,6 +18,8 @@ export const PlanItem = z.object({
   /** Forms (FormRecord keys) rebuilt in the forms plugin and placed where the source form was. */
   forms: z.array(z.string()).default([]),
   warnings: z.array(z.string()),
+  /** sha256 of the extracted content: a re-scan shows which pages changed (delta sync). */
+  contentSha256: z.string().nullable().default(null),
 });
 export type PlanItem = z.infer<typeof PlanItem>;
 

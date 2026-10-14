@@ -18,5 +18,6 @@ require_once __DIR__ . '/includes/acf.php';
 require_once __DIR__ . '/includes/forms.php';
 require_once __DIR__ . '/includes/entities.php';
 require_once __DIR__ . '/includes/uploads.php';
+require_once __DIR__ . '/includes/rollback.php';
 
 add_action( 'rest_api_init', 'wm_bridge_register_routes' );

@@ -1,4 +1,5 @@
 import type { ExtractedPage, FormAnalysis, FormRecord, MeetingAnalysis, NavLink, RecordAnalysis, SiteAnalysis, SnapshotFile, SnapshotPage } from '@wm/core';
+import { createHash } from 'node:crypto';
 import { sourceKey } from '@wm/core';
 import {
   Plan,
@@ -213,6 +214,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
       redirectFrom: redirectsFor(page.sourceKey, targetPath),
       forms: rebuiltForms(page.sourceKey).map((f) => f.key),
       warnings: itemWarnings,
+      contentSha256: createHash('sha256').update(page.contentHtml).digest('hex'),
     });
   }
 

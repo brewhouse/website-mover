@@ -60,7 +60,7 @@ async function handle(runId: number): Promise<void> {
   try {
     log(`Started ${run.stage}${run.requestedBy ? ` (requested by ${run.requestedBy})` : ''}`);
     const job = (await getJob(run.jobId)) ?? fail(`Job ${run.jobId} is not registered`);
-    const needsTarget = ['plan', 'execute', 'report', 'qa', 'postlaunch'].includes(run.stage);
+    const needsTarget = ['plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'].includes(run.stage);
     const summary = await runStage(run.stage as StageName, {
       jobId: job.id,
       source: { origin: job.sourceUrl, profile: job.profile },

@@ -28,7 +28,7 @@ const TABS = {
 type TabName = keyof typeof TABS;
 
 export default async function ReviewPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; q?: string; page?: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await params;
   const sp = await searchParams;
   const job = await getJob(id);
@@ -106,7 +106,7 @@ export default async function ReviewPage({ params, searchParams }: { params: Pro
                   jobId={id}
                   version={plan.version}
                   sha256={state.sha256}
-                  disabled={busy ? 'A stage is running.' : pendingDecisions ? 'Re-plan first: your changes aren’t in this version.' : undefined}
+                  disabled={!user.canApprove ? 'Only approvers can approve (ask one, or wm user grant).' : busy ? 'A stage is running.' : pendingDecisions ? 'Re-plan first: your changes aren’t in this version.' : undefined}
                 />
               </>
             )}

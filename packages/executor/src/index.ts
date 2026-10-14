@@ -3,3 +3,4 @@ export * from './links.js';
 export * from './execute.js';
 export * from './report.js';
 export * from './postlaunch.js';
+export * from './rollback.js';
