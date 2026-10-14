@@ -161,6 +161,9 @@ describe('framework links', () => {
     ]);
     // A migrated page that is itself at /latest-news/ keeps its URL.
     expect(plan([page('/latest-news')], { existing: [news] }).siteRedirects.map((r) => r.from)).toEqual(['/current-news/']);
+    // An existing page there (one the plan doesn't trash) keeps its URL too.
+    const other = entity(10, { type: 'custom_type', slug: 'current-news', link: 'http://localhost:8088/current-news/' });
+    expect(plan([page('/about')], { existing: [news, other] }).siteRedirects.map((r) => r.from)).toEqual(['/latest-news/']);
     // No News page kept: nothing to redirect to.
     expect(plan([page('/about')]).siteRedirects).toEqual([]);
   });

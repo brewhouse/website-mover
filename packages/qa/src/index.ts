@@ -4,8 +4,9 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { AxeBuilder } from '@axe-core/playwright';
-import { chromium, type Browser } from 'playwright';
+import { chromium, type Browser, type BrowserContext } from 'playwright';
 import { jobPath, readJson, writeJson } from '@wm/core';
+import { isAllowedHost } from '@wm/net';
 import { loadPlan } from '@wm/planner';
 import { selectPages, summarize, type PageResult, type QaPage, type RuleSummary, type RunEntities } from './select.js';
 
@@ -35,12 +36,14 @@ export async function runQa({ jobId, baseUrl, log = console.log, sampleSize = 20
 
   const shots = jobPath(jobId, 'qa', 'screenshots');
   await mkdir(shots, { recursive: true });
-  const browser = await chromium.launch();
+  // In Docker, Chromium's own sandbox needs privileges the container doesn't have; the container is
+  // the boundary there (WM_CHROMIUM_NO_SANDBOX=1 in the image).
+  const browser = await chromium.launch({ chromiumSandbox: process.env.WM_CHROMIUM_NO_SANDBOX !== '1' });
   try {
     const results: PageResult[] = [];
     // A few pages at a time: each opens three viewports.
     for (let i = 0; i < pages.length; i += 3) {
-      results.push(...(await Promise.all(pages.slice(i, i + 3).map((p) => checkPage(browser, baseUrl, p, shots)))));
+      results.push(...(await Promise.all(pages.slice(i, i + 3).map((p, j) => checkPage(browser, baseUrl, { ...p, index: i + j + 1 }, shots)))));
       log(`  ${results.length}/${pages.length} checked`);
     }
     const rules = summarize(results);
@@ -56,12 +59,30 @@ export async function runQa({ jobId, baseUrl, log = console.log, sampleSize = 20
   }
 }
 
-async function checkPage(browser: Browser, baseUrl: string, page: QaPage, shots: string): Promise<PageResult> {
+/**
+ * Chromium does its own networking, outside safeFetch: every request (pages, frames, subresources,
+ * redirects) is checked against the same address rules, so a page can't make the worker fetch an
+ * internal address (and show it in a screenshot).
+ */
+export async function guardRequests(context: BrowserContext): Promise<void> {
+  const verdicts = new Map<string, Promise<boolean>>();
+  await context.route('**/*', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.protocol === 'data:' || url.protocol === 'blob:') return route.continue();
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return route.abort('blockedbyclient');
+    if (!verdicts.has(url.hostname)) verdicts.set(url.hostname, isAllowedHost(url.hostname));
+    return (await verdicts.get(url.hostname)) ? route.continue() : route.abort('blockedbyclient');
+  });
+}
+
+async function checkPage(browser: Browser, baseUrl: string, page: QaPage & { index: number }, shots: string): Promise<PageResult> {
   const url = new URL(page.path, baseUrl).href;
   const result: PageResult = { ...page, status: 0, violations: [], overflow: {}, screenshots: {} };
-  const name = page.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'home';
+  // Unique per page (its position) and short, whatever the path.
+  const name = `${page.index}-${page.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 60) || 'home'}`.toLowerCase();
   for (const [viewport, width] of Object.entries(VIEWPORTS)) {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
+    await guardRequests(context);
     const tab = await context.newPage();
     try {
       const response = await tab.goto(url, { waitUntil: 'load', timeout: 60_000 });

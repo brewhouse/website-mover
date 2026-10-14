@@ -51,7 +51,9 @@ export async function login(_: FormState, form: FormData): Promise<FormState> {
   await dbReady();
   const email = text(form, 'email');
   const h = await headers();
-  const ip = h.get('x-forwarded-for')?.split(',')[0]?.trim() || h.get('x-real-ip') || null;
+  // The client's address only when a trusted proxy sets it (WM_TRUST_PROXY=1); otherwise anyone could
+  // send any X-Forwarded-For, and only the per-email limit applies.
+  const ip = process.env.WM_TRUST_PROXY === '1' ? h.get('x-forwarded-for')?.split(',')[0]?.trim() || h.get('x-real-ip') || null : null;
   if (await loginBlocked(email, ip)) return { error: 'Too many failed attempts: try again in 15 minutes.', values: kept(form, 'password') };
   const user = await checkLogin(email, String(form.get('password') ?? ''));
   await recordLogin(email, ip, !!user);

@@ -325,6 +325,18 @@ function PostLaunchSection({ pl }: { pl: PostLaunchReport }) {
           <span className="text-muted">No GA4 measurement ID for this job.</span>
         )}
       </p>
+      {pl.leftOut?.length > 0 && (
+        <p className="border-b border-line px-4 py-2 text-xs text-muted">
+          {pl.leftOut.length} legacy URLs were left out on purpose (see the plan’s “Not migrated”):{' '}
+          {Object.entries(pl.leftOut.reduce<Record<number, number>>((acc, l) => ({ ...acc, [l.status]: (acc[l.status] ?? 0) + 1 }), {}))
+            .map(([status, n]) => `${n} answer ${status === '0' ? 'nothing' : status}`)
+            .join(', ')}
+          .{' '}
+          {pl.leftOut.some((l) => l.status === 200) && (
+            <span className="text-warn">Still answering 200: {pl.leftOut.filter((l) => l.status === 200).slice(0, 10).map((l) => l.url).join(' ')}</span>
+          )}
+        </p>
+      )}
       {pl.problems.length ? (
         <table className="data">
           <thead>

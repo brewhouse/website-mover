@@ -11,7 +11,8 @@
  *   wm qa      --job jha [--target local]      accessibility and responsive checks (Playwright + axe-core)
  *   wm postlaunch --job jha [--base https://www.jaxha.org] [--target local]   legacy URLs and GA4 on the live site
  *   wm rollback --job jha --confirm jha [--target local]   undo the job on the target
- * The GA4 measurement ID comes from GA4_MEASUREMENT_ID.
+ * A job's GA4 measurement ID is given per command (--ga4 G-…) to plan and postlaunch: it belongs to
+ * the job, not the environment.
  *
  * --target local is the Docker seed configured in .env; any other name is a target saved in the
  * web app (needs DATABASE_URL).
@@ -49,6 +50,7 @@ const { positionals, values } = parseArgs({
     'password-env': { type: 'string' },
     'rights-confirmed': { type: 'boolean', default: false },
     base: { type: 'string' },
+    ga4: { type: 'string' },
     confirm: { type: 'string' },
     approver: { type: 'boolean', default: false },
     revoke: { type: 'boolean', default: false },
@@ -68,7 +70,7 @@ if (command && (STAGES as string[]).includes(command)) {
     source: command === 'scan' ? { origin: values.origin ?? fail('--origin is required'), profile: values.profile!, cacheDir: values.cache ? path.resolve(cwd, values.cache) : undefined } : undefined,
     target: ['plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'].includes(command) ? await cliTarget(values.target!) : undefined,
     timezone: values.timezone,
-    ga4Id: process.env.GA4_MEASUREMENT_ID || null,
+    ga4Id: values.ga4 ?? null,
     liveUrl: values.base ?? null,
     log: console.log,
   });

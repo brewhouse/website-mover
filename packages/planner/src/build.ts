@@ -457,7 +457,10 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const newsPage = keep.find((k) => /News listing/.test(k.reason));
   if (newsPage?.link) {
     const newsPath = new URL(newsPage.link, target.url).pathname;
-    const taken = new Set([...items.map((i) => i.targetPath), ...tables.map((t) => t.targetPath), ...contentTypes.map((c) => c.listing.targetPath)]);
+    // Paths with a page of their own stay: migrated ones, and existing target pages that aren't trashed.
+    const trashed = new Set(cleanup.map((c) => c.id));
+    const existingPaths = existing.filter((e) => !trashed.has(e.id) && e.link).map((e) => new URL(e.link, target.url).pathname);
+    const taken = new Set([...items.map((i) => i.targetPath), ...tables.map((t) => t.targetPath), ...contentTypes.map((c) => c.listing.targetPath), ...existingPaths]);
     for (const from of FRAMEWORK_NEWS_PATHS) {
       if (from !== newsPath && !taken.has(from)) siteRedirects.push({ from, to: newsPath, reason: 'The framework links here for "All News"; the News page is elsewhere' });
     }

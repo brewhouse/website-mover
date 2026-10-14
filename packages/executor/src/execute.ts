@@ -133,7 +133,8 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     const homeGroup = before.acf.field_groups.find((g) => g.location.some((rules) => rules.some((r) => r.param === 'page_template' && r.value === 'template-home.php')));
     await snapshotBefore(client, jobId, plan, { pageId: existing.find((e) => e.front_page)?.id ?? null, groupKey: homeGroup?.key ?? null, fields: homeGroup?.fields });
   } catch (err) {
-    fail('before', 'setup', 'snapshot', err);
+    // Nothing has changed yet: stop rather than change the site with no way to restore it.
+    throw new Error(`Couldn't save the site structure before changing it (rollback needs it): ${(err as Error).message}`);
   }
 
   // 1. Demo content → trash.

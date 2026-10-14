@@ -17,7 +17,9 @@ FROM deps AS worker
 # poppler-utils: style guide PDF facts (pdfinfo, pdftotext, pdffonts, pdfimages, pdftoppm).
 RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils ca-certificates && rm -rf /var/lib/apt/lists/*
 # Chromium for the QA stage (Playwright + axe-core), in a folder the node user can read.
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Chromium's own sandbox can't start in a container without extra privileges (tested): the container is
+# the boundary, and every request the browser makes still goes through the SSRF check.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright WM_CHROMIUM_NO_SANDBOX=1
 RUN pnpm --filter @wm/qa exec playwright install --with-deps chromium
 ENV NODE_ENV=production WM_DATA_DIR=/data
 USER node

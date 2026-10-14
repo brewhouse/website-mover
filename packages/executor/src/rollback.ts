@@ -13,6 +13,9 @@ import { loadRunState } from './execute.js';
 interface MenuItemSnapshot {
   id: number;
   title: string;
+  attr_title?: string;
+  description?: string;
+  xfn?: string[];
   url: string;
   type: string;
   object: string;
@@ -35,9 +38,13 @@ export interface BeforeState {
 
 const beforeFile = (jobId: string) => jobPath(jobId, 'run', 'before.json');
 
-/** Saves the site structure the job is about to change, once: re-runs keep the first snapshot. */
+/**
+ * Saves the site structure the job is about to change, on its first run only: re-runs keep that
+ * snapshot, and a job that already ran without one (before M5) gets none, since the site then holds
+ * its own earlier changes, not the original.
+ */
 export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan, home: { pageId: number | null; groupKey: string | null; fields?: { name: string; type?: string }[] }): Promise<void> {
-  if (existsSync(beforeFile(jobId))) return;
+  if (existsSync(beforeFile(jobId)) || (await hasRunBefore(jobId))) return;
   const settingKeys = ['title', ...plan.settings.map((s) => s.key)];
   const settings = await client.get<Record<string, unknown>>('/wp/v2/settings');
   const optionNames = Object.keys(plan.site?.options ?? {});
@@ -68,7 +75,23 @@ async function menuItems(client: WpClient, menuId: number): Promise<MenuItemSnap
   const items: MenuItemSnapshot[] = [];
   for (let page = 1; ; page++) {
     const batch = await client.get<(Omit<MenuItemSnapshot, 'title'> & { title: { raw: string } })[]>('/wp/v2/menu-items', { menus: menuId, per_page: 100, page, context: 'edit' }).catch(() => []);
-    items.push(...batch.map((i) => ({ id: i.id, title: i.title.raw, url: i.url, type: i.type, object: i.object, object_id: i.object_id, parent: i.parent, menu_order: i.menu_order, target: i.target, classes: i.classes })));
+    items.push(
+      ...batch.map((i) => ({
+        id: i.id,
+        title: i.title.raw,
+        attr_title: i.attr_title,
+        description: i.description,
+        xfn: i.xfn,
+        url: i.url,
+        type: i.type,
+        object: i.object,
+        object_id: i.object_id,
+        parent: i.parent,
+        menu_order: i.menu_order,
+        target: i.target,
+        classes: i.classes,
+      })),
+    );
     if (batch.length < 100) break;
   }
   return items;
@@ -94,16 +117,23 @@ export async function restoreHome(client: WpClient, home: NonNullable<BeforeStat
   }
 }
 
+/** The job ran on its target before (a run state, current or rolled back). */
+async function hasRunBefore(jobId: string): Promise<boolean> {
+  const names = await readdir(jobPath(jobId, 'run')).catch(() => [] as string[]);
+  return names.some((n) => n === 'state.json' || /^state\.rolled-back-\d+\.json$/.test(n));
+}
+
 /** Jobs (other than this one) whose last run was on the same target, with what they use there. */
-async function otherJobsOnTarget(jobId: string, targetUrl: string): Promise<{ jobId: string; startedAt: string; redirects: string[]; contentTypes: string[] }[]> {
+export async function otherJobsOnTarget(jobId: string, targetUrl: string): Promise<{ jobId: string; startedAt: string; redirects: string[]; contentTypes: string[] }[]> {
   const ids = await readdir(`${dataDir()}/jobs`).catch(() => [] as string[]);
   const found = [];
   for (const id of ids) {
     if (id === jobId || !existsSync(jobPath(id, 'run', 'state.json'))) continue;
     const state = await loadRunState(id).catch(() => null);
-    const plan = state && (await loadPlan(id, state.planVersion).catch(() => null))?.plan;
+    // Only the target and content types are needed: read the plan without validating all of it.
+    const plan = state && (await readJson<Pick<Plan, 'target' | 'contentTypes'>>(jobPath(id, 'plan', `plan.v${state.planVersion}.json`)).catch(() => null));
     if (!state || !plan || plan.target.url !== targetUrl) continue;
-    found.push({ jobId: id, startedAt: state.startedAt, redirects: state.redirects.map((r) => r.from), contentTypes: plan.contentTypes.map((c) => c.postType) });
+    found.push({ jobId: id, startedAt: state.startedAt, redirects: state.redirects.map((r) => r.from), contentTypes: (plan.contentTypes ?? []).map((c) => c.postType) });
   }
   return found;
 }
@@ -249,6 +279,9 @@ export async function rollbackJob({ jobId, client, log = console.log }: { jobId:
             status: 'publish',
             target: it.target,
             classes: it.classes,
+            ...(it.attr_title ? { attr_title: it.attr_title } : {}),
+            ...(it.description ? { description: it.description } : {}),
+            ...(it.xfn?.length ? { xfn: it.xfn } : {}),
             ...(it.type === 'custom' ? { type: 'custom', url: it.url } : { type: it.type, object: it.object, object_id: it.object_id }),
           });
           ids.set(it.id, created.id);

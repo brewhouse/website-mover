@@ -14,7 +14,11 @@ export interface ScopeLine {
   why: string;
 }
 
-export function scopeChecklist(plan: Plan, report: Report | null, qa: QaReport | null, postlaunch: PostLaunchReport | null): ScopeLine[] {
+export function scopeChecklist(plan: Plan, report: Report | null, qaResult: QaReport | null, postlaunchResult: PostLaunchReport | null): ScopeLine[] {
+  // Only results from this migration count: QA of the reported plan version, and a post-launch check
+  // made after the migration ran.
+  const qa = qaResult && (!report || qaResult.planVersion === report.planVersion) ? qaResult : null;
+  const postlaunch = postlaunchResult && (!report || postlaunchResult.ranAt >= report.ranAt) ? postlaunchResult : null;
   const c = report?.counts;
   const total = (kinds: readonly (keyof NonNullable<typeof c>)[]) => kinds.reduce((n, k) => n + (c?.[k].planned ?? 0), 0);
   const live = (kinds: readonly (keyof NonNullable<typeof c>)[]) => kinds.reduce((n, k) => n + (c?.[k].live ?? 0), 0);
@@ -49,8 +53,12 @@ export function scopeChecklist(plan: Plan, report: Report | null, qa: QaReport |
   lines.push({
     line: 'Implementation of the approved sitemap where practical',
     owner: 'Tool',
-    status: plan.site ? 'done' : 'n/a',
-    why: plan.site ? `No separate sitemap: the source's structure is kept (PLAN §6.6). ${plan.site.menus.filter((m) => m.items.length).length} menus rebuilt from the source.` : 'No site structure in this plan.',
+    status: !plan.site ? 'n/a' : report?.site && Object.values(report.site.menus).some((n) => n > 0) ? 'done' : 'not yet',
+    why: !plan.site
+      ? 'No site structure in this plan.'
+      : report?.site
+        ? `No separate sitemap: the source's structure is kept (PLAN §6.6). Menus rebuilt: ${Object.entries(report.site.menus).map(([n, k]) => `${n} ${k}`).join(', ') || 'none'}.`
+        : 'The site structure hasn’t been applied.',
   });
   lines.push({
     line: 'News, events/calendar, board/meeting content, forms/links, search, document access',

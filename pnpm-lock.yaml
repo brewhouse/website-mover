@@ -462,6 +462,9 @@ importers:
       '@wm/core':
         specifier: workspace:*
         version: link:../core
+      '@wm/net':
+        specifier: workspace:*
+        version: link:../net
       '@wm/planner':
         specifier: workspace:*
         version: link:../planner

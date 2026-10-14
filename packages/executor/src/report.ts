@@ -38,6 +38,29 @@ export interface Report {
 }
 
 /** Checks the run against the target and writes report.json/.md, url-map.csv and redirects.csv. */
+/** The same-site http(s) links and image sources on a page (absolute, without the #fragment), minus WordPress's own admin and API URLs. */
+export function linksIn(html: string, pageUrl: string): string[] {
+  const host = new URL(pageUrl).host;
+  const $ = cheerio.load(html);
+  const found = new Set<string>();
+  for (const [selector, attr] of [['a[href]', 'href'], ['img[src]', 'src']] as const) {
+    $(selector).each((_, el) => {
+      const raw = $(el).attr(attr)?.trim();
+      if (!raw || raw.startsWith('#') || /^(mailto|tel|javascript|data):/i.test(raw)) return;
+      let url: URL;
+      try {
+        url = new URL(raw, pageUrl);
+      } catch {
+        return;
+      }
+      if (!/^https?:$/.test(url.protocol) || url.host !== host || /^\/wp-(admin|login|json)/.test(url.pathname)) return;
+      url.hash = '';
+      found.add(url.href);
+    });
+  }
+  return [...found];
+}
+
 export async function buildReport({ jobId, client, log = console.log }: { jobId: string; client: WpClient; log?: (msg: string) => void }): Promise<Report> {
   const state = await loadRunState(jobId);
   const { plan } = await loadPlan(jobId, state.planVersion);
@@ -65,26 +88,10 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
   const invalid: Report['invalid'] = [];
   const warnings: Record<string, number> = {};
   const entities = Object.entries(state.entities);
-  const host = new URL(client.baseUrl).host;
   // Every same-site link and image on the migrated pages → the pages it's on.
   const linksOn = new Map<string, Set<string>>();
   const collectLinks = (html: string, page: string) => {
-    const $ = cheerio.load(html);
-    for (const [selector, attr] of [['a[href]', 'href'], ['img[src]', 'src']] as const) {
-      $(selector).each((_, el) => {
-        const raw = $(el).attr(attr)?.trim();
-        if (!raw || raw.startsWith('#') || /^(mailto|tel|javascript|data):/i.test(raw)) return;
-        let url: URL;
-        try {
-          url = new URL(raw, client.baseUrl + page);
-        } catch {
-          return;
-        }
-        if (!/^https?:$/.test(url.protocol) || url.host !== host || /^\/wp-(admin|login|json)/.test(url.pathname)) return;
-        url.hash = '';
-        linksOn.set(url.href, (linksOn.get(url.href) ?? new Set()).add(page));
-      });
-    }
+    for (const url of linksIn(html, client.baseUrl + page)) linksOn.set(url, (linksOn.get(url) ?? new Set()).add(page));
   };
   log(`Verifying ${entities.length} objects on ${client.baseUrl}`);
   await mapLimit(entities, 6, async ([key, e]) => {
