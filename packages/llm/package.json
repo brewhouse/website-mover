@@ -1,0 +1,16 @@
+{
+  "name": "@wm/llm",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "openai": "^7.32.0",
+    "zod": "^4.6.7"
+  }
+}

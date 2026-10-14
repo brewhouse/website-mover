@@ -1,0 +1,16 @@
+{
+  "name": "@wm/styleguide",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wm/llm": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}
