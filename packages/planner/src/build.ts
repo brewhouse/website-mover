@@ -110,9 +110,18 @@ export function buildPlan(input: BuildPlanInput): Plan {
     ...communities.map((c) => c.sourceKey),
     ...(records?.tables ?? []).flatMap((t) => t.sourceKeys),
   ]);
-  const movedAwaySlugs = [...movedAway]
-    .map((k) => pageByKey.get(k))
-    .map((p) => (p && !new URL(p.url).search ? new URL(p.url).pathname.toLowerCase().replace(/^\/|\/$/g, '') : ''))
+  const sourcePaths = [...movedAway].map((k) => pageByKey.get(k)).filter((p): p is ExtractedPage => !!p).map((p) => pathAndQuery(p.url));
+  // Aliases (URLs that already redirected on the source) and listing pages that redirect to a
+  // listing are redirect sources too.
+  for (const s of input.snapshotPages) {
+    if (s.status === 200 && sourceKey(s.url) !== sourceKey(s.finalUrl)) sourcePaths.push(pathAndQuery(s.url));
+  }
+  if (communities.length) {
+    for (const p of pages) if (p.kind === 'listing' && /^\/locations(\/|$)/.test(new URL(p.url).pathname)) sourcePaths.push(pathAndQuery(p.url));
+  }
+  const movedAwaySlugs = sourcePaths
+    .filter((path) => !path.includes('?'))
+    .map((path) => path.toLowerCase().replace(/^\/|\/$/g, ''))
     .filter((s) => s && !s.includes('/'));
   const slugs = new SlugRegistry([...WP_RESERVED, ...target.reservedSlugs.filter((s) => !ownBases.has(s)), ...keptSlugs, ...movedAwaySlugs]);
   const claim = (key: string, preferred: string, registry = slugs) => registry.claim(ours.get(key)?.slug || preferred);

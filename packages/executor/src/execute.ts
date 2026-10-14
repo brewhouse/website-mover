@@ -234,7 +234,10 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
 
   // 7. Content documents: pages, posts, table pages, listing pages, custom-type entries.
   const convert = (html: string, warnings: string[], formsInOrder: number[] = []) => {
-    const { html: rewritten, unresolved } = rewriteLinks(withFormMarkers(html), links, plan.source.origin);
+    // Only forms that were rebuilt are swapped for their block; any other form stays as it was.
+    if (!formsInOrder.length && /<form\b/i.test(html)) warnings.push('form-not-rebuilt: the page has a form that is not rebuilt; kept as HTML');
+    const marked = formsInOrder.length ? withFormMarkers(html) : html;
+    const { html: rewritten, unresolved } = rewriteLinks(marked, links, plan.source.origin);
     if (unresolved.length) warnings.push(`${unresolved.length} link(s) to source content not migrated yet`);
     let blocks = restrictBlocks(
       htmlToBlocks(rewritten, { demoteH1: true, onWarning: (w) => warnings.push(w), resolveImage: (url) => images.get(url) }),
@@ -339,7 +342,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     const post = previous
       ? await client.post<Post>(`${doc.route}/${previous.id}`, full)
       : await createOnce(client, doc.route, full, doc.key, doc.postType);
-    assertTagged(post, doc.key, doc.postType);
+    await assertTagged(client, post, doc.key, doc.postType);
     posts.set(doc.key, post);
     const path = post.status === 'publish' ? new URL(post.link).pathname : doc.targetPath;
     state.entities[doc.key] = { kind: doc.kind, id: post.id, path, action: action(previous), warnings };
@@ -379,7 +382,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
       };
       const route = `/wp/v2/${restBase('people')}`;
       const post = previous ? await client.post<Post>(`${route}/${previous.id}`, body) : await createOnce(client, route, body, person.key, 'people');
-      assertTagged(post, person.key, 'people');
+      await assertTagged(client, post, person.key, 'people');
       // The framework's people type has no public page: people appear through blocks on pages.
       state.entities[person.key] = { kind: 'person', id: post.id, path: '', action: action(previous), warnings: [] };
     } catch (err) {
@@ -419,7 +422,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
         ? await client.post<{ id: number; url: string }>(`/tribe/events/v1/events/${previous.id}`, body)
         : await client.post<{ id: number; url: string }>('/tribe/events/v1/events', body);
       // Tag it (The Events Calendar's API has no meta field).
-      assertTagged(await client.post<Post>(`/wp/v2/tribe_events/${created.id}`, { meta: meta(ev.key) }), ev.key, 'tribe_events');
+      await assertTagged(client, await client.post<Post>(`/wp/v2/tribe_events/${created.id}`, { meta: meta(ev.key) }), ev.key, 'tribe_events');
       if (ev.cancelled) warnings.push('cancelled: the source says this meeting was cancelled; set the event status by hand');
       state.entities[ev.key] = { kind: 'event', id: created.id, path: new URL(created.url).pathname, action: action(previous), warnings };
     } catch (err) {
@@ -494,9 +497,11 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
  * Every object must keep its source key: re-runs find objects by it, and untagged objects of the
  * seed's own types look like demo content to the next plan.
  */
-function assertTagged(post: Post, key: string, postType: string): void {
+async function assertTagged(client: WpClient, post: Post, key: string, postType: string): Promise<void> {
   if (post.meta?._wm_source_key !== key) {
-    throw new Error(`The target did not store the source key on this ${postType} (is the bridge active and up to date?)`);
+    // An untagged object would be duplicated by a re-run and look like demo content to the next plan.
+    await client.post('/website-mover/v1/trash', { ids: [post.id] }).catch(() => {});
+    throw new Error(`The target did not store the source key on this ${postType} (is the bridge active and up to date?); the object was moved to the trash`);
   }
 }
 
