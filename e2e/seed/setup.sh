@@ -60,8 +60,10 @@ wp rewrite structure '/%postname%/' --hard >/dev/null
 wp theme activate planeteriaweb
 
 # Activate the framework's plugins. Skipped locally: ones that call external services or send mail
-# (staff SSO, AI alt text, BugHerd, link checker, SMTP, social feeds).
-SKIP="planeteria-sso alttext-ai bugherd broken-link-checker gravitysmtp custom-facebook-feed-pro instagram-feed-pro wordpress-importer"
+# (staff SSO, AI alt text, BugHerd, link checker, SMTP, social feeds), and WP Sheet Editor - Media
+# Library, whose Enable Media Replace integration is a fatal error on the post edit screen
+# (EnableMediaReplace\Replacer is missing in Enable Media Replace 4.1.5).
+SKIP="planeteria-sso alttext-ai bugherd broken-link-checker gravitysmtp custom-facebook-feed-pro instagram-feed-pro wordpress-importer wp-sheet-editor-media-library-premium"
 TO_ACTIVATE=()
 for p in $(wp plugin list --field=name --status=inactive); do
   [[ " $SKIP website-mover-bridge " == *" $p "* ]] || TO_ACTIVATE+=("$p")

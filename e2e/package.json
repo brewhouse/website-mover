@@ -1,0 +1,12 @@
+{
+  "name": "@wm/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@wm/wp-client": "workspace:*",
+    "playwright": "1.64.0"
+  }
+}
