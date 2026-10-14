@@ -45,6 +45,8 @@ export function renderPlan(plan: Plan): string {
     }
     out.push('**Theme options:** ' + Object.entries(s.options).map(([k, v]) => `${k} = ${v ? `"${cell(v)}"` : '(cleared)'}`).join(' · '), '');
     out.push(`**Homepage slides:** ${s.home.banner.map((b) => `"${cell(b.title)}" → \`${b.linkUrl ?? '—'}\``).join(' · ')}`, '');
+    if (s.home.quickLinks.length) out.push(`**Homepage quick links:** ${s.home.quickLinks.map((q) => `"${cell(q.title)}" → \`${q.url}\``).join(' · ')}`, '');
+    if (s.home.clearOthers) out.push('The homepage template\'s other fields (the seed\'s demo placeholders) are cleared.', '');
   }
   if (plan.categories.length) out.push('## News categories', '', plan.categories.join(' · '), '');
 

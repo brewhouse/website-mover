@@ -15,8 +15,10 @@ M3 has two parts.
 | **Footer Menu** | Footer links (Accessibility) | |
 | **Social Menu** | Facebook, YouTube | |
 | **Explore Menu** | "Industry Links": CDC, FAHRO, HDLI, HUD, NAHRO, PHADA, SERC-NAHRO | The seed had no Explore Menu, although `footer.php` uses one; it is created |
-| Footer contact (theme options) | Address and phone from the footer. The seed's placeholder email and fax are cleared | Bridge `POST /acf/options`; the framework regenerates its CSS file afterwards |
-| Homepage slides (`banner`) | The 4 slideshow slides: title, image, link, and link text from the slide subtitle | Front page ACF fields over REST |
+| Footer contact (theme options) | Address and phone from the footer. The seed's placeholder email and fax are cleared with their headings and icons, so the footer hides those rows; the demo "City Hall" heading is cleared | Bridge `POST /acf/options`; the framework regenerates its CSS file afterwards |
+| Homepage slides (`banner`) | The slideshow slides: title, image, link, and link text from the slide subtitle. The template takes at most 3; the rest are reported | Front page ACF fields over REST, within the row limits in the seed's field definitions |
+| Homepage quick links (`banner_icon`) | The tile under the slideshow ("View Our Full Calendar") | Same |
+| Homepage demo content | The template's other fields (featured programs, departments, counters, sign-up, hand-picked news) are cleared. A field that requires rows keeps the seed's values and is reported | Same |
 | Left out (target not migrated) | Quick Links (empty page), E-News, Sign Up For News, Site Map | Listed in the plan |
 
 ## New theme changes for the team
@@ -27,6 +29,8 @@ These add to T1–T7 in `docs/m0/framework-assessment.md` §6:
 |---|---|---|
 | T8 | Footer: show office hours and the fair-housing / HUD non-discrimination statements (an options field or a footer text area) | jaxha.org shows "Monday – Friday 8 am – 5 pm" and two required fair-housing statements on every page. The framework footer has no place for them |
 | T9 | Homepage: a field for the intro/mission text (or show the page content) | `template-home.php` hides the editor and has no field for the mission statement and program intro that jaxha.org's homepage leads with |
+
+T10–T12 (social icons, the hard-coded "Connect with us" section, homepage events) came out of the first run: see `docs/m3/results.md`.
 
 ## 2. Branding (when the style guide arrives)
 

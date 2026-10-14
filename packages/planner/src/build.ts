@@ -520,12 +520,13 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
   }).filter((m) => m.items.length);
   if (dropped.length) ctx.warnings.push(`Menu links to content that isn't migrated were left out: ${dropped.join('; ')}`);
 
-  const options: Record<string, string> = {
-    footer_address: site.contact.address ?? '',
-    footer_phone: site.contact.phone ?? '',
-    footer_email: site.contact.email ?? '',
-    footer_fax: site.contact.fax ?? '',
-  };
+  // Footer contact. Where the source has no value, the seed's placeholder (and its heading and
+  // icon, which the footer would still show) is cleared; the address heading is a demo label.
+  const options: Record<string, string> = { footer_address: site.contact.address ?? '', footer_address_heading: '' };
+  for (const [field, value] of [['phone', site.contact.phone], ['email', site.contact.email], ['fax', site.contact.fax]] as const) {
+    options[`footer_${field}`] = value ?? '';
+    if (!value) Object.assign(options, { [`footer_${field}_heading`]: '', [`footer_${field}_icon`]: '' });
+  }
   if (site.contact.hours) ctx.warnings.push(`Office hours ("${site.contact.hours}") have no place in the framework footer (theme change).`);
   if (site.footerNotices.length) ctx.warnings.push(`${site.footerNotices.length} footer notice(s) (e.g. fair-housing statements) have no place in the framework footer (theme change).`);
 
@@ -533,7 +534,12 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     const target = s.link ? resolve(s.link) : null;
     return { title: s.title, image: s.image, linkUrl: target?.url ?? null, linkKey: target?.key ?? null, linkTitle: s.subtitle };
   });
-  return { title: site.siteName, menus, options, home: { banner } };
+  const quickLinks = site.home.buttons.flatMap((b) => {
+    const target = resolve(b.href);
+    if (!target) ctx.warnings.push(`Homepage link "${b.label}" (${b.href}) points to content that isn't migrated: left out.`);
+    return target ? [{ title: b.label, url: target.url, key: target.key }] : [];
+  });
+  return { title: site.siteName, menus, options, home: { banner, quickLinks, clearOthers: true } };
 }
 
 /** Entries of forms with sensitive fields are deleted after this many days. */

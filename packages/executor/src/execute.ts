@@ -33,14 +33,15 @@ export interface RunState {
   redirects: { from: string; to: string }[];
   redirectImport: { imported: number; updated: number; skipped: number; failed: number } | null;
   /** Site structure applied (M3): menu name → item count, options result, homepage slides set. */
-  site: { menus: Record<string, number>; options: Record<string, string>; homeSlides: number; warnings: string[] } | null;
+  site: { menus: Record<string, number>; options: Record<string, string>; homeSlides: number; homeQuickLinks?: number; warnings: string[] } | null;
 }
 
 type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
 type Media = { id: number; source_url: string };
+type SeedField = { name: string; type?: string; choices?: Record<string, string>; min?: number | string; max?: number | string };
 type Schema = {
   post_types: Record<string, { rest_base: string }>;
-  acf: { field_groups: { key: string; location: { param: string; value: string }[][]; fields: { name: string; choices?: Record<string, string>; max?: number | string }[] }[] };
+  acf: { field_groups: { key: string; location: { param: string; value: string }[][]; fields: SeedField[] }[] };
 };
 
 /**
@@ -439,8 +440,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     try {
       state.site = await applySite(client, plan, state, {
         frontPage: existing.find((e) => e.front_page)?.id ?? null,
-        homeGroup: groupFor('page_template', 'template-home.php')?.key ?? null,
-        bannerMax: Number(groupFor('page_template', 'template-home.php')?.fields.find((f) => f.name === 'banner')?.max) || null,
+        homeGroup: groupFor('page_template', 'template-home.php') ?? null,
         mediaId,
         postTypeOf: (key) => plan.records.find((r) => r.sourceKey === key)?.postType ?? (plan.items.find((i) => i.sourceKey === key)?.type === 'post' ? 'post' : 'page'),
         log,
@@ -531,9 +531,8 @@ async function applySite(
   state: RunState,
   ctx: {
     frontPage: number | null;
-    homeGroup: string | null;
-    /** The homepage template's limit on slides (repeater max), if any. */
-    bannerMax: number | null;
+    /** The homepage template's field group (its fields' types and row limits). */
+    homeGroup: { key: string; fields: SeedField[] } | null;
     mediaId: (url: string | null) => number | undefined;
     postTypeOf: (key: string) => string;
     log: (msg: string) => void;
@@ -543,21 +542,45 @@ async function applySite(
   if (site.title) await client.post('/wp/v2/settings', { title: site.title });
   const options = await client.post<Record<string, string>>('/website-mover/v1/acf/options', { values: site.options });
 
-  let homeSlides = 0;
   const warnings: string[] = [];
-  if (ctx.frontPage && ctx.homeGroup && site.home.banner.length) {
-    await client.post(`/website-mover/v1/acf/field-groups/${ctx.homeGroup}/show-in-rest`, {});
-    const slides = ctx.bannerMax ? site.home.banner.slice(0, ctx.bannerMax) : site.home.banner;
-    if (slides.length < site.home.banner.length) {
-      warnings.push(`The homepage template takes at most ${ctx.bannerMax} slides; left out: ${site.home.banner.slice(slides.length).map((b) => `"${b.title}"`).join(', ')}`);
+  const home = { slides: 0, quickLinks: 0 };
+  if (ctx.frontPage && ctx.homeGroup) {
+    await client.post(`/website-mover/v1/acf/field-groups/${ctx.homeGroup.key}/show-in-rest`, {});
+    const link = (title: string, key: string | null, url: string) => ({ title, url: (key && state.entities[key]?.path) || url, target: '' });
+    // Fields the source fills (slides, quick links); with clearOthers, the rest are emptied.
+    const filled: Record<string, { label: string; rows: unknown[]; names: string[] }> = {};
+    if (site.home.banner.length) {
+      filled.banner = {
+        label: 'slides',
+        rows: site.home.banner.map((b) => ({ select_image: ctx.mediaId(b.image) ?? null, title: b.title, link: link(b.linkTitle ?? '', b.linkKey, b.linkUrl ?? '') })),
+        names: site.home.banner.map((b) => b.title),
+      };
     }
-    const banner = slides.map((b) => ({
-      select_image: ctx.mediaId(b.image) ?? '',
-      title: b.title,
-      link: { title: b.linkTitle ?? '', url: (b.linkKey && state.entities[b.linkKey]?.path) || b.linkUrl || '', target: '' },
-    }));
-    await client.post(`/wp/v2/pages/${ctx.frontPage}`, { acf: { banner } });
-    homeSlides = banner.length;
+    if (site.home.quickLinks.length) {
+      filled.banner_icon = {
+        label: 'quick links',
+        rows: site.home.quickLinks.map((q) => ({ banner_icon: null, icon_link: link(q.title, q.key, q.url) })),
+        names: site.home.quickLinks.map((q) => q.title),
+      };
+    }
+    const acf: Record<string, unknown> = {};
+    for (const field of ctx.homeGroup.fields) {
+      if (!field.name || ['tab', 'message', 'accordion'].includes(field.type ?? '')) continue;
+      const fill = filled[field.name];
+      const [min, max] = [Number(field.min) || 0, Number(field.max) || 0];
+      if (fill) {
+        const rows = max ? fill.rows.slice(0, max) : fill.rows;
+        if (rows.length < fill.rows.length) warnings.push(`The homepage template takes at most ${max} ${fill.label}; left out: ${fill.names.slice(max).map((n) => `"${n}"`).join(', ')}`);
+        acf[field.name] = rows;
+      } else if (site.home.clearOthers) {
+        // The seed's demo placeholders are cleared, except where the template requires rows.
+        if (min > 0) warnings.push(`The homepage template requires at least ${min} "${field.name}" row(s): the seed's placeholders stay until an editor replaces them.`);
+        else acf[field.name] = ['repeater', 'flexible_content'].includes(field.type ?? '') ? [] : ['text', 'textarea', 'wysiwyg', 'email', 'url'].includes(field.type ?? '') ? '' : null;
+      }
+    }
+    if (Object.keys(acf).length) await client.post(`/wp/v2/pages/${ctx.frontPage}`, { acf });
+    home.slides = Array.isArray(acf.banner) ? acf.banner.length : 0;
+    home.quickLinks = Array.isArray(acf.banner_icon) ? acf.banner_icon.length : 0;
   }
 
   // Named menus are replaced as a whole: the seed's items are demo links.
@@ -588,9 +611,9 @@ async function applySite(
     }
     menus[menu.name] = ids.length;
   }
-  ctx.log(`Site: title, ${Object.keys(site.options).length} options, ${homeSlides} homepage slides, menus ${Object.entries(menus).map(([n, c]) => `${n} (${c})`).join(', ')}`);
+  ctx.log(`Site: title, ${Object.keys(site.options).length} options, ${home.slides} homepage slides, ${home.quickLinks} quick links, menus ${Object.entries(menus).map(([n, c]) => `${n} (${c})`).join(', ')}`);
   for (const w of warnings) ctx.log(`  ! ${w}`);
-  return { menus, options, homeSlides, warnings };
+  return { menus, options, homeSlides: home.slides, homeQuickLinks: home.quickLinks, warnings };
 }
 
 function entryRedirects(plan: Plan, key: string): string[] {

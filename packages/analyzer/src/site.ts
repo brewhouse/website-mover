@@ -85,7 +85,7 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
     },
     contact: { address, phone, email: null, fax: null, hours },
     footerNotices: notices,
-    home: { slides },
+    home: { slides, buttons: links('#buttonRow a') },
   };
 }
 
@@ -104,7 +104,7 @@ function genericSite(html: string, origin: string): SiteAnalysis {
     menus: { top: [], main, footer: dedupe(footer), social: footer.filter((l) => /facebook|youtube|instagram|twitter|x\.com|linkedin/.test(l.href)), explore: [] },
     contact: { address: null, phone: null, email: null, fax: null, hours: null },
     footerNotices: [],
-    home: { slides: [] },
+    home: { slides: [], buttons: [] },
   };
 }
 

@@ -171,6 +171,10 @@ export const PlanSite = z.object({
   /** Homepage template fields. */
   home: z.object({
     banner: z.array(z.object({ title: z.string(), image: z.string().nullable(), linkUrl: z.string().nullable(), linkKey: z.string().nullable(), linkTitle: z.string().nullable() })),
+    /** Link tiles under the slideshow (the homepage template's `banner_icon`). */
+    quickLinks: z.array(z.object({ title: z.string(), url: z.string(), key: z.string().nullable() })).default([]),
+    /** Clear the homepage template's other fields (the seed's demo placeholders). */
+    clearOthers: z.boolean().default(false),
   }),
 });
 export type PlanSite = z.infer<typeof PlanSite>;

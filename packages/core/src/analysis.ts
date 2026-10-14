@@ -178,6 +178,8 @@ export interface SiteAnalysis {
   home: {
     /** Homepage slideshow / hero slides. */
     slides: { title: string; subtitle: string | null; link: string | null; image: string | null; alt: string }[];
+    /** Link tiles shown under the slideshow (quick links). */
+    buttons: NavLink[];
   };
 }
 

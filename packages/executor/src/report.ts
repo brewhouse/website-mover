@@ -153,7 +153,7 @@ export function renderReport(r: Report): string {
   if (r.failures.length) out.push('## Failures', '', ...r.failures.map((f) => `- ${f.kind} \`${f.sourceKey}\` at ${f.step}: ${f.error}`), '');
   if (r.notLive.length) out.push('## Not answering 200', '', ...r.notLive.map((n) => `- \`${n.path}\` → ${n.status} (${n.sourceKey})`), '');
   if (r.site) {
-    out.push('## Site structure', '', `Homepage slides: ${r.site.homeSlides}. Menus: ${Object.entries(r.site.menus).map(([n, c]) => `${n} (${c} items)`).join(', ') || 'none'}.`, '');
+    out.push('## Site structure', '', `Homepage slides: ${r.site.homeSlides}. Quick links: ${r.site.homeQuickLinks ?? 0}. Menus: ${Object.entries(r.site.menus).map(([n, c]) => `${n} (${c} items)`).join(', ') || 'none'}.`, '');
     if (r.site.warnings.length) out.push(...r.site.warnings.map((w) => `- ${w}`), '');
   }
   if (r.redirects.broken.length) out.push('## Redirects not working', '', ...r.redirects.broken.map((b) => `- \`${b.from}\` → expected \`${b.to}\`, got ${b.got}`), '');
