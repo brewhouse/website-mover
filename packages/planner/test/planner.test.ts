@@ -152,6 +152,17 @@ describe('buildPlan', () => {
   });
 });
 
+describe('delta sync', () => {
+  it('records each page’s content hash, so a re-scan shows which pages changed', () => {
+    const before = plan([page('/about', { contentHtml: '<p>Old text</p>' }), page('/contact')]);
+    const after = plan([page('/about', { contentHtml: '<p>New text</p>' }), page('/contact')]);
+    const hash = (p: typeof before, key: string) => p.items.find((i) => i.sourceKey === key)!.contentSha256;
+    expect(hash(before, 'jaxha.org/about')).toMatch(/^[0-9a-f]{64}$/);
+    expect(hash(after, 'jaxha.org/about')).not.toBe(hash(before, 'jaxha.org/about'));
+    expect(hash(after, 'jaxha.org/contact')).toBe(hash(before, 'jaxha.org/contact'));
+  });
+});
+
 describe('framework links', () => {
   it('redirects the paths the framework hard-codes for news to the News page, unless content uses them', () => {
     const news = entity(9, { title: 'News', slug: 'news', link: 'http://localhost:8088/news/', template: 'template-news.php' });
