@@ -67,6 +67,21 @@ The theme changes from M0–M5 (`docs/m0/framework-assessment.md` §6, `docs/m3/
 - **SCSS:** `custom.scss` and `responsive.scss` compile with Sass 1.77. Their rule changes match the hand-edited `custom.css` and `responsive.css` (vendor prefixes aside), so the CSS can be rebuilt from the SCSS.
 - **Screenshots:** before and after, at desktop and phone width, in `dist/theme-patches/screenshots/`.
 
+## On Pantheon dev (2026-10-15)
+
+Rohit applied patches 0001–0017: Pantheon `master` is now `f5f3259`. Plan v2 of job `jha-dev` was approved as "Rohit Mehta (approved in chat)" and run.
+
+| Check | Result |
+|---|---|
+| Migration | 1,112 objects, 0 failures, 1,167 redirects. Filled: office hours, both notices, the homepage introduction and the GA4 ID. Cleared: the tagline and the News page's demo sign-up box |
+| QA | 30 pages: 0 accessibility rules violated; 0 pages scrolling sideways at 375 px |
+| Links | 1,006 checked; 10 broken, the source's own dial-in links, as before |
+| Post-launch | 1,242 of 1,242 legacy URLs OK. GA4 isn't on dev (the tag is live-only) |
+| PHP warnings | None on the pages that showed them |
+| Rollback | The snapshot now also records the tagline, the new theme options, `home_intro` and the News page's fields |
+
+**Next patch (not applied):** `dist/theme-patches/next/0018-*.patch`. The new theme files exit when requested directly by URL; before, they printed a PHP error with the server path, which dev displays.
+
 ## Not changed
 
 - **Plugin notices:** the Add Admin CSS plugin raises PHP 8.2 "dynamic property" deprecations. WordPress hides them (WP_DEBUG is off), but the plugin should be updated.
