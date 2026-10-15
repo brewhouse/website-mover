@@ -84,7 +84,7 @@ function wm_bridge_acf_options( WP_REST_Request $request ) {
 /**
  * Sets ACF fields on a post whatever their group's REST or active setting: a template can show values
  * from a field group that's switched off (the seed's News page), which core REST can't reach.
- * Body: { values: { field_name: value } }. Stored as ordinary ACF post meta.
+ * Body: { values: { field_key_or_name: value } }. Stored as ordinary ACF post meta.
  */
 function wm_bridge_acf_post_fields( WP_REST_Request $request ) {
 	if ( ! function_exists( 'update_field' ) ) {
@@ -96,7 +96,7 @@ function wm_bridge_acf_post_fields( WP_REST_Request $request ) {
 	}
 	$result = array();
 	foreach ( (array) $request['values'] as $name => $value ) {
-		$name = sanitize_key( $name );
+		$name = wm_bridge_field_selector( $name );
 		if ( ! acf_get_field( $name ) ) {
 			$result[ $name ] = 'unknown field';
 			continue;
@@ -106,14 +106,22 @@ function wm_bridge_acf_post_fields( WP_REST_Request $request ) {
 	return $result;
 }
 
-/** Reads ACF fields on a post, unformatted. Query: names (comma-separated). */
+/**
+ * A field key ("field_…", which binds a value to that exact field) or name, case kept: ACF names can
+ * have capitals, which sanitize_key would drop.
+ */
+function wm_bridge_field_selector( $name ) {
+	return preg_replace( '/[^A-Za-z0-9_-]/', '', (string) $name );
+}
+
+/** Reads ACF fields on a post, unformatted. Query: names (comma-separated keys or names). */
 function wm_bridge_acf_post_fields_get( WP_REST_Request $request ) {
 	if ( ! function_exists( 'get_field' ) ) {
 		return new WP_Error( 'wm_acf_missing', 'ACF is required.', array( 'status' => 424 ) );
 	}
 	$post_id = (int) $request['id'];
 	$values  = array();
-	foreach ( array_filter( array_map( 'sanitize_key', explode( ',', (string) $request['names'] ) ) ) as $name ) {
+	foreach ( array_filter( array_map( 'wm_bridge_field_selector', explode( ',', (string) $request['names'] ) ) ) as $name ) {
 		$values[ $name ] = acf_get_field( $name ) ? get_field( $name, $post_id, false ) : null;
 	}
 	return $values;

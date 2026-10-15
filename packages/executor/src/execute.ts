@@ -39,9 +39,9 @@ export interface RunState {
 
 type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
 type Media = { id: number; source_url: string };
-export type SeedField = { name: string; type?: string; choices?: Record<string, string>; min?: number | string; max?: number | string };
+export type SeedField = { name: string; key?: string; type?: string; choices?: Record<string, string>; min?: number | string; max?: number | string };
 /** An ACF field group as the bridge's schema lists it. `local` is 'php' for groups defined in code, 'json' for acf-json ones. */
-export type SeedGroup = { key: string; title?: string; local?: string | false; show_in_rest?: number | boolean; location: { param: string; value: string }[][]; fields: SeedField[] };
+export type SeedGroup = { key: string; title?: string; active?: boolean | number; local?: string | false; show_in_rest?: number | boolean; location: { param: string; value: string }[][]; fields: SeedField[] };
 type Schema = {
   post_types: Record<string, { rest_base: string }>;
   acf: { field_groups: SeedGroup[] };
@@ -59,20 +59,25 @@ export function homeGroupsOf(groups: SeedGroup[]): SeedGroup[] {
   return templateGroupsOf(groups, 'template-home.php');
 }
 
-/** Clears a template's text fields: on kept framework pages they hold the seed's demo content. */
+/**
+ * Clears a template's text fields: on kept framework pages they hold the seed's demo content. Keyed by
+ * field key where known, so the value is bound to that field even if another group has the same name.
+ */
 export function clearedTextFields(fields: SeedField[]): Record<string, string> {
-  return Object.fromEntries(fields.filter((f) => f.name && ['text', 'textarea', 'wysiwyg', 'email', 'url'].includes(f.type ?? '')).map((f) => [f.name, '']));
+  return Object.fromEntries(fields.filter((f) => f.name && ['text', 'textarea', 'wysiwyg', 'email', 'url'].includes(f.type ?? '')).map((f) => [f.key ?? f.name, '']));
 }
 
 /**
  * The groups whose fields can be read and written through REST: "Show in REST API" is turned on for
  * the others. A group defined in PHP can't be changed that way (saving it would store a copy in the
- * database), so one without it is left out, with a warning. acf-json groups save normally.
+ * database), so one without it is left out, with a warning. acf-json groups save normally. REST never
+ * exposes a switched-off group, so one is left out too, with a warning.
  */
 export async function restGroups(client: WpClient, groups: SeedGroup[], warn: (msg: string) => void): Promise<SeedGroup[]> {
   const usable: SeedGroup[] = [];
   for (const g of groups) {
-    if (g.show_in_rest) usable.push(g);
+    if (g.active === false || g.active === 0) warn(`The field group "${g.title ?? g.key}" is switched off, so its fields (${g.fields.map((f) => f.name).filter(Boolean).join(', ')}) aren't set.`);
+    else if (g.show_in_rest) usable.push(g);
     else if (g.local === 'php') warn(`The field group "${g.title ?? g.key}" is defined in code without "Show in REST API", so its fields (${g.fields.map((f) => f.name).filter(Boolean).join(', ')}) aren't set.`);
     else {
       await client.post(`/website-mover/v1/acf/field-groups/${g.key}/show-in-rest`, {});
@@ -648,9 +653,10 @@ async function applySite(
       // Through the bridge: the template can show fields from a group that's switched off (the seed's
       // News Page group), which core REST doesn't expose.
       const result = await client.post<Record<string, string>>(`/website-mover/v1/acf/posts/${p.pageId}/fields`, { values }).catch((err: unknown) => {
-        if (err instanceof WpError && err.status === 404) throw new Error(`the target's Website Mover Bridge is older than 0.1.1 (no page fields endpoint): update it to clear the "${p.title}" page's demo text`);
+        if (err instanceof WpError && err.status === 404) return null;
         throw err;
       });
+      if (!result) return void warnings.push(`The "${p.title}" page's demo text isn't cleared: the target's Website Mover Bridge is older than 0.1.1. Update it and run again.`);
       const unknown = Object.keys(result).filter((k) => result[k] === 'unknown field');
       if (unknown.length) warnings.push(`The "${p.title}" page: no fields ${unknown.join(', ')}: not cleared.`);
     });

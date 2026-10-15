@@ -106,17 +106,22 @@ it('uses every homepage field group, and only turns on REST for groups stored in
     { key: 'group_news', location: at('template-news.php'), fields: [{ name: 'hide_news_image' }] },
     // ACF's newer "Post Template" rule.
     { key: 'group_home_post_template', show_in_rest: 1, location: [[{ param: 'post_template', value: 'template-home.php' }]], fields: [{ name: 'extra' }] },
+    // REST never exposes a switched-off group.
+    { key: 'group_off', title: 'Old group', active: false, location: at('template-home.php'), fields: [{ name: 'old' }] },
   ];
   const posted: string[] = [];
   const client = { post: async (path: string) => void posted.push(path) } as unknown as WpClient;
   const warnings: string[] = [];
 
   const home = homeGroupsOf(groups);
-  expect(home.map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_code', 'group_json', 'group_home_post_template']);
+  expect(home.map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_code', 'group_json', 'group_home_post_template', 'group_off']);
   expect((await restGroups(client, home, (m) => warnings.push(m))).map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_json', 'group_home_post_template']);
   // Saving a PHP-defined group through ACF would store a copy of it in the database.
   expect(posted).toEqual(['/website-mover/v1/acf/field-groups/group_db/show-in-rest', '/website-mover/v1/acf/field-groups/group_json/show-in-rest']);
-  expect(warnings).toEqual(['The field group "Code group" is defined in code without "Show in REST API", so its fields (other) aren\'t set.']);
+  expect(warnings).toEqual([
+    'The field group "Code group" is defined in code without "Show in REST API", so its fields (other) aren\'t set.',
+    'The field group "Old group" is switched off, so its fields (old) aren\'t set.',
+  ]);
 });
 
 it('adds what a newer plan changes to an existing rollback snapshot, keeping what it recorded first', async () => {
@@ -156,9 +161,23 @@ it('adds what a newer plan changes to an existing rollback snapshot, keeping wha
   });
 });
 
-it('clears only the text fields of a kept framework page', () => {
-  const fields: SeedField[] = [{ name: '', type: 'tab' }, { name: 'sign_up_heading', type: 'text' }, { name: 'sign_up_text', type: 'wysiwyg' }, { name: 'hide_news_image', type: 'true_false' }];
-  expect(clearedTextFields(fields)).toEqual({ sign_up_heading: '', sign_up_text: '' });
+it('clears only the text fields of a kept framework page, by field key where known', () => {
+  const fields: SeedField[] = [{ name: '', type: 'tab' }, { name: 'sign_up_heading', type: 'text' }, { name: 'sign_up_text', key: 'field_1', type: 'wysiwyg' }, { name: 'hide_news_image', type: 'true_false' }];
+  expect(clearedTextFields(fields)).toEqual({ sign_up_heading: '', field_1: '' });
+});
+
+it('takes the rollback snapshot without the kept pages when the target\'s bridge predates the page fields endpoint', async () => {
+  process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
+  const client = {
+    get: async (route: string) => {
+      if (route.startsWith('/website-mover/v1/acf/posts/')) throw new WpError(404, 'rest_no_route', 'No route', null);
+      return route === '/wp/v2/menus' ? [] : {};
+    },
+  } as unknown as WpClient;
+  const plan = { settings: [], site: { options: {}, menus: [] } } as unknown as Plan;
+
+  await snapshotBefore(client, 'old-bridge', plan, { pageId: null, fields: [] }, [{ pageId: 9, fields: [{ name: 'sign_up_text' }] }]);
+  expect((await readJson<BeforeState>(jobPath('old-bridge', 'run', 'before.json'))).pages).toEqual([]);
 });
 
 it('restores the homepage fields in the form ACF accepts: empty repeaters as [], not null', async () => {

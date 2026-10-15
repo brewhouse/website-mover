@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { readdir, rename } from 'node:fs/promises';
 import { dataDir, jobPath, readJson, writeJson } from '@wm/core';
 import { loadPlan, type Plan, type TargetEntity } from '@wm/planner';
-import type { WpClient } from '@wm/wp-client';
+import { WpError, type WpClient } from '@wm/wp-client';
 import { loadRunState } from './execute.js';
 
 interface MenuItemSnapshot {
@@ -59,7 +59,10 @@ export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan
   const options = optionNames.length ? await client.get<Record<string, unknown>>('/website-mover/v1/acf/options', { names: optionNames.join(',') }) : {};
   const homeState = plan.site && home.pageId && home.fields.length ? await pageState(client, home.pageId, home.fields) : null;
   const pageStates: PageState[] = [];
-  for (const p of plan.site ? pages : []) if (p.pageId && p.fields.length) pageStates.push(await bridgePageState(client, p.pageId, p.fields));
+  for (const p of plan.site ? pages : []) {
+    const state = p.pageId && p.fields.length ? await bridgePageState(client, p.pageId, p.fields) : null;
+    if (state) pageStates.push(state);
+  }
   const existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
   const menus: BeforeState['menus'] = [];
   for (const m of plan.site?.menus ?? []) {
@@ -107,7 +110,9 @@ async function addToSnapshot(client: WpClient, jobId: string, plan: Plan, home: 
     if (recorded) {
       if (await fillPageState(client, recorded, p.fields, bridgePageState)) changed = true;
     } else {
-      (snapshot.pages ??= []).push(await bridgePageState(client, p.pageId, p.fields));
+      const state = await bridgePageState(client, p.pageId, p.fields);
+      if (!state) continue;
+      (snapshot.pages ??= []).push(state);
       changed = true;
     }
   }
@@ -120,11 +125,18 @@ async function pageState(client: WpClient, pageId: number, fields: PageFields['f
   return { pageId, acf: page.acf ?? {}, types: Object.fromEntries(fields.filter((f) => f.name).map((f) => [f.name, f.type ?? ''])) };
 }
 
-/** A page's fields as they are now, read through the bridge (whatever their group's REST or active setting). */
-async function bridgePageState(client: WpClient, pageId: number, fields: PageFields['fields']): Promise<PageState> {
+/**
+ * A page's fields as they are now, read through the bridge (whatever their group's REST or active
+ * setting). Null when the target's bridge predates the endpoint (0.1.0): the executor then doesn't
+ * change those fields either.
+ */
+async function bridgePageState(client: WpClient, pageId: number, fields: PageFields['fields']): Promise<PageState | null> {
   const names = fields.map((f) => f.name).filter(Boolean);
-  const acf = await client.get<Record<string, unknown>>(`/website-mover/v1/acf/posts/${pageId}/fields`, { names: names.join(',') });
-  return { pageId, acf, types: Object.fromEntries(fields.filter((f) => f.name).map((f) => [f.name, f.type ?? ''])) };
+  const acf = await client.get<Record<string, unknown>>(`/website-mover/v1/acf/posts/${pageId}/fields`, { names: names.join(',') }).catch((err: unknown) => {
+    if (err instanceof WpError && err.status === 404) return null;
+    throw err;
+  });
+  return acf && { pageId, acf, types: Object.fromEntries(fields.filter((f) => f.name).map((f) => [f.name, f.type ?? ''])) };
 }
 
 /** Adds the fields a recorded page lacks, as they are now. */
@@ -132,11 +144,12 @@ async function fillPageState(
   client: WpClient,
   recorded: PageState,
   fields: PageFields['fields'],
-  read: (client: WpClient, pageId: number, fields: PageFields['fields']) => Promise<PageState>,
+  read: (client: WpClient, pageId: number, fields: PageFields['fields']) => Promise<PageState | null>,
 ): Promise<boolean> {
   const missing = fields.filter((f) => f.name && !(f.name in recorded.acf));
   if (!missing.length) return false;
   const now = await read(client, recorded.pageId, missing);
+  if (!now) return false;
   let changed = false;
   for (const f of missing) {
     if (!(f.name in now.acf)) continue;
