@@ -4,11 +4,11 @@ The theme changes from M0–M5 (`docs/m0/framework-assessment.md` §6, `docs/m3/
 
 ## Applying them
 
-- **Patches:** `dist/theme-patches/patches/0001-…0016-*.patch`, one per change, made with `git format-patch`. `dist/` is gitignored; the patches are framework code and stay out of this repo.
+- **Patches:** `dist/theme-patches/patches/0001-…0017-*.patch` (also zipped as `dist/theme-patches/jha-theme-patches.zip`), made with `git format-patch`. 0001–0016 are the theme changes, one per change; 0017 updates the bridge plugin in the repo to 0.1.1. `dist/` is gitignored; the patches are framework code and stay out of this repo.
 - **Base:** commit `7dc39a56c` ("Add Website Mover Bridge") on the seed repo's `master`.
-- **Apply:** in a clone of the Pantheon repo, on a new branch, run `git am path/to/patches/*.patch`. All 16 apply cleanly to the base. If `master` has moved on, `git am -3` resolves most context changes.
-- **Changed:** 26 files, only in `wp-content/themes/planeteriaweb`. New files are `inc/site-setup.php`, `index.php` and `inc/templates/events.php`. Five broken patterns and three unused templates are deleted.
-- **Bridge 0.1.1:** `dist/website-mover-bridge.zip`. Install it with the patches. It adds two things:
+- **Apply:** in a clone of the Pantheon repo, run `git am path/to/patches/*.patch`. All 17 apply cleanly to the base, which is still Pantheon's `master` (checked 2026-10-14). If `master` has moved on, `git am -3` resolves most context changes. Pushing `master` deploys to dev.
+- **Changed:** 26 theme files, only in `wp-content/themes/planeteriaweb`, and the bridge plugin's 3 files. New files are `inc/site-setup.php`, `index.php` and `inc/templates/events.php`. Five broken patterns and three unused templates are deleted.
+- **Bridge 0.1.1:** patch 0017 (the same code as `dist/website-mover-bridge.zip`). It adds two things:
   - an endpoint that reads and writes a page's ACF fields. The tool uses it to clear the News page's demo sign-up box, whose field group is switched off, so REST can't reach it;
   - a guard against re-saving a field group that's defined in PHP.
 
@@ -37,7 +37,7 @@ The theme changes from M0–M5 (`docs/m0/framework-assessment.md` §6, `docs/m3/
 
 ## After applying
 
-1. **Logo:** upload JHA's logo in Appearance → Site Identity (Logo). If it includes the name, turn off "Show the site name next to the logo" (Theme Settings → Header). A light version for the dark footer can go in Theme Settings → Footer → Footer logo.
+1. **Logo:** the header shows the site logo (the `site_logo` setting). The theme counts as a block theme, so WordPress may not list Appearance → Customize → Site Identity. In that case set it with the Site Logo block in Appearance → Editor, or let the tool set it with the branding step (M3). If the logo includes the name, turn off "Show the site name next to the logo" (Theme Settings → Header). A light version for the dark footer can go in Theme Settings → Footer → Footer logo.
 2. **Re-run the migration** (a new plan version) with the tool from the `theme-fields` PR. It fills the new fields from jaxha.org, verbatim:
    - office hours and the two notices;
    - the homepage introduction, with links rewritten;
@@ -66,6 +66,21 @@ The theme changes from M0–M5 (`docs/m0/framework-assessment.md` §6, `docs/m3/
 - **Patches:** each commit lints (`php -l`), and the series applies to the base with `git am`.
 - **SCSS:** `custom.scss` and `responsive.scss` compile with Sass 1.77. Their rule changes match the hand-edited `custom.css` and `responsive.css` (vendor prefixes aside), so the CSS can be rebuilt from the SCSS.
 - **Screenshots:** before and after, at desktop and phone width, in `dist/theme-patches/screenshots/`.
+
+## On Pantheon dev (2026-10-15)
+
+Rohit applied patches 0001–0017: Pantheon `master` is now `f5f3259`. Plan v2 of job `jha-dev` was approved as "Rohit Mehta (approved in chat)" and run.
+
+| Check | Result |
+|---|---|
+| Migration | 1,112 objects, 0 failures, 1,167 redirects. Filled: office hours, both notices, the homepage introduction and the GA4 ID. Cleared: the tagline and the News page's demo sign-up box |
+| QA | 30 pages: 0 accessibility rules violated; 0 pages scrolling sideways at 375 px |
+| Links | 1,006 checked; 10 broken, the source's own dial-in links, as before |
+| Post-launch | 1,242 of 1,242 legacy URLs OK. GA4 isn't on dev (the tag is live-only) |
+| PHP warnings | None on the pages that showed them |
+| Rollback | The snapshot now also records the tagline, the new theme options, `home_intro` and the News page's fields |
+
+**Next patch (not applied):** `dist/theme-patches/next/0018-*.patch`. The new theme files exit when requested directly by URL; before, they printed a PHP error with the server path, which dev displays.
 
 ## Not changed
 
