@@ -50,6 +50,17 @@ function wm_bridge_register_routes() {
 		),
 	) );
 
+	register_rest_route( WM_BRIDGE_NAMESPACE, '/acf/posts/(?P<id>\d+)/fields', array(
+		$admin + array(
+			'methods'  => WP_REST_Server::CREATABLE,
+			'callback' => 'wm_bridge_acf_post_fields',
+		),
+		$admin + array(
+			'methods'  => WP_REST_Server::READABLE,
+			'callback' => 'wm_bridge_acf_post_fields_get',
+		),
+	) );
+
 	register_rest_route( WM_BRIDGE_NAMESPACE, '/untrash', $admin + array(
 		'methods'  => WP_REST_Server::CREATABLE,
 		'callback' => 'wm_bridge_untrash',

@@ -20,6 +20,12 @@ const HOME = `<html><head><title>Home - Housing &amp; Community - Jacksonville, 
   <li data-banner-title="Providing Affordable Housing" data-banner-link="/about-us" data-banner-subtitle="Learn More">
     <img src="/plugins/show_image.php?id=820&amp;size=large&amp;type=jpg" alt="Family at home"></li>
 </ul></div>
+<div class="homeBorder">
+  <p>The <strong class="headingFont">mission</strong> of Jacksonville Housing is to provide <a href="/fss">housing</a>.</p>
+  <p>   </p>
+  <a href="/about-us" class="mainButtons">Learn More About <span>Jacksonville Housing&nbsp;&nbsp;<i class="fas fa-angle-right"></i></span></a>
+  <div id="anni-perf"><a href="/30th-anniversary"><img src="/a.png" alt=""></a></div>
+</div>
 <div id="buttonRow"><a href="/calendar"><span>View Our Full</span><br> <strong><span>Calendar</span></strong></a></div>
 <div id="sideBar"><a href="https://www.facebook.com/jha" aria-label="Like us on Facebook"><i class="fab fa-facebook"></i></a></div>
 <div id="footerBottom"><div id="copycred"><a href="https://maps.google.com/?q=1300">1300 N Broad Street</a> <a href="/accessibility">Accessibility</a> <a href="#">2026</a></div></div>
@@ -58,6 +64,13 @@ it('reads the slides with the image file itself (not its size variant) and the t
   ]);
   expect(site.home.buttons).toEqual([{ label: 'View Our Full Calendar', href: `${O}/calendar` }]);
   expect(site.contact.address).toBe('1300 N Broad Street');
+});
+
+it('keeps the homepage introduction verbatim with absolute links, and its button as a linked paragraph', () => {
+  expect(site.home.intro).toBe(
+    `<p>The <strong class="headingFont">mission</strong> of Jacksonville Housing is to provide <a href="${O}/fss">housing</a>.</p>\n` +
+      `<p><a href="${O}/about-us">Learn More About Jacksonville Housing</a></p>`,
+  );
 });
 
 it('takes the site name from the page titles as shown: the shared segment before the place', () => {

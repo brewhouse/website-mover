@@ -97,7 +97,7 @@ export function SummaryTab({ plan }: TabProps) {
           <dt className="text-muted">Plan made</dt>
           <dd>{new Date(plan.createdAt).toLocaleString('en-US')}</dd>
           {plan.settings.map((s) => (
-            <SettingRow key={s.key} label={s.key} value={`${s.from} → ${s.to}`} note={s.reason} />
+            <SettingRow key={s.key} label={s.key} value={`${s.from} → ${s.to || '(cleared)'}`} note={s.reason} />
           ))}
         </dl>
       </Card>
@@ -574,12 +574,45 @@ export function SiteTab({ plan }: TabProps) {
                 </ul>
               </div>
             )}
+            {site.home.intro && (
+              <div>
+                <div className="font-medium">Introduction</div>
+                <p className="mt-1 whitespace-pre-line">{htmlText(site.home.intro)}</p>
+                <ul className="mt-1 grid gap-0.5">
+                  {[...site.home.intro.matchAll(/href="([^"]+)"/g)].map(([, href], i) => (
+                    <li key={i} className="font-mono text-xs text-muted break-all">
+                      → {htmlText(href!)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {site.home.clearOthers && <p className="text-muted">The template’s other fields (the seed’s demo placeholders) are cleared.</p>}
+            {(site.clearPages ?? []).map((p) => (
+              <p key={p.pageId} className="text-muted">
+                The kept “{p.title}” page’s own text fields ({p.template}: the seed’s demo content, e.g. a sign-up box) are cleared.
+              </p>
+            ))}
           </div>
         </Card>
       </div>
     </div>
   );
+}
+
+/** An HTML snippet's text, for review: paragraphs on their own lines, common entities decoded. */
+function htmlText(html: string): string {
+  return html
+    .replace(/<\/p>\s*/gi, '\n\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .trim();
 }
 
 function OptionRow({ name, value }: { name: string; value: string }) {

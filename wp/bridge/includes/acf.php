@@ -82,6 +82,52 @@ function wm_bridge_acf_options( WP_REST_Request $request ) {
 }
 
 /**
+ * Sets ACF fields on a post whatever their group's REST or active setting: a template can show values
+ * from a field group that's switched off (the seed's News page), which core REST can't reach.
+ * Body: { values: { field_key_or_name: value } }. Stored as ordinary ACF post meta.
+ */
+function wm_bridge_acf_post_fields( WP_REST_Request $request ) {
+	if ( ! function_exists( 'update_field' ) ) {
+		return new WP_Error( 'wm_acf_missing', 'ACF is required.', array( 'status' => 424 ) );
+	}
+	$post_id = (int) $request['id'];
+	if ( ! get_post( $post_id ) ) {
+		return new WP_Error( 'wm_not_found', 'No post with that ID.', array( 'status' => 404 ) );
+	}
+	$result = array();
+	foreach ( (array) $request['values'] as $name => $value ) {
+		$name = wm_bridge_field_selector( $name );
+		if ( ! acf_get_field( $name ) ) {
+			$result[ $name ] = 'unknown field';
+			continue;
+		}
+		$result[ $name ] = update_field( $name, is_string( $value ) ? wp_kses_post( $value ) : $value, $post_id ) ? 'updated' : 'unchanged';
+	}
+	return $result;
+}
+
+/**
+ * A field key ("field_…", which binds a value to that exact field) or name, case kept: ACF names can
+ * have capitals, which sanitize_key would drop.
+ */
+function wm_bridge_field_selector( $name ) {
+	return preg_replace( '/[^A-Za-z0-9_-]/', '', (string) $name );
+}
+
+/** Reads ACF fields on a post, unformatted. Query: names (comma-separated keys or names). */
+function wm_bridge_acf_post_fields_get( WP_REST_Request $request ) {
+	if ( ! function_exists( 'get_field' ) ) {
+		return new WP_Error( 'wm_acf_missing', 'ACF is required.', array( 'status' => 424 ) );
+	}
+	$post_id = (int) $request['id'];
+	$values  = array();
+	foreach ( array_filter( array_map( 'wm_bridge_field_selector', explode( ',', (string) $request['names'] ) ) ) as $name ) {
+		$values[ $name ] = acf_get_field( $name ) ? get_field( $name, $post_id, false ) : null;
+	}
+	return $values;
+}
+
+/**
  * Turns on "Show in REST API" for an existing field group, so its values can be written through
  * the core REST `acf` property. Changes only that setting; the seed's field definitions stay as
  * they are.
@@ -95,6 +141,10 @@ function wm_bridge_acf_show_in_rest( WP_REST_Request $request ) {
 		return new WP_Error( 'wm_not_found', 'No field group with that key.', array( 'status' => 404 ) );
 	}
 	$changed = empty( $group['show_in_rest'] );
+	// A group defined in PHP: saving it would store a copy in the database. (acf-json groups save normally.)
+	if ( $changed && isset( $group['local'] ) && 'php' === $group['local'] ) {
+		return new WP_Error( 'wm_local_group', 'This field group is defined in code: turn on show_in_rest there.', array( 'status' => 409 ) );
+	}
 	if ( $changed ) {
 		$group['show_in_rest'] = 1;
 		acf_update_field_group( $group );

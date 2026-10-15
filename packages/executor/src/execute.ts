@@ -2,12 +2,12 @@ import { createWriteStream } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { blocksToHtml, externalBlock, htmlToBlocks, loadWordPress, restrictBlocks, serializeBlocks, type Block } from '@wm/blocks';
-import { jobPath, readJson, readJsonl, sourceKey, writeJson, type ExtractedPage } from '@wm/core';
+import { escapeHtml, jobPath, readJson, readJsonl, sourceKey, writeJson, type ExtractedPage } from '@wm/core';
 import { loadApprovedPlan, wpSlug, type Plan, type PlanContentType, type PlanItem, type PlanMedia, type PlanRecord, type TargetEntity } from '@wm/planner';
 import { WpError, type WpClient } from '@wm/wp-client';
 import { LinkMap, rewriteLinks } from './links.js';
 import { probeTarget } from './target.js';
-import { snapshotBefore } from './rollback.js';
+import { snapshotBefore, type PageFields } from './rollback.js';
 
 export type EntityKind = 'page' | 'post' | 'document' | 'image' | 'event' | 'person' | 'form' | 'record';
 
@@ -39,11 +39,53 @@ export interface RunState {
 
 type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
 type Media = { id: number; source_url: string };
-export type SeedField = { name: string; type?: string; choices?: Record<string, string>; min?: number | string; max?: number | string };
+export type SeedField = { name: string; key?: string; type?: string; choices?: Record<string, string>; min?: number | string; max?: number | string };
+/** An ACF field group as the bridge's schema lists it. `local` is 'php' for groups defined in code, 'json' for acf-json ones. */
+export type SeedGroup = { key: string; title?: string; active?: boolean | number; local?: string | false; show_in_rest?: number | boolean; location: { param: string; value: string }[][]; fields: SeedField[] };
 type Schema = {
   post_types: Record<string, { rest_base: string }>;
-  acf: { field_groups: { key: string; location: { param: string; value: string }[][]; fields: SeedField[] }[] };
+  acf: { field_groups: SeedGroup[] };
 };
+
+/**
+ * A page template's field groups: for the homepage, the seed's Homepage Details plus any the theme adds
+ * in code (T9). ACF locates them by "Page Template" or by the newer "Post Template" rule.
+ */
+export function templateGroupsOf(groups: SeedGroup[], template: string): SeedGroup[] {
+  return groups.filter((g) => g.location.some((rules) => rules.some((r) => (r.param === 'page_template' || r.param === 'post_template') && r.value === template)));
+}
+
+export function homeGroupsOf(groups: SeedGroup[]): SeedGroup[] {
+  return templateGroupsOf(groups, 'template-home.php');
+}
+
+/**
+ * Clears a template's text fields: on kept framework pages they hold the seed's demo content. Keyed by
+ * field key where known, so the value is bound to that field even if another group has the same name.
+ */
+export function clearedTextFields(fields: SeedField[]): Record<string, string> {
+  return Object.fromEntries(fields.filter((f) => f.name && ['text', 'textarea', 'wysiwyg', 'email', 'url'].includes(f.type ?? '')).map((f) => [f.key ?? f.name, '']));
+}
+
+/**
+ * The groups whose fields can be read and written through REST: "Show in REST API" is turned on for
+ * the others. A group defined in PHP can't be changed that way (saving it would store a copy in the
+ * database), so one without it is left out, with a warning. acf-json groups save normally. REST never
+ * exposes a switched-off group, so one is left out too, with a warning.
+ */
+export async function restGroups(client: WpClient, groups: SeedGroup[], warn: (msg: string) => void): Promise<SeedGroup[]> {
+  const usable: SeedGroup[] = [];
+  for (const g of groups) {
+    if (g.active === false || g.active === 0) warn(`The field group "${g.title ?? g.key}" is switched off, so its fields (${g.fields.map((f) => f.name).filter(Boolean).join(', ')}) aren't set.`);
+    else if (g.show_in_rest) usable.push(g);
+    else if (g.local === 'php') warn(`The field group "${g.title ?? g.key}" is defined in code without "Show in REST API", so its fields (${g.fields.map((f) => f.name).filter(Boolean).join(', ')}) aren't set.`);
+    else {
+      await client.post(`/website-mover/v1/acf/field-groups/${g.key}/show-in-rest`, {});
+      usable.push(g);
+    }
+  }
+  return usable;
+}
 
 /**
  * Anything created as post-type content with block content: pages, posts, table pages, listing
@@ -130,8 +172,13 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   // 0. What the job will change on the site structure, as it is now (once: rollback restores it).
   try {
     const before = await client.get<Schema>('/website-mover/v1/schema');
-    const homeGroup = before.acf.field_groups.find((g) => g.location.some((rules) => rules.some((r) => r.param === 'page_template' && r.value === 'template-home.php')));
-    await snapshotBefore(client, jobId, plan, { pageId: existing.find((e) => e.front_page)?.id ?? null, groupKey: homeGroup?.key ?? null, fields: homeGroup?.fields });
+    const homeFields = (plan.site ? await restGroups(client, homeGroupsOf(before.acf.field_groups), log) : []).flatMap((g) => g.fields);
+    // Kept framework pages: only the text fields the job clears, read through the bridge.
+    const pages: PageFields[] = (plan.site?.clearPages ?? []).map((p) => ({
+      pageId: p.pageId,
+      fields: Object.keys(clearedTextFields(templateGroupsOf(before.acf.field_groups, p.template).flatMap((g) => g.fields))).map((name) => ({ name })),
+    }));
+    await snapshotBefore(client, jobId, plan, { pageId: existing.find((e) => e.front_page)?.id ?? null, fields: homeFields }, pages);
   } catch (err) {
     // Nothing has changed yet: stop rather than change the site with no way to restore it.
     throw new Error(`Couldn't save the site structure before changing it (rollback needs it): ${(err as Error).message}`);
@@ -451,8 +498,9 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   if (plan.site) {
     state.site = await applySite(client, plan, state, {
       frontPage: existing.find((e) => e.front_page)?.id ?? null,
-      homeGroup: groupFor('page_template', 'template-home.php') ?? null,
+      fieldGroups: schema.acf.field_groups,
       mediaId,
+      html: (html) => rewriteLinks(html, links, plan.source.origin),
       postTypeOf: (key) => plan.records.find((r) => r.sourceKey === key)?.postType ?? (plan.items.find((i) => i.sourceKey === key)?.type === 'post' ? 'post' : 'page'),
       fail: (step, err) => fail('site', 'setup', step, err),
       log,
@@ -546,9 +594,11 @@ async function applySite(
   state: RunState,
   ctx: {
     frontPage: number | null;
-    /** The homepage template's field group (its fields' types and row limits). */
-    homeGroup: { key: string; fields: SeedField[] } | null;
+    /** The seed's field groups (the templates' fields, their types and row limits). */
+    fieldGroups: SeedGroup[];
     mediaId: (url: string | null) => number | undefined;
+    /** Rewrites source links in HTML to the migrated pages. */
+    html: (html: string) => { html: string; unresolved: string[] };
     postTypeOf: (key: string) => string;
     fail: (step: string, err: unknown) => void;
     log: (msg: string) => void;
@@ -575,17 +625,40 @@ async function applySite(
   });
 
   const home = { slides: 0, quickLinks: 0 };
-  const { frontPage, homeGroup } = ctx;
-  if (frontPage && homeGroup) {
+  const { frontPage } = ctx;
+  const homeGroups = homeGroupsOf(ctx.fieldGroups);
+  if (frontPage && homeGroups.length) {
     await attempt('homepage fields', async () => {
-      await client.post(`/website-mover/v1/acf/field-groups/${homeGroup.key}/show-in-rest`, {});
-      const values = homeFieldValues(homeGroup.fields, site.home, {
+      const groups = await restGroups(client, homeGroups, (msg) => warnings.push(msg));
+      const values = homeFieldValues(groups.flatMap((g) => g.fields), site.home, {
         link: (key, url) => (key && state.entities[key]?.path) || url,
         mediaId: ctx.mediaId,
+        html: (html) => {
+          const { html: rewritten, unresolved } = ctx.html(html);
+          if (unresolved.length) warnings.push(`Homepage introduction: links to content that isn't migrated stay as they are: ${unresolved.join(', ')}`);
+          return rewritten;
+        },
       });
       warnings.push(...values.warnings);
       if (Object.keys(values.acf).length) await client.post(`/wp/v2/pages/${frontPage}`, { acf: values.acf });
       Object.assign(home, values.counts);
+    });
+  }
+
+  // Kept framework pages (the News page): the seed's demo text in their template fields.
+  for (const p of site.clearPages ?? []) {
+    await attempt(`page fields: ${p.title}`, async () => {
+      const values = clearedTextFields(templateGroupsOf(ctx.fieldGroups, p.template).flatMap((g) => g.fields));
+      if (!Object.keys(values).length) return void warnings.push(`The "${p.title}" page: the seed has no text fields for ${p.template}, so nothing was cleared.`);
+      // Through the bridge: the template can show fields from a group that's switched off (the seed's
+      // News Page group), which core REST doesn't expose.
+      const result = await client.post<Record<string, string>>(`/website-mover/v1/acf/posts/${p.pageId}/fields`, { values }).catch((err: unknown) => {
+        if (err instanceof WpError && err.status === 404) return null;
+        throw err;
+      });
+      if (!result) return void warnings.push(`The "${p.title}" page's demo text isn't cleared: the target's Website Mover Bridge is older than 0.1.1. Update it and run again.`);
+      const unknown = Object.keys(result).filter((k) => result[k] === 'unknown field');
+      if (unknown.length) warnings.push(`The "${p.title}" page: no fields ${unknown.join(', ')}: not cleared.`);
     });
   }
 
@@ -643,7 +716,7 @@ function menuItems(client: WpClient, menu: number) {
 export function homeFieldValues(
   fields: SeedField[],
   home: NonNullable<Plan['site']>['home'],
-  resolve: { link: (key: string | null, url: string) => string; mediaId: (url: string | null) => number | undefined },
+  resolve: { link: (key: string | null, url: string) => string; mediaId: (url: string | null) => number | undefined; html?: (html: string) => string },
 ): { acf: Record<string, unknown>; warnings: string[]; counts: { slides: number; quickLinks: number } } {
   const warnings: string[] = [];
   const link = (title: string, key: string | null, url: string | null) => {
@@ -666,9 +739,19 @@ export function homeFieldValues(
       names: home.quickLinks.map((q) => q.title),
     };
   }
+  // Single-value fields the plan fills.
+  const values: Record<string, string> = {};
+  if (home.intro) {
+    if (fields.some((f) => f.name === 'home_intro')) values.home_intro = resolve.html ? resolve.html(home.intro) : home.intro;
+    else warnings.push('The homepage template has no introduction field (theme change T9): the source\'s introduction isn\'t on the homepage.');
+  }
   const acf: Record<string, unknown> = {};
   for (const field of fields) {
     if (!field.name || ['tab', 'message', 'accordion'].includes(field.type ?? '')) continue;
+    if (Object.hasOwn(values, field.name)) {
+      acf[field.name] = values[field.name];
+      continue;
+    }
     const fill = filled[field.name];
     const [min, max] = [Number(field.min) || 0, Number(field.max) || 0];
     if (fill) {
@@ -755,10 +838,6 @@ function placeForms(blocks: Block[], formIds: number[]): Block[] {
 /** The form's block, without its own title (the page already has it). */
 function formBlock(id: number): Block {
   return externalBlock('gravityforms/form', { formId: String(id), title: false });
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /**

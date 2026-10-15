@@ -90,6 +90,9 @@ const WP_RESERVED = [
   'page', 'comments', 'attachment', 'search', 'author', 'category', 'tag', 'trackback', 'robots', 'sitemap',
 ];
 
+/** Taglines that are placeholders, not the organization's: the seed's ("City Seed Site") and WordPress's default. */
+const PLACEHOLDER_TAGLINES = [/\bseed site\b/i, /^just another wordpress site$/i];
+
 export function buildPlan(input: BuildPlanInput): Plan {
   const { pages, target, existing } = input;
   const meetings = input.analysis?.meetings;
@@ -432,6 +435,11 @@ export function buildPlan(input: BuildPlanInput): Plan {
   if (input.timezone && target.timezone !== input.timezone) {
     settings.push({ key: 'timezone', from: target.timezone || '(UTC offset)', to: input.timezone, reason: 'Event and meeting times are in the organization\'s local time' });
   }
+  // The header shows the tagline under the site name (theme change T1). A placeholder one (the seed's,
+  // WordPress's default) is cleared; one an editor wrote stays.
+  if (input.analysis?.site && PLACEHOLDER_TAGLINES.some((re) => re.test(target.tagline))) {
+    settings.push({ key: 'description', from: target.tagline, to: '', reason: 'The header shows the tagline under the site name, and this one is a placeholder' });
+  }
 
   const site = input.analysis?.site
     ? planSite(input.analysis.site, {
@@ -449,6 +457,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
           ...media.map((m) => ({ key: m.sourceKey, path: m.redirectFrom[0]!, from: m.redirectFrom })),
         ],
         pages,
+        existing,
         warnings,
       })
     : null;
@@ -541,6 +550,7 @@ interface SiteContext {
   target: TargetInfo;
   entries: { key: string; path: string; from: string[] }[];
   pages: ExtractedPage[];
+  existing: TargetEntity[];
   warnings: string[];
 }
 
@@ -603,10 +613,12 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     options[`footer_${field}`] = value ?? '';
     if (!value) Object.assign(options, { [`footer_${field}_heading`]: '', [`footer_${field}_icon`]: '' });
   }
-  // GA4 goes in a theme option (T13); until the theme has the field, the executor reports it.
+  // Office hours and footer notices (theme change T8), and GA4 (T13). On a seed without the theme
+  // changes the executor reports the fields as missing.
+  options.footer_hours = site.contact.hours ?? '';
+  // One paragraph per notice: the field turns blank lines into paragraphs.
+  options.footer_notices = site.footerNotices.join('\n\n');
   if (ctx.ga4Id) options.ga4_measurement_id = ctx.ga4Id;
-  if (site.contact.hours) ctx.warnings.push(`Office hours ("${site.contact.hours}") have no place in the framework footer (theme change).`);
-  if (site.footerNotices.length) ctx.warnings.push(`${site.footerNotices.length} footer notice(s) (e.g. fair-housing statements) have no place in the framework footer (theme change).`);
 
   const banner = site.home.slides.map((s) => {
     const target = s.link ? resolve(s.link) : null;
@@ -618,7 +630,11 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     if (!target) ctx.warnings.push(`Homepage link "${b.label}" (${b.href}) points to content that isn't migrated: left out.`);
     return target ? [{ title: b.label, url: target.url, key: target.key }] : [];
   });
-  return { title: site.siteName, menus, options, home: { banner, quickLinks, clearOthers: true } };
+  // Kept framework pages (the News page): their template's text fields are the seed's demo content.
+  const clearPages = ctx.existing
+    .filter((e) => e.template && KEEP_TEMPLATES[e.template] && ctx.keep.some((k) => k.id === e.id))
+    .map((e) => ({ pageId: e.id, template: e.template!, title: e.title }));
+  return { title: site.siteName, menus, options, home: { banner, quickLinks, intro: site.home.intro ?? null, clearOthers: true }, clearPages };
 }
 
 /** Decisions that no longer match anything the job has (the source or the analysis changed). */

@@ -3,10 +3,11 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { jobPath, writeJsonl } from '@wm/core';
+import { jobPath, readJson, writeJson, writeJsonl } from '@wm/core';
 import { approvePlan, buildPlan, savePlan } from '@wm/planner';
 import { WpError, type WpClient } from '@wm/wp-client';
-import { executePlan, homeFieldValues, restoreHome, uploadOnce, type SeedField } from '../src/index.js';
+import { clearedTextFields, executePlan, homeFieldValues, homeGroupsOf, restGroups, restoreHome, snapshotBefore, uploadOnce, type BeforeState, type SeedField, type SeedGroup } from '../src/index.js';
+import type { Plan } from '@wm/planner';
 
 it('refuses to execute content that changed after the plan was approved', async () => {
   process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
@@ -17,7 +18,7 @@ it('refuses to execute content that changed after the plan was approved', async 
     version: 1,
     source: { origin: 'https://example.org', profile: 'generic' },
     inputs: { extractSha256: createHash('sha256').update(await import('node:fs').then((fs) => fs.readFileSync(extract))).digest('hex') },
-    target: { name: 'local', url: 'http://localhost:8088', wordpress: '7.0.4', theme: 't', permalinks: '/%postname%/', disabledBlocks: [], reservedSlugs: [], redirection: false, timezone: 'UTC' },
+    target: { name: 'local', url: 'http://localhost:8088', wordpress: '7.0.4', theme: 't', permalinks: '/%postname%/', disabledBlocks: [], reservedSlugs: [], redirection: false, timezone: 'UTC', tagline: '' },
     pages: [],
     snapshotPages: [],
     files: [],
@@ -52,6 +53,7 @@ it('fills the homepage template from the source within its row limits and clears
     {
       banner: [slide('One', 'https://www.jaxha.org/plugins/show_image.php?id=1', '/about-us/'), slide('Two', 'https://www.jaxha.org/plugins/show_image.php?id=2', null), slide('Three', null, null)],
       quickLinks: [{ title: 'View Our Full Calendar', url: '/events/', key: null }],
+      intro: null,
       clearOthers: true,
     },
     { link: (_key, url) => url, mediaId: (url) => (url ? uploaded[url] : undefined) },
@@ -76,6 +78,106 @@ it('fills the homepage template from the source within its row limits and clears
     'The homepage template takes at most 2 slides; left out: "Three"',
     'The homepage template requires at least 1 "department_details" row(s): the seed\'s placeholders stay until an editor replaces them.',
   ]);
+});
+
+it('fills the homepage introduction (theme change T9) with its links rewritten, and says so when the theme has no field for it', () => {
+  const home = { banner: [], quickLinks: [], intro: '<p>See <a href="https://www.jaxha.org/about-us">About Us</a>.</p>', clearOthers: true };
+  const resolve = { link: (_k: string | null, url: string) => url, mediaId: () => undefined, html: (html: string) => html.replace('https://www.jaxha.org/about-us', '/about-us/') };
+  // The seed's group and the theme's code-defined group, merged.
+  const fields: SeedField[] = [{ name: 'sign_up_title', type: 'text' }, { name: 'home_intro', type: 'wysiwyg' }];
+
+  expect(homeFieldValues(fields, home, resolve)).toMatchObject({ acf: { sign_up_title: '', home_intro: '<p>See <a href="/about-us/">About Us</a>.</p>' }, warnings: [] });
+  // No introduction in the source: the field is cleared like the other placeholders.
+  expect(homeFieldValues(fields, { ...home, intro: null }, resolve).acf).toEqual({ sign_up_title: '', home_intro: '' });
+  // A seed without the theme change.
+  expect(homeFieldValues(fields.slice(0, 1), home, resolve).warnings).toEqual([
+    'The homepage template has no introduction field (theme change T9): the source\'s introduction isn\'t on the homepage.',
+  ]);
+});
+
+it('uses every homepage field group, and only turns on REST for groups stored in the database', async () => {
+  const at = (value: string) => [[{ param: 'page_template', value }]];
+  const groups: SeedGroup[] = [
+    { key: 'group_db', title: 'Homepage Details', location: at('template-home.php'), fields: [{ name: 'banner' }] },
+    { key: 'group_code_rest', local: 'php', show_in_rest: 1, location: at('template-home.php'), fields: [{ name: 'home_intro' }] },
+    { key: 'group_code', title: 'Code group', local: 'php', location: at('template-home.php'), fields: [{ name: 'other' }] },
+    // acf-json groups are saved like database ones.
+    { key: 'group_json', local: 'json', location: at('template-home.php'), fields: [{ name: 'sign_up_title' }] },
+    { key: 'group_news', location: at('template-news.php'), fields: [{ name: 'hide_news_image' }] },
+    // ACF's newer "Post Template" rule.
+    { key: 'group_home_post_template', show_in_rest: 1, location: [[{ param: 'post_template', value: 'template-home.php' }]], fields: [{ name: 'extra' }] },
+    // REST never exposes a switched-off group.
+    { key: 'group_off', title: 'Old group', active: false, location: at('template-home.php'), fields: [{ name: 'old' }] },
+  ];
+  const posted: string[] = [];
+  const client = { post: async (path: string) => void posted.push(path) } as unknown as WpClient;
+  const warnings: string[] = [];
+
+  const home = homeGroupsOf(groups);
+  expect(home.map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_code', 'group_json', 'group_home_post_template', 'group_off']);
+  expect((await restGroups(client, home, (m) => warnings.push(m))).map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_json', 'group_home_post_template']);
+  // Saving a PHP-defined group through ACF would store a copy of it in the database.
+  expect(posted).toEqual(['/website-mover/v1/acf/field-groups/group_db/show-in-rest', '/website-mover/v1/acf/field-groups/group_json/show-in-rest']);
+  expect(warnings).toEqual([
+    'The field group "Code group" is defined in code without "Show in REST API", so its fields (other) aren\'t set.',
+    'The field group "Old group" is switched off, so its fields (old) aren\'t set.',
+  ]);
+});
+
+it('adds what a newer plan changes to an existing rollback snapshot, keeping what it recorded first', async () => {
+  process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
+  const snapshot: BeforeState = {
+    takenAt: '2026-10-15T00:00:00Z',
+    settings: { title: 'JHA Seed' },
+    options: { footer_address: '1 Demo Street' },
+    home: { pageId: 7, acf: { banner: [{ title: 'Demo slide' }] }, types: { banner: 'repeater' } },
+    menus: [],
+  };
+  await writeJson(jobPath('j', 'run', 'before.json'), snapshot);
+  // The site now holds the job's earlier changes (title, address, banner); the new values never changed.
+  const client = {
+    get: async (route: string) =>
+      route === '/wp/v2/settings'
+        ? { title: 'Jacksonville Housing', description: 'City Seed Site' }
+        : route === '/website-mover/v1/acf/options'
+          ? { footer_hours: '' }
+          : route === '/website-mover/v1/acf/posts/9/fields'
+            ? { sign_up_heading: 'Sign Up For News & Alerts', sign_up_text: '<p>Nullam interdum</p>' }
+            : { acf: { banner: [{ title: 'Migrated slide' }], home_intro: '' } },
+  } as unknown as WpClient;
+  const plan = { settings: [{ key: 'description', from: 'City Seed Site', to: '', reason: '' }], site: { options: { footer_address: '1300 N Broad', footer_hours: 'Mon-Fri' } } } as unknown as Plan;
+
+  await snapshotBefore(client, 'j', plan, { pageId: 7, fields: [{ name: 'banner', type: 'repeater' }, { name: 'home_intro', type: 'wysiwyg' }] }, [
+    { pageId: 9, fields: [{ name: 'sign_up_heading' }, { name: 'sign_up_text' }] },
+  ]);
+
+  expect(await readJson<BeforeState>(jobPath('j', 'run', 'before.json'))).toEqual({
+    ...snapshot,
+    settings: { title: 'JHA Seed', description: 'City Seed Site' },
+    options: { footer_address: '1 Demo Street', footer_hours: '' },
+    home: { pageId: 7, acf: { banner: [{ title: 'Demo slide' }], home_intro: '' }, types: { banner: 'repeater', home_intro: 'wysiwyg' } },
+    // A kept page the plan now clears: no earlier run changed it, so it's recorded as it is.
+    pages: [{ pageId: 9, acf: { sign_up_heading: 'Sign Up For News & Alerts', sign_up_text: '<p>Nullam interdum</p>' }, types: { sign_up_heading: '', sign_up_text: '' } }],
+  });
+});
+
+it('clears only the text fields of a kept framework page, by field key where known', () => {
+  const fields: SeedField[] = [{ name: '', type: 'tab' }, { name: 'sign_up_heading', type: 'text' }, { name: 'sign_up_text', key: 'field_1', type: 'wysiwyg' }, { name: 'hide_news_image', type: 'true_false' }];
+  expect(clearedTextFields(fields)).toEqual({ sign_up_heading: '', field_1: '' });
+});
+
+it('takes the rollback snapshot without the kept pages when the target\'s bridge predates the page fields endpoint', async () => {
+  process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
+  const client = {
+    get: async (route: string) => {
+      if (route.startsWith('/website-mover/v1/acf/posts/')) throw new WpError(404, 'rest_no_route', 'No route', null);
+      return route === '/wp/v2/menus' ? [] : {};
+    },
+  } as unknown as WpClient;
+  const plan = { settings: [], site: { options: {}, menus: [] } } as unknown as Plan;
+
+  await snapshotBefore(client, 'old-bridge', plan, { pageId: null, fields: [] }, [{ pageId: 9, fields: [{ name: 'sign_up_text' }] }]);
+  expect((await readJson<BeforeState>(jobPath('old-bridge', 'run', 'before.json'))).pages).toEqual([]);
 });
 
 it('restores the homepage fields in the form ACF accepts: empty repeaters as [], not null', async () => {

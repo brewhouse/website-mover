@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { readdir, rename } from 'node:fs/promises';
 import { dataDir, jobPath, readJson, writeJson } from '@wm/core';
 import { loadPlan, type Plan, type TargetEntity } from '@wm/planner';
-import type { WpClient } from '@wm/wp-client';
+import { WpError, type WpClient } from '@wm/wp-client';
 import { loadRunState } from './execute.js';
 
 interface MenuItemSnapshot {
@@ -32,28 +32,36 @@ export interface BeforeState {
   settings: Record<string, unknown>;
   options: Record<string, unknown>;
   /** The homepage template's fields; `types` lets restore send what ACF's REST check accepts. */
-  home: { pageId: number; acf: Record<string, unknown>; types?: Record<string, string> } | null;
+  home: PageState | null;
+  /** Kept framework pages' template text fields the job clears (the News page), read through the bridge. */
+  pages?: PageState[];
   menus: { name: string; existed: boolean; items: MenuItemSnapshot[] }[];
 }
+
+type PageState = { pageId: number; acf: Record<string, unknown>; types?: Record<string, string> };
+/** A page and the template fields the job changes on it (the homepage's are readable through REST by now: restGroups). */
+export type PageFields = { pageId: number | null; fields: { name: string; type?: string }[] };
 
 const beforeFile = (jobId: string) => jobPath(jobId, 'run', 'before.json');
 
 /**
  * Saves the site structure the job is about to change, on its first run only: re-runs keep that
  * snapshot, and a job that already ran without one (before M5) gets none, since the site then holds
- * its own earlier changes, not the original.
+ * its own earlier changes, not the original. A re-run that changes something the snapshot doesn't
+ * have yet (a setting or field a newer plan adds) records it first: the job hasn't changed it before.
  */
-export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan, home: { pageId: number | null; groupKey: string | null; fields?: { name: string; type?: string }[] }): Promise<void> {
-  if (existsSync(beforeFile(jobId)) || (await hasRunBefore(jobId))) return;
+export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan, home: PageFields, pages: PageFields[] = []): Promise<void> {
+  if (existsSync(beforeFile(jobId))) return addToSnapshot(client, jobId, plan, home, pages);
+  if (await hasRunBefore(jobId)) return;
   const settingKeys = ['title', ...plan.settings.map((s) => s.key)];
   const settings = await client.get<Record<string, unknown>>('/wp/v2/settings');
   const optionNames = Object.keys(plan.site?.options ?? {});
   const options = optionNames.length ? await client.get<Record<string, unknown>>('/website-mover/v1/acf/options', { names: optionNames.join(',') }) : {};
-  let homeState: BeforeState['home'] = null;
-  if (plan.site && home.pageId && home.groupKey) {
-    await client.post(`/website-mover/v1/acf/field-groups/${home.groupKey}/show-in-rest`, {});
-    const page = await client.get<{ acf?: Record<string, unknown> }>(`/wp/v2/pages/${home.pageId}`, { context: 'edit', _fields: 'acf' });
-    homeState = { pageId: home.pageId, acf: page.acf ?? {}, types: Object.fromEntries((home.fields ?? []).filter((f) => f.name).map((f) => [f.name, f.type ?? ''])) };
+  const homeState = plan.site && home.pageId && home.fields.length ? await pageState(client, home.pageId, home.fields) : null;
+  const pageStates: PageState[] = [];
+  for (const p of plan.site ? pages : []) {
+    const state = p.pageId && p.fields.length ? await bridgePageState(client, p.pageId, p.fields) : null;
+    if (state) pageStates.push(state);
   }
   const existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
   const menus: BeforeState['menus'] = [];
@@ -66,9 +74,90 @@ export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan
     settings: Object.fromEntries(settingKeys.filter((k) => k in settings).map((k) => [k, settings[k]])),
     options,
     home: homeState,
+    pages: pageStates,
     menus,
   };
   await writeJson(beforeFile(jobId), snapshot);
+}
+
+async function addToSnapshot(client: WpClient, jobId: string, plan: Plan, home: PageFields, pages: PageFields[]): Promise<void> {
+  const snapshot = await readJson<BeforeState>(beforeFile(jobId));
+  let changed = false;
+  const settingKeys = ['title', ...plan.settings.map((s) => s.key)].filter((k) => !(k in snapshot.settings));
+  if (settingKeys.length) {
+    const settings = await client.get<Record<string, unknown>>('/wp/v2/settings');
+    for (const k of settingKeys) {
+      if (!(k in settings)) continue;
+      snapshot.settings[k] = settings[k];
+      changed = true;
+    }
+  }
+  const optionNames = Object.keys(plan.site?.options ?? {}).filter((n) => !(n in snapshot.options));
+  if (optionNames.length) {
+    Object.assign(snapshot.options, await client.get<Record<string, unknown>>('/website-mover/v1/acf/options', { names: optionNames.join(',') }));
+    changed = true;
+  }
+  // Pages: fields the snapshot lacks, or pages it lacks (no earlier run changed them).
+  if (plan.site && home.pageId && home.fields.length) {
+    if (!snapshot.home) {
+      snapshot.home = await pageState(client, home.pageId, home.fields);
+      changed = true;
+    } else if (snapshot.home.pageId === home.pageId && (await fillPageState(client, snapshot.home, home.fields, pageState))) changed = true;
+  }
+  for (const p of plan.site ? pages : []) {
+    if (!p.pageId || !p.fields.length) continue;
+    const recorded = snapshot.pages?.find((s) => s.pageId === p.pageId);
+    if (recorded) {
+      if (await fillPageState(client, recorded, p.fields, bridgePageState)) changed = true;
+    } else {
+      const state = await bridgePageState(client, p.pageId, p.fields);
+      if (!state) continue;
+      (snapshot.pages ??= []).push(state);
+      changed = true;
+    }
+  }
+  if (changed) await writeJson(beforeFile(jobId), snapshot);
+}
+
+/** A page's template fields as they are now. */
+async function pageState(client: WpClient, pageId: number, fields: PageFields['fields']): Promise<PageState> {
+  const page = await client.get<{ acf?: Record<string, unknown> }>(`/wp/v2/pages/${pageId}`, { context: 'edit', _fields: 'acf' });
+  return { pageId, acf: page.acf ?? {}, types: Object.fromEntries(fields.filter((f) => f.name).map((f) => [f.name, f.type ?? ''])) };
+}
+
+/**
+ * A page's fields as they are now, read through the bridge (whatever their group's REST or active
+ * setting). Null when the target's bridge predates the endpoint (0.1.0): the executor then doesn't
+ * change those fields either.
+ */
+async function bridgePageState(client: WpClient, pageId: number, fields: PageFields['fields']): Promise<PageState | null> {
+  const names = fields.map((f) => f.name).filter(Boolean);
+  const acf = await client.get<Record<string, unknown>>(`/website-mover/v1/acf/posts/${pageId}/fields`, { names: names.join(',') }).catch((err: unknown) => {
+    if (err instanceof WpError && err.status === 404) return null;
+    throw err;
+  });
+  return acf && { pageId, acf, types: Object.fromEntries(fields.filter((f) => f.name).map((f) => [f.name, f.type ?? ''])) };
+}
+
+/** Adds the fields a recorded page lacks, as they are now. */
+async function fillPageState(
+  client: WpClient,
+  recorded: PageState,
+  fields: PageFields['fields'],
+  read: (client: WpClient, pageId: number, fields: PageFields['fields']) => Promise<PageState | null>,
+): Promise<boolean> {
+  const missing = fields.filter((f) => f.name && !(f.name in recorded.acf));
+  if (!missing.length) return false;
+  const now = await read(client, recorded.pageId, missing);
+  if (!now) return false;
+  let changed = false;
+  for (const f of missing) {
+    if (!(f.name in now.acf)) continue;
+    recorded.acf[f.name] = now.acf[f.name];
+    recorded.types = { ...recorded.types, [f.name]: f.type ?? '' };
+    changed = true;
+  }
+  return changed;
 }
 
 async function menuItems(client: WpClient, menuId: number): Promise<MenuItemSnapshot[]> {
@@ -98,6 +187,7 @@ async function menuItems(client: WpClient, menuId: number): Promise<MenuItemSnap
 }
 
 /**
+ * Restores the homepage's template fields.
  * ACF's REST check wants an empty repeater as [] (it rejects null, its own message notwithstanding),
  * while relationship fields want null. Snapshots record field types; older ones are fixed up from the
  * field ACF names in its error.
@@ -254,6 +344,10 @@ export async function rollbackJob({ jobId, client, log = console.log }: { jobId:
     await attempt('homepage', async () => {
       if (before.home) await restoreHome(client, before.home);
       result.restored.push('homepage');
+    });
+    await attempt('framework pages', async () => {
+      for (const p of before.pages ?? []) await client.post(`/website-mover/v1/acf/posts/${p.pageId}/fields`, { values: p.acf });
+      if (before.pages?.length) result.restored.push('framework pages');
     });
     await attempt('menus', async () => {
       const menus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
