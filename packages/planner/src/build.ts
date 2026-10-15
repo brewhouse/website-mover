@@ -457,6 +457,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
           ...media.map((m) => ({ key: m.sourceKey, path: m.redirectFrom[0]!, from: m.redirectFrom })),
         ],
         pages,
+        existing,
         warnings,
       })
     : null;
@@ -549,6 +550,7 @@ interface SiteContext {
   target: TargetInfo;
   entries: { key: string; path: string; from: string[] }[];
   pages: ExtractedPage[];
+  existing: TargetEntity[];
   warnings: string[];
 }
 
@@ -628,7 +630,11 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     if (!target) ctx.warnings.push(`Homepage link "${b.label}" (${b.href}) points to content that isn't migrated: left out.`);
     return target ? [{ title: b.label, url: target.url, key: target.key }] : [];
   });
-  return { title: site.siteName, menus, options, home: { banner, quickLinks, intro: site.home.intro ?? null, clearOthers: true } };
+  // Kept framework pages (the News page): their template's text fields are the seed's demo content.
+  const clearPages = ctx.existing
+    .filter((e) => e.template && KEEP_TEMPLATES[e.template] && ctx.keep.some((k) => k.id === e.id))
+    .map((e) => ({ pageId: e.id, template: e.template!, title: e.title }));
+  return { title: site.siteName, menus, options, home: { banner, quickLinks, intro: site.home.intro ?? null, clearOthers: true }, clearPages };
 }
 
 /** Decisions that no longer match anything the job has (the source or the analysis changed). */

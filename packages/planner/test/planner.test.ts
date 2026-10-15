@@ -317,7 +317,8 @@ describe('buildPlan with the site structure (M3)', () => {
       pages: [about],
       snapshotPages: [],
       files: [],
-      existing: [],
+      // The seed's News page (framework News template) is kept; a demo page isn't.
+      existing: [entity(35638, { title: 'News', slug: 'news', link: 'http://localhost:8088/news/', template: 'template-news.php' }), entity(40, { title: 'Demo' })],
       analysis: { site },
     });
 
@@ -354,6 +355,8 @@ describe('buildPlan with the site structure (M3)', () => {
     const real = buildPlan({ jobId: 'test', version: 2, source: { origin, profile: 'bjm' }, inputs: { extractSha256: 'test' }, target: { ...target, tagline: 'Strong Homes. Strong People.' }, pages: [about], snapshotPages: [], files: [], existing: [], analysis: { site } });
     expect(real.settings.map((s) => s.key)).not.toContain('description');
     expect(result.warnings.join('\n')).not.toMatch(/no place in the framework footer/);
+    // The kept News page's own text fields (its demo sign-up box) are cleared.
+    expect(result.site!.clearPages).toEqual([{ pageId: 35638, template: 'template-news.php', title: 'News' }]);
   });
 
   it('keeps dropdown parents without a page of their own as headings, links documents, and empties menus the source lacks', () => {

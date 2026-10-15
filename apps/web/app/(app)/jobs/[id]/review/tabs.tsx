@@ -588,6 +588,11 @@ export function SiteTab({ plan }: TabProps) {
               </div>
             )}
             {site.home.clearOthers && <p className="text-muted">The template’s other fields (the seed’s demo placeholders) are cleared.</p>}
+            {(site.clearPages ?? []).map((p) => (
+              <p key={p.pageId} className="text-muted">
+                The kept “{p.title}” page’s own text fields ({p.template}: the seed’s demo content, e.g. a sign-up box) are cleared.
+              </p>
+            ))}
           </div>
         </Card>
       </div>

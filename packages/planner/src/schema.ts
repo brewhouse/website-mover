@@ -180,6 +180,8 @@ export const PlanSite = z.object({
     /** Clear the homepage template's other fields (the seed's demo placeholders). */
     clearOthers: z.boolean().default(false),
   }),
+  /** Kept framework pages whose template text fields hold the seed's demo content (e.g. the News page's sign-up box): cleared. */
+  clearPages: z.array(z.object({ pageId: z.number(), template: z.string(), title: z.string() })).default([]),
 });
 export type PlanSite = z.infer<typeof PlanSite>;
 

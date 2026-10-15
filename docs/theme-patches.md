@@ -29,7 +29,7 @@ The theme changes from M0–M5 (`docs/m0/framework-assessment.md` §6, `docs/m3/
 | T13 | 0013 | **GA4:** a measurement ID field (Theme Settings → Analytics). The tag is printed on the live environment only, so dev and test visits aren't counted |
 | T14 | 0014 | "All News" and the news breadcrumb link to the News page. They pointed at `/latest-news/` and `/current-news/`, which are 404 |
 | T15 | 0015 | The News and search pages' filter and sort labels point at their controls. This fixes axe `select-name` (critical) |
-| T16 | 0016 | **Phones:** no sideways scrolling, and no PHP warnings. Posts without a category printed three PHP warnings on Pantheon dev, which shows warnings on the page. Long URLs and file names in content now wrap, and The Events Calendar's list rows fit |
+| T16 | 0016 | **Phones:** no sideways scrolling, and no PHP warnings. Posts without a category printed three PHP warnings on Pantheon dev, which shows warnings on the page. Long URLs and file names in content now wrap, and The Events Calendar's list rows fit. The breadcrumb takes its own space: before, its first line sat behind the band under the header and a long one ran into the page title |
 
 ## After applying
 
@@ -39,7 +39,11 @@ The theme changes from M0–M5 (`docs/m0/framework-assessment.md` §6, `docs/m3/
    - the homepage introduction, with links rewritten;
    - the GA4 ID.
 
-   It also clears the seed's placeholder tagline ("City Seed Site"), which the header now shows.
+   It also clears two placeholders:
+   - the seed's tagline ("City Seed Site"), which the header now shows;
+   - the News page's demo "Sign up for news & alerts" box (lorem ipsum and a demo form).
+
+   JHA's subscription sign-ups still need a tool.
 3. **Yoast (optional):** the seed's title templates for pages, posts and some types end with the separator and leave out `%%sitename%%`, because the old header added the name. The theme adds the name for those titles, so nothing breaks. Adding `%%sitename%%` to those templates in Yoast → Settings is the cleaner fix.
 4. **GA4:** the tag appears on the live site only. Before launch, the tool's post-launch check against dev reports it missing; that's expected.
 
@@ -53,7 +57,8 @@ The theme changes from M0–M5 (`docs/m0/framework-assessment.md` §6, `docs/m3/
   - Feeds and REST are unchanged.
 - **PHP warnings:** with errors displayed (as on Pantheon dev), none from the theme on all 618 migrated pages. Before, 30 of the 54 QA-sampled pages printed them.
 - **Phones:** none of the 618 pages scrolls sideways at 375 px. Before, 17 did.
-- **Accessibility:** axe (WCAG 2.1 A/AA) finds no violations on the homepage, News, a post, `/events/`, a category archive or search results, at 1280 and 375 px.
+- **QA stage:** the tool's QA on its 30-page sample (WCAG 2.1 A/AA with axe at 375, 768 and 1280 px) finds no rule violations and no sideways scrolling. Before the patches it found 2 rules (`select-name` on the News page, The Events Calendar's `list`) and sideways scrolling on 1–5 pages.
+- **Post-launch check (local):** 1,242 of 1,242 legacy URLs answer as planned.
 - **Patches:** each commit lints (`php -l`), and the series applies to the base with `git am`.
 - **SCSS:** `custom.scss` and `responsive.scss` compile with Sass 1.77. Their rule changes match the hand-edited `custom.css` and `responsive.css` (vendor prefixes aside), so the CSS can be rebuilt from the SCSS.
 - **Screenshots:** before and after, at desktop and phone width, in `dist/theme-patches/screenshots/`.

@@ -6,7 +6,7 @@ import { expect, it } from 'vitest';
 import { jobPath, readJson, writeJson, writeJsonl } from '@wm/core';
 import { approvePlan, buildPlan, savePlan } from '@wm/planner';
 import { WpError, type WpClient } from '@wm/wp-client';
-import { executePlan, homeFieldValues, homeGroupsOf, restGroups, restoreHome, snapshotBefore, uploadOnce, type BeforeState, type SeedField, type SeedGroup } from '../src/index.js';
+import { clearedTextFields, executePlan, homeFieldValues, homeGroupsOf, restGroups, restoreHome, snapshotBefore, uploadOnce, type BeforeState, type SeedField, type SeedGroup } from '../src/index.js';
 import type { Plan } from '@wm/planner';
 
 it('refuses to execute content that changed after the plan was approved', async () => {
@@ -104,14 +104,16 @@ it('uses every homepage field group, and only turns on REST for groups stored in
     // acf-json groups are saved like database ones.
     { key: 'group_json', local: 'json', location: at('template-home.php'), fields: [{ name: 'sign_up_title' }] },
     { key: 'group_news', location: at('template-news.php'), fields: [{ name: 'hide_news_image' }] },
+    // ACF's newer "Post Template" rule.
+    { key: 'group_home_post_template', show_in_rest: 1, location: [[{ param: 'post_template', value: 'template-home.php' }]], fields: [{ name: 'extra' }] },
   ];
   const posted: string[] = [];
   const client = { post: async (path: string) => void posted.push(path) } as unknown as WpClient;
   const warnings: string[] = [];
 
   const home = homeGroupsOf(groups);
-  expect(home.map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_code', 'group_json']);
-  expect((await restGroups(client, home, (m) => warnings.push(m))).map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_json']);
+  expect(home.map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_code', 'group_json', 'group_home_post_template']);
+  expect((await restGroups(client, home, (m) => warnings.push(m))).map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_json', 'group_home_post_template']);
   // Saving a PHP-defined group through ACF would store a copy of it in the database.
   expect(posted).toEqual(['/website-mover/v1/acf/field-groups/group_db/show-in-rest', '/website-mover/v1/acf/field-groups/group_json/show-in-rest']);
   expect(warnings).toEqual(['The field group "Code group" is defined in code without "Show in REST API", so its fields (other) aren\'t set.']);
@@ -134,18 +136,29 @@ it('adds what a newer plan changes to an existing rollback snapshot, keeping wha
         ? { title: 'Jacksonville Housing', description: 'City Seed Site' }
         : route === '/website-mover/v1/acf/options'
           ? { footer_hours: '' }
-          : { acf: { banner: [{ title: 'Migrated slide' }], home_intro: '' } },
+          : route === '/website-mover/v1/acf/posts/9/fields'
+            ? { sign_up_heading: 'Sign Up For News & Alerts', sign_up_text: '<p>Nullam interdum</p>' }
+            : { acf: { banner: [{ title: 'Migrated slide' }], home_intro: '' } },
   } as unknown as WpClient;
   const plan = { settings: [{ key: 'description', from: 'City Seed Site', to: '', reason: '' }], site: { options: { footer_address: '1300 N Broad', footer_hours: 'Mon-Fri' } } } as unknown as Plan;
 
-  await snapshotBefore(client, 'j', plan, { pageId: 7, fields: [{ name: 'banner', type: 'repeater' }, { name: 'home_intro', type: 'wysiwyg' }] });
+  await snapshotBefore(client, 'j', plan, { pageId: 7, fields: [{ name: 'banner', type: 'repeater' }, { name: 'home_intro', type: 'wysiwyg' }] }, [
+    { pageId: 9, fields: [{ name: 'sign_up_heading' }, { name: 'sign_up_text' }] },
+  ]);
 
   expect(await readJson<BeforeState>(jobPath('j', 'run', 'before.json'))).toEqual({
     ...snapshot,
     settings: { title: 'JHA Seed', description: 'City Seed Site' },
     options: { footer_address: '1 Demo Street', footer_hours: '' },
     home: { pageId: 7, acf: { banner: [{ title: 'Demo slide' }], home_intro: '' }, types: { banner: 'repeater', home_intro: 'wysiwyg' } },
+    // A kept page the plan now clears: no earlier run changed it, so it's recorded as it is.
+    pages: [{ pageId: 9, acf: { sign_up_heading: 'Sign Up For News & Alerts', sign_up_text: '<p>Nullam interdum</p>' }, types: { sign_up_heading: '', sign_up_text: '' } }],
   });
+});
+
+it('clears only the text fields of a kept framework page', () => {
+  const fields: SeedField[] = [{ name: '', type: 'tab' }, { name: 'sign_up_heading', type: 'text' }, { name: 'sign_up_text', type: 'wysiwyg' }, { name: 'hide_news_image', type: 'true_false' }];
+  expect(clearedTextFields(fields)).toEqual({ sign_up_heading: '', sign_up_text: '' });
 });
 
 it('restores the homepage fields in the form ACF accepts: empty repeaters as [], not null', async () => {

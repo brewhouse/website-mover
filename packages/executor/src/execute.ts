@@ -7,7 +7,7 @@ import { loadApprovedPlan, wpSlug, type Plan, type PlanContentType, type PlanIte
 import { WpError, type WpClient } from '@wm/wp-client';
 import { LinkMap, rewriteLinks } from './links.js';
 import { probeTarget } from './target.js';
-import { snapshotBefore } from './rollback.js';
+import { snapshotBefore, type PageFields } from './rollback.js';
 
 export type EntityKind = 'page' | 'post' | 'document' | 'image' | 'event' | 'person' | 'form' | 'record';
 
@@ -47,9 +47,21 @@ type Schema = {
   acf: { field_groups: SeedGroup[] };
 };
 
-/** The homepage template's field groups: the seed's Homepage Details, plus any the theme adds in code (T9). */
+/**
+ * A page template's field groups: for the homepage, the seed's Homepage Details plus any the theme adds
+ * in code (T9). ACF locates them by "Page Template" or by the newer "Post Template" rule.
+ */
+export function templateGroupsOf(groups: SeedGroup[], template: string): SeedGroup[] {
+  return groups.filter((g) => g.location.some((rules) => rules.some((r) => (r.param === 'page_template' || r.param === 'post_template') && r.value === template)));
+}
+
 export function homeGroupsOf(groups: SeedGroup[]): SeedGroup[] {
-  return groups.filter((g) => g.location.some((rules) => rules.some((r) => r.param === 'page_template' && r.value === 'template-home.php')));
+  return templateGroupsOf(groups, 'template-home.php');
+}
+
+/** Clears a template's text fields: on kept framework pages they hold the seed's demo content. */
+export function clearedTextFields(fields: SeedField[]): Record<string, string> {
+  return Object.fromEntries(fields.filter((f) => f.name && ['text', 'textarea', 'wysiwyg', 'email', 'url'].includes(f.type ?? '')).map((f) => [f.name, '']));
 }
 
 /**
@@ -155,8 +167,13 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   // 0. What the job will change on the site structure, as it is now (once: rollback restores it).
   try {
     const before = await client.get<Schema>('/website-mover/v1/schema');
-    const homeGroups = plan.site ? await restGroups(client, homeGroupsOf(before.acf.field_groups), log) : [];
-    await snapshotBefore(client, jobId, plan, { pageId: existing.find((e) => e.front_page)?.id ?? null, fields: homeGroups.flatMap((g) => g.fields) });
+    const homeFields = (plan.site ? await restGroups(client, homeGroupsOf(before.acf.field_groups), log) : []).flatMap((g) => g.fields);
+    // Kept framework pages: only the text fields the job clears, read through the bridge.
+    const pages: PageFields[] = (plan.site?.clearPages ?? []).map((p) => ({
+      pageId: p.pageId,
+      fields: Object.keys(clearedTextFields(templateGroupsOf(before.acf.field_groups, p.template).flatMap((g) => g.fields))).map((name) => ({ name })),
+    }));
+    await snapshotBefore(client, jobId, plan, { pageId: existing.find((e) => e.front_page)?.id ?? null, fields: homeFields }, pages);
   } catch (err) {
     // Nothing has changed yet: stop rather than change the site with no way to restore it.
     throw new Error(`Couldn't save the site structure before changing it (rollback needs it): ${(err as Error).message}`);
@@ -476,7 +493,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   if (plan.site) {
     state.site = await applySite(client, plan, state, {
       frontPage: existing.find((e) => e.front_page)?.id ?? null,
-      homeGroups: homeGroupsOf(schema.acf.field_groups),
+      fieldGroups: schema.acf.field_groups,
       mediaId,
       html: (html) => rewriteLinks(html, links, plan.source.origin),
       postTypeOf: (key) => plan.records.find((r) => r.sourceKey === key)?.postType ?? (plan.items.find((i) => i.sourceKey === key)?.type === 'post' ? 'post' : 'page'),
@@ -572,8 +589,8 @@ async function applySite(
   state: RunState,
   ctx: {
     frontPage: number | null;
-    /** The homepage template's field groups (their fields' types and row limits). */
-    homeGroups: SeedGroup[];
+    /** The seed's field groups (the templates' fields, their types and row limits). */
+    fieldGroups: SeedGroup[];
     mediaId: (url: string | null) => number | undefined;
     /** Rewrites source links in HTML to the migrated pages. */
     html: (html: string) => { html: string; unresolved: string[] };
@@ -603,7 +620,8 @@ async function applySite(
   });
 
   const home = { slides: 0, quickLinks: 0 };
-  const { frontPage, homeGroups } = ctx;
+  const { frontPage } = ctx;
+  const homeGroups = homeGroupsOf(ctx.fieldGroups);
   if (frontPage && homeGroups.length) {
     await attempt('homepage fields', async () => {
       const groups = await restGroups(client, homeGroups, (msg) => warnings.push(msg));
@@ -619,6 +637,22 @@ async function applySite(
       warnings.push(...values.warnings);
       if (Object.keys(values.acf).length) await client.post(`/wp/v2/pages/${frontPage}`, { acf: values.acf });
       Object.assign(home, values.counts);
+    });
+  }
+
+  // Kept framework pages (the News page): the seed's demo text in their template fields.
+  for (const p of site.clearPages ?? []) {
+    await attempt(`page fields: ${p.title}`, async () => {
+      const values = clearedTextFields(templateGroupsOf(ctx.fieldGroups, p.template).flatMap((g) => g.fields));
+      if (!Object.keys(values).length) return void warnings.push(`The "${p.title}" page: the seed has no text fields for ${p.template}, so nothing was cleared.`);
+      // Through the bridge: the template can show fields from a group that's switched off (the seed's
+      // News Page group), which core REST doesn't expose.
+      const result = await client.post<Record<string, string>>(`/website-mover/v1/acf/posts/${p.pageId}/fields`, { values }).catch((err: unknown) => {
+        if (err instanceof WpError && err.status === 404) throw new Error(`the target's Website Mover Bridge is older than 0.1.1 (no page fields endpoint): update it to clear the "${p.title}" page's demo text`);
+        throw err;
+      });
+      const unknown = Object.keys(result).filter((k) => result[k] === 'unknown field');
+      if (unknown.length) warnings.push(`The "${p.title}" page: no fields ${unknown.join(', ')}: not cleared.`);
     });
   }
 

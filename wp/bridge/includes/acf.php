@@ -82,6 +82,44 @@ function wm_bridge_acf_options( WP_REST_Request $request ) {
 }
 
 /**
+ * Sets ACF fields on a post whatever their group's REST or active setting: a template can show values
+ * from a field group that's switched off (the seed's News page), which core REST can't reach.
+ * Body: { values: { field_name: value } }. Stored as ordinary ACF post meta.
+ */
+function wm_bridge_acf_post_fields( WP_REST_Request $request ) {
+	if ( ! function_exists( 'update_field' ) ) {
+		return new WP_Error( 'wm_acf_missing', 'ACF is required.', array( 'status' => 424 ) );
+	}
+	$post_id = (int) $request['id'];
+	if ( ! get_post( $post_id ) ) {
+		return new WP_Error( 'wm_not_found', 'No post with that ID.', array( 'status' => 404 ) );
+	}
+	$result = array();
+	foreach ( (array) $request['values'] as $name => $value ) {
+		$name = sanitize_key( $name );
+		if ( ! acf_get_field( $name ) ) {
+			$result[ $name ] = 'unknown field';
+			continue;
+		}
+		$result[ $name ] = update_field( $name, is_string( $value ) ? wp_kses_post( $value ) : $value, $post_id ) ? 'updated' : 'unchanged';
+	}
+	return $result;
+}
+
+/** Reads ACF fields on a post, unformatted. Query: names (comma-separated). */
+function wm_bridge_acf_post_fields_get( WP_REST_Request $request ) {
+	if ( ! function_exists( 'get_field' ) ) {
+		return new WP_Error( 'wm_acf_missing', 'ACF is required.', array( 'status' => 424 ) );
+	}
+	$post_id = (int) $request['id'];
+	$values  = array();
+	foreach ( array_filter( array_map( 'sanitize_key', explode( ',', (string) $request['names'] ) ) ) as $name ) {
+		$values[ $name ] = acf_get_field( $name ) ? get_field( $name, $post_id, false ) : null;
+	}
+	return $values;
+}
+
+/**
  * Turns on "Show in REST API" for an existing field group, so its values can be written through
  * the core REST `acf` property. Changes only that setting; the seed's field definitions stay as
  * they are.

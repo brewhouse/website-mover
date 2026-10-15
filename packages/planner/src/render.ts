@@ -60,6 +60,7 @@ export function renderPlan(plan: Plan): string {
     if (s.home.intro) out.push(`**Homepage introduction:** ${cell(s.home.intro.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160))}…`, '');
     if (plan.siteRedirects.length) out.push('**Framework links redirected:** ' + plan.siteRedirects.map((r) => `\`${r.from}\` → \`${r.to}\``).join(' · '), '');
     if (s.home.clearOthers) out.push('The homepage template\'s other fields (the seed\'s demo placeholders) are cleared.', '');
+    for (const p of s.clearPages ?? []) out.push(`The kept "${cell(p.title)}" page's own text fields (\`${p.template}\`: the seed's demo content, e.g. a sign-up box) are cleared.`, '');
   }
   if (plan.categories.length) out.push('## News categories', '', plan.categories.join(' · '), '');
 
