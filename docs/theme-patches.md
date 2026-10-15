@@ -8,7 +8,11 @@ The theme changes from M0–M5 (`docs/m0/framework-assessment.md` §6, `docs/m3/
 - **Base:** commit `7dc39a56c` ("Add Website Mover Bridge") on the seed repo's `master`.
 - **Apply:** in a clone of the Pantheon repo, on a new branch, run `git am path/to/patches/*.patch`. All 16 apply cleanly to the base. If `master` has moved on, `git am -3` resolves most context changes.
 - **Changed:** 26 files, only in `wp-content/themes/planeteriaweb`. New files are `inc/site-setup.php`, `index.php` and `inc/templates/events.php`. Five broken patterns and three unused templates are deleted.
-- **Bridge 0.1.1 (optional):** `dist/website-mover-bridge.zip`. The only change refuses to re-save a field group that's defined in code. The installed 0.1.0 works with these patches.
+- **Bridge 0.1.1:** `dist/website-mover-bridge.zip`. Install it with the patches. It adds two things:
+  - an endpoint that reads and writes a page's ACF fields. The tool uses it to clear the News page's demo sign-up box, whose field group is switched off, so REST can't reach it;
+  - a guard against re-saving a field group that's defined in PHP.
+
+  With 0.1.0 the migration still runs; the run reports that the News page wasn't cleared.
 
 ## The changes
 
