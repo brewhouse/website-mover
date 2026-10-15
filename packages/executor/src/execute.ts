@@ -765,14 +765,39 @@ function escapeHtml(s: string): string {
  * Creates a post. If the connection drops (the server may still have saved it), looks the post up
  * by its source key before trying again, so a retry never makes a duplicate.
  */
+/**
+ * The write may or may not have happened: the connection dropped, or a gateway in front of WordPress
+ * gave up waiting (Pantheon answers 502 while WordPress is still saving a large upload).
+ */
+export function outcomeUnknown(err: unknown): boolean {
+  return !(err instanceof WpError) || [502, 503, 504].includes(err.status);
+}
+
 async function createOnce(client: WpClient, route: string, body: object, key: string, postType: string): Promise<Post> {
   try {
     return await client.post<Post>(route, body);
   } catch (err) {
-    if (err instanceof WpError) throw err; // the server answered: not a network problem
+    if (!outcomeUnknown(err)) throw err; // WordPress answered: it didn't save it
     const saved = (await client.get<{ id: number; source_key: string | null }[]>('/website-mover/v1/entities', { types: postType }))
       .find((e) => e.source_key === key);
     return saved ? client.post<Post>(`${route}/${saved.id}`, body) : client.post<Post>(route, body);
+  }
+}
+
+/**
+ * Uploads a file tagged with its source key. If the outcome is unknown, looks for the tagged
+ * attachment before failing, so a file that did arrive isn't reported as failed or uploaded twice.
+ */
+export async function uploadOnce(client: WpClient, data: Uint8Array<ArrayBuffer>, filename: string, contentType: string, meta: Record<string, string>): Promise<Media> {
+  try {
+    return await client.upload<Media>(data, filename, contentType, { 'meta[_wm_source_key]': meta._wm_source_key!, 'meta[_wm_job_id]': meta._wm_job_id! });
+  } catch (err) {
+    if (!outcomeUnknown(err)) throw err;
+    const saved = (await client.get<{ id: number; source_key: string | null }[]>('/website-mover/v1/entities', { types: 'attachment' })).find(
+      (e) => e.source_key === meta._wm_source_key,
+    );
+    if (!saved) throw err;
+    return client.get<Media>(`/wp/v2/media/${saved.id}`, { context: 'edit', _fields: 'id,source_url' });
   }
 }
 
@@ -791,7 +816,7 @@ async function uploadMedia(
     const data = new Uint8Array(await readFile(jobPath(jobId, m.path)));
     // Tag it in the upload request itself, so a failure before the update below can't leave an
     // untagged attachment that a re-run would upload again.
-    const media = await client.upload<Media>(data, m.filename, m.contentType, { 'meta[_wm_source_key]': meta._wm_source_key!, 'meta[_wm_job_id]': meta._wm_job_id! });
+    const media = await uploadOnce(client, data, m.filename, m.contentType, meta);
     id = media.id;
     url = media.source_url;
   }

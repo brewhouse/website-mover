@@ -1,6 +1,6 @@
 # Website Mover — Technical Plan
 
-Status: **M0 done** (2026-10-13), except style guide extraction, which is waiting on the PDF (`docs/m0/`). **M1–M5 pass on the local seed** (`docs/m1/` … `docs/m5/`): content, public-sector model, site structure, review UI and approval gate, verification/QA/post-launch/rollback/hardening. **Still open:** M3 branding (waiting on the style guide PDF), the run on the hosted seed (needs the bridge in the seed's Pantheon codebase and Redirection active), and theme changes T1–T16 for the team. First real job: Jacksonville Housing Authority (JHA), source `https://www.jaxha.org/`.
+Status: **M0 done** (2026-10-13), except style guide extraction, which is waiting on the PDF (`docs/m0/`). **M1–M5 pass on the local seed** (`docs/m1/` … `docs/m5/`): content, public-sector model, site structure, review UI and approval gate, verification/QA/post-launch/rollback/hardening. **Hosted seed:** JHA is migrated to the Pantheon dev site and verified (`docs/m5/results.md`, 2026-10-15). **Still open:** M3 branding (waiting on the style guide PDF) and theme changes T1–T16 for the team. First real job: Jacksonville Housing Authority (JHA), source `https://www.jaxha.org/`.
 
 ## 1. What we're building
 

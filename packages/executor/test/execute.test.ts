@@ -5,8 +5,8 @@ import path from 'node:path';
 import { expect, it } from 'vitest';
 import { jobPath, writeJsonl } from '@wm/core';
 import { approvePlan, buildPlan, savePlan } from '@wm/planner';
-import type { WpClient } from '@wm/wp-client';
-import { executePlan, homeFieldValues, restoreHome, type SeedField } from '../src/index.js';
+import { WpError, type WpClient } from '@wm/wp-client';
+import { executePlan, homeFieldValues, restoreHome, uploadOnce, type SeedField } from '../src/index.js';
 
 it('refuses to execute content that changed after the plan was approved', async () => {
   process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
@@ -101,5 +101,38 @@ it('restores the homepage fields in the form ACF accepts: empty repeaters as [],
   await restoreHome(client, { pageId: 7, acf });
   expect(posted.at(-1)).toEqual({ ...acf, featured_program_details: [] });
   expect(posted).toHaveLength(2);
+});
+
+it('treats a gateway timeout on an upload as unknown: the file is used if it arrived, never uploaded twice', async () => {
+  const meta = { _wm_source_key: 'jaxha.org/plugins/show_image.php?id=820', _wm_job_id: 'jha' };
+  const fake = (uploadError: Error, onSite: boolean) => {
+    const calls: string[] = [];
+    const client = {
+      upload: async () => {
+        calls.push('upload');
+        throw uploadError;
+      },
+      get: async (path: string) => {
+        calls.push(path);
+        if (path === '/website-mover/v1/entities') return onSite ? [{ id: 36820, source_key: meta._wm_source_key }] : [];
+        return { id: 36820, source_url: 'https://dev.example/wp-content/uploads/slide.jpg' };
+      },
+    } as unknown as WpClient;
+    return { client, calls };
+  };
+  const data = new Uint8Array(1) as Uint8Array<ArrayBuffer>;
+
+  // Pantheon answered 502, but WordPress had saved the file.
+  const arrived = fake(new WpError(502, 'http_error', '<html>', ''), true);
+  expect(await uploadOnce(arrived.client, data, 'slide.jpg', 'image/jpeg', meta)).toEqual({ id: 36820, source_url: 'https://dev.example/wp-content/uploads/slide.jpg' });
+  expect(arrived.calls.filter((c) => c === 'upload')).toHaveLength(1);
+
+  // A 502 where nothing arrived is still a failure.
+  await expect(uploadOnce(fake(new WpError(502, 'http_error', '<html>', ''), false).client, data, 'slide.jpg', 'image/jpeg', meta)).rejects.toThrow(/502/);
+
+  // WordPress refused it: no lookup, the error stands.
+  const refused = fake(new WpError(400, 'rest_upload_sideload_error', 'not allowed', ''), true);
+  await expect(uploadOnce(refused.client, data, 'slide.jpg', 'image/jpeg', meta)).rejects.toThrow(/400/);
+  expect(refused.calls).toEqual(['upload']);
 });
 

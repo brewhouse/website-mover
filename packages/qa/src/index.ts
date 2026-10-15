@@ -60,6 +60,23 @@ export async function runQa({ jobId, baseUrl, log = console.log, sampleSize = 20
 }
 
 /**
+ * Hosting interstitials a browser gets instead of the site. Pantheon shows sandbox sites' visitors a
+ * "Sandbox Environment Notice" whose Continue button sets this cookie; QA sets it up front.
+ */
+const INTERSTITIALS = [{ title: 'Sandbox Environment Notice', cookie: { name: 'Deterrence-Bypass', value: '1' } }];
+
+/** Lets a QA browser session reach the site itself rather than a hosting notice. */
+export async function prepareContext(context: BrowserContext, baseUrl: string): Promise<void> {
+  const { hostname } = new URL(baseUrl);
+  await context.addCookies(INTERSTITIALS.map((i) => ({ ...i.cookie, domain: hostname, path: '/' })));
+}
+
+/** True if the page is a hosting interstitial, not the site (checked results must never come from one). */
+export function isInterstitial(title: string): boolean {
+  return INTERSTITIALS.some((i) => i.title === title.trim());
+}
+
+/**
  * Chromium does its own networking, outside safeFetch: every request (pages, frames, subresources,
  * redirects) is checked against the same address rules, so a page can't make the worker fetch an
  * internal address (and show it in a screenshot).
@@ -83,11 +100,13 @@ async function checkPage(browser: Browser, baseUrl: string, page: QaPage & { ind
   for (const [viewport, width] of Object.entries(VIEWPORTS)) {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     await guardRequests(context);
+    await prepareContext(context, baseUrl);
     const tab = await context.newPage();
     try {
       const response = await tab.goto(url, { waitUntil: 'load', timeout: 60_000 });
       result.status = response?.status() ?? 0;
       if (result.status !== 200) return result;
+      if (isInterstitial(await tab.title())) throw new Error(`The host showed "${(await tab.title()).trim()}" instead of the page`);
       await tab.waitForTimeout(500); // sliders and fonts settle
       result.overflow[viewport] = await tab.evaluate('document.documentElement.scrollWidth > document.documentElement.clientWidth + 1');
       if (page.template) {
