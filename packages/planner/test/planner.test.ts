@@ -33,6 +33,7 @@ const target: TargetInfo = {
   reservedSlugs: ['people', 'events/category'],
   redirection: false,
   timezone: 'America/New_York',
+  tagline: '',
 };
 
 function page(url: string, over: Partial<ExtractedPage> = {}): ExtractedPage {
@@ -284,7 +285,7 @@ describe('buildPlan with analysis (M2)', () => {
 });
 
 describe('buildPlan with the site structure (M3)', () => {
-  it('links menus and homepage tiles to migrated content and clears contact placeholders the source has no value for', () => {
+  it('links menus and homepage tiles to migrated content, fills the footer and intro, and clears placeholders the source has no value for', () => {
     const about = page('/about-us', { title: 'About Us' });
     const site: SiteAnalysis = {
       siteName: 'Jacksonville Housing',
@@ -295,14 +296,15 @@ describe('buildPlan with the site structure (M3)', () => {
         social: [{ label: 'Like us on Facebook', href: 'https://www.facebook.com/JacksonvilleHousingAuthority' }],
         explore: [],
       },
-      contact: { address: '1300 N Broad Street, Jacksonville, FL 32202', phone: '904-630-3810', email: null, fax: null, hours: null },
-      footerNotices: [],
+      contact: { address: '1300 N Broad Street, Jacksonville, FL 32202', phone: '904-630-3810', email: null, fax: null, hours: 'Monday - Friday 8 am - 5 pm' },
+      footerNotices: ['We are an Equal Housing Opportunity Provider.', 'In accordance with federal law and HUD policy, this institution is prohibited from discriminating.'],
       home: {
         slides: [],
         buttons: [
           { label: 'View Our Full Calendar', href: `${origin}/calendar` },
           { label: 'Old Tile', href: `${origin}/not-migrated` },
         ],
+        intro: `<p>The <strong>mission</strong> of Jacksonville Housing is to provide housing. See <a href="${origin}/about-us">About Us</a>.</p>`,
       },
     };
     const result = buildPlan({
@@ -311,7 +313,7 @@ describe('buildPlan with the site structure (M3)', () => {
       source: { origin, profile: 'bjm' },
       inputs: { extractSha256: 'test' },
       // The Events Calendar is active: the source's calendar page becomes its /events/ archive.
-      target: { ...target, reservedSlugs: [...target.reservedSlugs, 'event'] },
+      target: { ...target, tagline: 'City Seed Site', reservedSlugs: [...target.reservedSlugs, 'event'] },
       pages: [about],
       snapshotPages: [],
       files: [],
@@ -340,8 +342,16 @@ describe('buildPlan with the site structure (M3)', () => {
       footer_fax: '',
       footer_fax_heading: '',
       footer_fax_icon: '',
+      // Office hours and notices (theme change T8), verbatim; one paragraph per notice.
+      footer_hours: 'Monday - Friday 8 am - 5 pm',
+      footer_notices: 'We are an Equal Housing Opportunity Provider.\n\nIn accordance with federal law and HUD policy, this institution is prohibited from discriminating.',
     });
+    // The introduction stays as the source has it; the executor rewrites its links.
+    expect(result.site!.home.intro).toBe(site.home.intro);
     expect(result.site!.home.clearOthers).toBe(true);
+    // The header shows the tagline under the site name, and the source has none: the seed's is cleared.
+    expect(result.settings.find((s) => s.key === 'description')).toMatchObject({ from: 'City Seed Site', to: '' });
+    expect(result.warnings.join('\n')).not.toMatch(/no place in the framework footer/);
   });
 
   it('keeps dropdown parents without a page of their own as headings, links documents, and empties menus the source lacks', () => {

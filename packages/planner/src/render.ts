@@ -40,7 +40,7 @@ export function renderPlan(plan: Plan): string {
 
   if (plan.settings.length) {
     out.push('## Site settings changed', '', '| Setting | Now | Becomes | Why |', '|---|---|---|---|');
-    out.push(...plan.settings.map((s) => `| ${s.key} | ${s.from} | ${s.to} | ${cell(s.reason)} |`), '');
+    out.push(...plan.settings.map((s) => `| ${s.key} | ${cell(s.from)} | ${s.to ? cell(s.to) : '(cleared)'} | ${cell(s.reason)} |`), '');
   }
   if (plan.site) {
     const s = plan.site;
@@ -57,6 +57,7 @@ export function renderPlan(plan: Plan): string {
     out.push('**Theme options:** ' + Object.entries(s.options).map(([k, v]) => `${k} = ${v ? `"${cell(v)}"` : '(cleared)'}`).join(' · '), '');
     out.push(`**Homepage slides:** ${s.home.banner.map((b) => `"${cell(b.title)}" → \`${b.linkUrl ?? '—'}\``).join(' · ')}`, '');
     if (s.home.quickLinks.length) out.push(`**Homepage quick links:** ${s.home.quickLinks.map((q) => `"${cell(q.title)}" → \`${q.url}\``).join(' · ')}`, '');
+    if (s.home.intro) out.push(`**Homepage introduction:** ${cell(s.home.intro.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160))}…`, '');
     if (plan.siteRedirects.length) out.push('**Framework links redirected:** ' + plan.siteRedirects.map((r) => `\`${r.from}\` → \`${r.to}\``).join(' · '), '');
     if (s.home.clearOthers) out.push('The homepage template\'s other fields (the seed\'s demo placeholders) are cleared.', '');
   }

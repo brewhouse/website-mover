@@ -180,6 +180,8 @@ export interface SiteAnalysis {
     slides: { title: string; subtitle: string | null; link: string | null; image: string | null; alt: string }[];
     /** Link tiles shown under the slideshow (quick links). */
     buttons: NavLink[];
+    /** The introduction (mission, programs) as HTML paragraphs, verbatim with absolute links. Newer than the first M3 analyses. */
+    intro?: string | null;
   };
 }
 

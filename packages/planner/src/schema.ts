@@ -175,6 +175,8 @@ export const PlanSite = z.object({
     banner: z.array(z.object({ title: z.string(), image: z.string().nullable(), linkUrl: z.string().nullable(), linkKey: z.string().nullable(), linkTitle: z.string().nullable() })),
     /** Link tiles under the slideshow (the homepage template's `banner_icon`). */
     quickLinks: z.array(z.object({ title: z.string(), url: z.string(), key: z.string().nullable() })).default([]),
+    /** The introduction (`home_intro`, theme change T9): source HTML, links rewritten at execution. */
+    intro: z.string().nullable().default(null),
     /** Clear the homepage template's other fields (the seed's demo placeholders). */
     clearOthers: z.boolean().default(false),
   }),
@@ -217,6 +219,8 @@ export const TargetInfo = z.object({
   reservedSlugs: z.array(z.string()),
   redirection: z.boolean(),
   timezone: z.string().default(''),
+  /** Site tagline (Settings → General). */
+  tagline: z.string().default(''),
 });
 export type TargetInfo = z.infer<typeof TargetInfo>;
 

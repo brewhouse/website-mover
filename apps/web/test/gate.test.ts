@@ -37,7 +37,7 @@ describe('approval state the job and review pages gate on', () => {
       version: 1,
       source: { origin: 'https://example.org', profile: 'generic' },
       inputs: { extractSha256: 'x' },
-      target: { name: 'local', url: 'http://localhost:8088', wordpress: '7.0.4', theme: 't', permalinks: '/%postname%/', disabledBlocks: [], reservedSlugs: [], redirection: true, timezone: 'UTC' },
+      target: { name: 'local', url: 'http://localhost:8088', wordpress: '7.0.4', theme: 't', permalinks: '/%postname%/', disabledBlocks: [], reservedSlugs: [], redirection: true, timezone: 'UTC', tagline: '' },
       pages: [],
       snapshotPages: [],
       files: [],

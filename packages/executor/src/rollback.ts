@@ -43,17 +43,17 @@ const beforeFile = (jobId: string) => jobPath(jobId, 'run', 'before.json');
  * snapshot, and a job that already ran without one (before M5) gets none, since the site then holds
  * its own earlier changes, not the original.
  */
-export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan, home: { pageId: number | null; groupKey: string | null; fields?: { name: string; type?: string }[] }): Promise<void> {
+export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan, home: { pageId: number | null; fields: { name: string; type?: string }[] }): Promise<void> {
   if (existsSync(beforeFile(jobId)) || (await hasRunBefore(jobId))) return;
   const settingKeys = ['title', ...plan.settings.map((s) => s.key)];
   const settings = await client.get<Record<string, unknown>>('/wp/v2/settings');
   const optionNames = Object.keys(plan.site?.options ?? {});
   const options = optionNames.length ? await client.get<Record<string, unknown>>('/website-mover/v1/acf/options', { names: optionNames.join(',') }) : {};
   let homeState: BeforeState['home'] = null;
-  if (plan.site && home.pageId && home.groupKey) {
-    await client.post(`/website-mover/v1/acf/field-groups/${home.groupKey}/show-in-rest`, {});
+  // The homepage's field groups are readable through REST by now (restGroups).
+  if (plan.site && home.pageId && home.fields.length) {
     const page = await client.get<{ acf?: Record<string, unknown> }>(`/wp/v2/pages/${home.pageId}`, { context: 'edit', _fields: 'acf' });
-    homeState = { pageId: home.pageId, acf: page.acf ?? {}, types: Object.fromEntries((home.fields ?? []).filter((f) => f.name).map((f) => [f.name, f.type ?? ''])) };
+    homeState = { pageId: home.pageId, acf: page.acf ?? {}, types: Object.fromEntries(home.fields.filter((f) => f.name).map((f) => [f.name, f.type ?? ''])) };
   }
   const existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
   const menus: BeforeState['menus'] = [];

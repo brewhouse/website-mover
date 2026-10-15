@@ -432,6 +432,11 @@ export function buildPlan(input: BuildPlanInput): Plan {
   if (input.timezone && target.timezone !== input.timezone) {
     settings.push({ key: 'timezone', from: target.timezone || '(UTC offset)', to: input.timezone, reason: 'Event and meeting times are in the organization\'s local time' });
   }
+  // The header shows the tagline under the site name (theme change T1). The source has none to carry
+  // over, so the seed's (a placeholder such as "City Seed Site") is cleared.
+  if (input.analysis?.site && target.tagline) {
+    settings.push({ key: 'description', from: target.tagline, to: '', reason: 'The header shows the tagline under the site name; the source has none, so the seed\'s is cleared' });
+  }
 
   const site = input.analysis?.site
     ? planSite(input.analysis.site, {
@@ -603,10 +608,12 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     options[`footer_${field}`] = value ?? '';
     if (!value) Object.assign(options, { [`footer_${field}_heading`]: '', [`footer_${field}_icon`]: '' });
   }
-  // GA4 goes in a theme option (T13); until the theme has the field, the executor reports it.
+  // Office hours and footer notices (theme change T8), and GA4 (T13). On a seed without the theme
+  // changes the executor reports the fields as missing.
+  options.footer_hours = site.contact.hours ?? '';
+  // One paragraph per notice: the field turns blank lines into paragraphs.
+  options.footer_notices = site.footerNotices.join('\n\n');
   if (ctx.ga4Id) options.ga4_measurement_id = ctx.ga4Id;
-  if (site.contact.hours) ctx.warnings.push(`Office hours ("${site.contact.hours}") have no place in the framework footer (theme change).`);
-  if (site.footerNotices.length) ctx.warnings.push(`${site.footerNotices.length} footer notice(s) (e.g. fair-housing statements) have no place in the framework footer (theme change).`);
 
   const banner = site.home.slides.map((s) => {
     const target = s.link ? resolve(s.link) : null;
@@ -618,7 +625,7 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     if (!target) ctx.warnings.push(`Homepage link "${b.label}" (${b.href}) points to content that isn't migrated: left out.`);
     return target ? [{ title: b.label, url: target.url, key: target.key }] : [];
   });
-  return { title: site.siteName, menus, options, home: { banner, quickLinks, clearOthers: true } };
+  return { title: site.siteName, menus, options, home: { banner, quickLinks, intro: site.home.intro ?? null, clearOthers: true } };
 }
 
 /** Decisions that no longer match anything the job has (the source or the analysis changed). */

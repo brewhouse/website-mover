@@ -95,6 +95,10 @@ function wm_bridge_acf_show_in_rest( WP_REST_Request $request ) {
 		return new WP_Error( 'wm_not_found', 'No field group with that key.', array( 'status' => 404 ) );
 	}
 	$changed = empty( $group['show_in_rest'] );
+	// A group defined in theme or plugin code: saving it would store a copy in the database.
+	if ( $changed && ! empty( $group['local'] ) ) {
+		return new WP_Error( 'wm_local_group', 'This field group is defined in code: turn on show_in_rest there.', array( 'status' => 409 ) );
+	}
 	if ( $changed ) {
 		$group['show_in_rest'] = 1;
 		acf_update_field_group( $group );

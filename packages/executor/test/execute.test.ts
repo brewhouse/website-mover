@@ -6,7 +6,7 @@ import { expect, it } from 'vitest';
 import { jobPath, writeJsonl } from '@wm/core';
 import { approvePlan, buildPlan, savePlan } from '@wm/planner';
 import { WpError, type WpClient } from '@wm/wp-client';
-import { executePlan, homeFieldValues, restoreHome, uploadOnce, type SeedField } from '../src/index.js';
+import { executePlan, homeFieldValues, homeGroupsOf, restGroups, restoreHome, uploadOnce, type SeedField, type SeedGroup } from '../src/index.js';
 
 it('refuses to execute content that changed after the plan was approved', async () => {
   process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
@@ -17,7 +17,7 @@ it('refuses to execute content that changed after the plan was approved', async 
     version: 1,
     source: { origin: 'https://example.org', profile: 'generic' },
     inputs: { extractSha256: createHash('sha256').update(await import('node:fs').then((fs) => fs.readFileSync(extract))).digest('hex') },
-    target: { name: 'local', url: 'http://localhost:8088', wordpress: '7.0.4', theme: 't', permalinks: '/%postname%/', disabledBlocks: [], reservedSlugs: [], redirection: false, timezone: 'UTC' },
+    target: { name: 'local', url: 'http://localhost:8088', wordpress: '7.0.4', theme: 't', permalinks: '/%postname%/', disabledBlocks: [], reservedSlugs: [], redirection: false, timezone: 'UTC', tagline: '' },
     pages: [],
     snapshotPages: [],
     files: [],
@@ -52,6 +52,7 @@ it('fills the homepage template from the source within its row limits and clears
     {
       banner: [slide('One', 'https://www.jaxha.org/plugins/show_image.php?id=1', '/about-us/'), slide('Two', 'https://www.jaxha.org/plugins/show_image.php?id=2', null), slide('Three', null, null)],
       quickLinks: [{ title: 'View Our Full Calendar', url: '/events/', key: null }],
+      intro: null,
       clearOthers: true,
     },
     { link: (_key, url) => url, mediaId: (url) => (url ? uploaded[url] : undefined) },
@@ -76,6 +77,41 @@ it('fills the homepage template from the source within its row limits and clears
     'The homepage template takes at most 2 slides; left out: "Three"',
     'The homepage template requires at least 1 "department_details" row(s): the seed\'s placeholders stay until an editor replaces them.',
   ]);
+});
+
+it('fills the homepage introduction (theme change T9) with its links rewritten, and says so when the theme has no field for it', () => {
+  const home = { banner: [], quickLinks: [], intro: '<p>See <a href="https://www.jaxha.org/about-us">About Us</a>.</p>', clearOthers: true };
+  const resolve = { link: (_k: string | null, url: string) => url, mediaId: () => undefined, html: (html: string) => html.replace('https://www.jaxha.org/about-us', '/about-us/') };
+  // The seed's group and the theme's code-defined group, merged.
+  const fields: SeedField[] = [{ name: 'sign_up_title', type: 'text' }, { name: 'home_intro', type: 'wysiwyg' }];
+
+  expect(homeFieldValues(fields, home, resolve)).toMatchObject({ acf: { sign_up_title: '', home_intro: '<p>See <a href="/about-us/">About Us</a>.</p>' }, warnings: [] });
+  // No introduction in the source: the field is cleared like the other placeholders.
+  expect(homeFieldValues(fields, { ...home, intro: null }, resolve).acf).toEqual({ sign_up_title: '', home_intro: '' });
+  // A seed without the theme change.
+  expect(homeFieldValues(fields.slice(0, 1), home, resolve).warnings).toEqual([
+    'The homepage template has no introduction field (theme change T9): the source\'s introduction isn\'t on the homepage.',
+  ]);
+});
+
+it('uses every homepage field group, and only turns on REST for groups stored in the database', async () => {
+  const at = (value: string) => [[{ param: 'page_template', value }]];
+  const groups: SeedGroup[] = [
+    { key: 'group_db', title: 'Homepage Details', location: at('template-home.php'), fields: [{ name: 'banner' }] },
+    { key: 'group_code_rest', local: 'php', show_in_rest: 1, location: at('template-home.php'), fields: [{ name: 'home_intro' }] },
+    { key: 'group_code', title: 'Code group', local: 'php', location: at('template-home.php'), fields: [{ name: 'other' }] },
+    { key: 'group_news', location: at('template-news.php'), fields: [{ name: 'hide_news_image' }] },
+  ];
+  const posted: string[] = [];
+  const client = { post: async (path: string) => void posted.push(path) } as unknown as WpClient;
+  const warnings: string[] = [];
+
+  const home = homeGroupsOf(groups);
+  expect(home.map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_code']);
+  expect((await restGroups(client, home, (m) => warnings.push(m))).map((g) => g.key)).toEqual(['group_db', 'group_code_rest']);
+  // Saving a code-defined group through ACF would store a copy of it in the database.
+  expect(posted).toEqual(['/website-mover/v1/acf/field-groups/group_db/show-in-rest']);
+  expect(warnings).toEqual(['The field group "Code group" is defined in code without "Show in REST API", so its fields (other) aren\'t set.']);
 });
 
 it('restores the homepage fields in the form ACF accepts: empty repeaters as [], not null', async () => {

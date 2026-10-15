@@ -31,6 +31,7 @@ export async function probeTarget(
     throw err;
   });
   const existing = await client.get<TargetEntity[]>('/website-mover/v1/entities');
+  const settings = await client.get<{ description?: string }>('/wp/v2/settings', { _fields: 'description' });
   return {
     info: {
       name,
@@ -42,6 +43,7 @@ export async function probeTarget(
       reservedSlugs: status.reserved_slugs,
       redirection: 'redirection' in status.active_plugins,
       timezone: status.timezone,
+      tagline: settings.description ?? '',
     },
     existing,
   };

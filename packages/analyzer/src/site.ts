@@ -4,8 +4,8 @@ import { jobPath, readJson, readJsonl, writeJson, type JobInfo, type NavLink, ty
 import { cleanText as clean } from './records/text.js';
 
 /**
- * Reads the site's shared structure from the homepage: menus, contact details, footer notices and
- * the homepage slides. Writes analyze/site.json. Values are verbatim; URLs are made absolute.
+ * Reads the site's shared structure from the homepage: menus, contact details, footer notices, the
+ * homepage slides and its introduction. Writes analyze/site.json. Values are verbatim; URLs are made absolute.
  */
 export async function analyzeSite(jobId: string, log: (msg: string) => void = () => {}): Promise<SiteAnalysis> {
   const job = await readJson<JobInfo>(jobPath(jobId, 'job.json'));
@@ -56,6 +56,18 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
   const hours = clean($('#footerInfo').text()) || null;
   const notices = $('#footerMiddle .condensedFont').toArray().map((el) => clean($(el).text())).filter(Boolean);
 
+  // The introduction under the slideshow (mission, programs): its paragraphs as they are, and its
+  // "Learn More" button as a paragraph with that link. Links are made absolute.
+  const introBox = $('.homeBorder').first();
+  introBox.find('a[href]').each((_, a) => {
+    $(a).attr('href', abs($(a).attr('href')!, origin));
+  });
+  const intro = introBox
+    .children('p, a.mainButtons')
+    .toArray()
+    .filter((el) => clean($(el).text()))
+    .map((el) => (el.tagName === 'p' ? $.html(el).trim() : `<p><a href="${escapeHtml($(el).attr('href') ?? '')}">${escapeHtml(clean($(el).text()))}</a></p>`));
+
   const slides = $('#rotator ul.slides > li')
     .toArray()
     .map((li) => {
@@ -86,7 +98,7 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
     },
     contact: { address, phone, email: null, fax: null, hours },
     footerNotices: notices,
-    home: { slides, buttons: links('#buttonRow a') },
+    home: { slides, buttons: links('#buttonRow a'), intro: intro.length ? intro.join('\n') : null },
   };
 }
 
@@ -101,7 +113,7 @@ function genericSite(html: string, origin: string): SiteAnalysis {
     menus: { top: [], main, footer: dedupe(footer), social: footer.filter((l) => /facebook|youtube|instagram|twitter|x\.com|linkedin/.test(l.href)), explore: [] },
     contact: { address: null, phone: null, email: null, fax: null, hours: null },
     footerNotices: [],
-    home: { slides: [], buttons: [] },
+    home: { slides: [], buttons: [], intro: null },
   };
 }
 
@@ -145,6 +157,10 @@ function withoutParams(url: string, names: string[]): string {
 
 function dedupe(items: NavLink[]): NavLink[] {
   return items.filter((item, i) => items.findIndex((o) => o.href === item.href && o.label === item.label) === i);
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function abs(href: string, origin: string): string {
