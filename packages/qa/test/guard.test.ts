@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { chromium } from 'playwright';
-import { guardRequests } from '../src/index.js';
+import { guardRequests, isInterstitial, prepareContext } from '../src/index.js';
 
 let server: Server;
 let port: number;
@@ -34,4 +34,29 @@ it('stops the browser from loading anything from a blocked address, while the al
   expect(hits.some((h) => h.endsWith('/page'))).toBe(true);
   expect(hits.some((h) => h.endsWith('/ok.png'))).toBe(true);
   expect(hits.some((h) => h.endsWith('/secret.png'))).toBe(false);
+}, 60_000);
+
+it('gets past a hosting notice (Pantheon sandbox) to the site, and recognizes the notice if it stays', async () => {
+  const notice = createServer((req, res) => {
+    const bypass = /Deterrence-Bypass=1/.test(req.headers.cookie ?? '');
+    res.writeHead(200, { 'Content-Type': 'text/html' }).end(bypass ? '<title>News</title><h1>News</h1>' : '<title>Sandbox Environment Notice</title><p>This website is hosted in a sandbox environment.</p>');
+  });
+  await new Promise<void>((resolve) => notice.listen(0, '127.0.0.1', resolve));
+  const url = `http://localhost:${(notice.address() as AddressInfo).port}/news/`;
+  const browser = await chromium.launch();
+  try {
+    const plain = await (await browser.newContext()).newPage();
+    await plain.goto(url);
+    expect(isInterstitial(await plain.title())).toBe(true);
+
+    const context = await browser.newContext();
+    await prepareContext(context, url);
+    const tab = await context.newPage();
+    await tab.goto(url);
+    expect(await tab.title()).toBe('News');
+    expect(isInterstitial(await tab.title())).toBe(false);
+  } finally {
+    await browser.close();
+    await new Promise<void>((resolve) => notice.close(() => resolve()));
+  }
 }, 60_000);
