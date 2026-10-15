@@ -18,6 +18,28 @@
 | GA4 `G-ZHVZNQBLZ8` | Not on the homepage yet. The plan sets the theme option, and the run reports "the seed has no theme option ga4_measurement_id" until theme change T13 |
 | Scope checklist | Done: lift-and-shift, sitemap, redirects. Partial: branding (waits on the style guide), news/events/forms (2 subscription forms need a tool), navigation (T1), QA (theme issues), analytics (T13). n/a: hosting (the team's part) |
 
+## Hosted seed run (Pantheon dev, 2026-10-15)
+
+The team added the bridge plugin to the seed's Pantheon codebase and activated Redirection. Job `jha-dev` reused JHA's scan, with the hosted site saved as its target.
+- **Approval:** Rohit Mehta approved plan v1 in chat, recorded as "Rohit Mehta (approved in chat)".
+- **Demo content:** the plan trashed the seed's 34 demo items and kept the homepage and the News page.
+- **Timezone:** changed from Los Angeles to New York.
+
+| Check | Result |
+|---|---|
+| Migration (second pass) | 0 failures; 1,112 objects, all live; 0 block problems. A pass takes 9–28 minutes on Pantheon |
+| Redirects | 1,167 of 1,167 answer 301 to the right page |
+| Links and images | 1,018 checked; 10 broken, the same source dial-in links as locally |
+| QA | 30 pages: `select-name` on the News page (critical), and The Events Calendar's `list` markup on 6 pages (serious). Sideways scrolling at 375 px on 5 pages: 4 news or content pages with long link text, and `/events/` |
+| Post-launch check (against the dev site) | 1,242 of 1,242 legacy URLs OK. Of the 46 left out on purpose, 31 answer 404 and 15 answer 200 (rebuilt homepage and News paths). GA4 is not on the homepage yet (T13) |
+| Rollback | Available: the first run saved `run/before.json` (title, timezone, 10 theme options, 13 homepage fields, 5 menus) |
+
+The first pass found two problems. Both are fixed, and the second pass ran clean:
+- **Uploads reported failed that weren't:** Pantheon answered 502 for 4 uploads that WordPress had saved, so they were marked failed and their links weren't rewritten. A 502/503/504 now means "outcome unknown": the executor looks for the item by its source key before failing.
+- **QA checked Pantheon's notice, not the site:** Pantheon shows browsers a "Sandbox Environment Notice" on sandbox sites, so QA checked 30 copies of the notice and reported nothing. QA now sets the notice's bypass cookie, and a page that is still a hosting notice is an error, never a clean result.
+
+**For the team (T1):** on the hosted theme, the seal logo also covers the first main-menu item ("About Us").
+
 ## Rollback, on a throwaway job
 
 The `rb-test` job ran after JHA on the same local seed, from the fixture site in `e2e/fixtures/small-site`. Its plan:
