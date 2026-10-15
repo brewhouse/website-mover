@@ -100,7 +100,7 @@ export function scopeChecklist(plan: Plan, report: Report | null, qaResult: QaRe
     status: !postlaunch ? 'not yet' : ga4?.expected && ga4.found.includes(ga4.expected) && !postlaunch.problems.length ? 'done' : 'partial',
     why: !postlaunch
       ? 'Run the post-launch check (job page).'
-      : `${ga4?.expected ? (ga4.found.includes(ga4.expected) ? `GA4 ${ga4.expected} is on the homepage.` : `GA4 ${ga4.expected} is not on the homepage yet (theme change T13).`) : 'No GA4 ID for this job.'} ${postlaunch.problems.length} legacy URL problems at ${postlaunch.base}.`,
+      : `${ga4?.expected ? (ga4.found.includes(ga4.expected) ? `GA4 ${ga4.expected} is on the homepage.` : `GA4 ${ga4.expected} is not on the homepage at ${postlaunch.base}. The theme adds the tag on the live environment only, so dev and test never show it.`) : 'No GA4 ID for this job.'} ${postlaunch.problems.length} legacy URL problems at ${postlaunch.base}.`,
   });
   return lines;
 }

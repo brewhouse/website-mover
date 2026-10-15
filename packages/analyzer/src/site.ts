@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import * as cheerio from 'cheerio';
-import { jobPath, readJson, readJsonl, writeJson, type JobInfo, type NavLink, type SiteAnalysis, type SnapshotPage } from '@wm/core';
+import { escapeHtml, jobPath, readJson, readJsonl, writeJson, type JobInfo, type NavLink, type SiteAnalysis, type SnapshotPage } from '@wm/core';
 import { cleanText as clean } from './records/text.js';
 
 /**
@@ -57,10 +57,14 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
   const notices = $('#footerMiddle .condensedFont').toArray().map((el) => clean($(el).text())).filter(Boolean);
 
   // The introduction under the slideshow (mission, programs): its paragraphs as they are, and its
-  // "Learn More" button as a paragraph with that link. Links are made absolute.
+  // "Learn More" button as a paragraph with that link. Links and image sources are made absolute (the
+  // executor rewrites them, and reports any it can't).
   const introBox = $('.homeBorder').first();
   introBox.find('a[href]').each((_, a) => {
     $(a).attr('href', abs($(a).attr('href')!, origin));
+  });
+  introBox.find('img[src]').each((_, img) => {
+    $(img).attr('src', abs($(img).attr('src')!, origin));
   });
   const intro = introBox
     .children('p, a.mainButtons')
@@ -157,10 +161,6 @@ function withoutParams(url: string, names: string[]): string {
 
 function dedupe(items: NavLink[]): NavLink[] {
   return items.filter((item, i) => items.findIndex((o) => o.href === item.href && o.label === item.label) === i);
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function abs(href: string, origin: string): string {

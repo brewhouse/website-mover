@@ -90,6 +90,9 @@ const WP_RESERVED = [
   'page', 'comments', 'attachment', 'search', 'author', 'category', 'tag', 'trackback', 'robots', 'sitemap',
 ];
 
+/** Taglines that are placeholders, not the organization's: the seed's ("City Seed Site") and WordPress's default. */
+const PLACEHOLDER_TAGLINES = [/\bseed site\b/i, /^just another wordpress site$/i];
+
 export function buildPlan(input: BuildPlanInput): Plan {
   const { pages, target, existing } = input;
   const meetings = input.analysis?.meetings;
@@ -432,10 +435,10 @@ export function buildPlan(input: BuildPlanInput): Plan {
   if (input.timezone && target.timezone !== input.timezone) {
     settings.push({ key: 'timezone', from: target.timezone || '(UTC offset)', to: input.timezone, reason: 'Event and meeting times are in the organization\'s local time' });
   }
-  // The header shows the tagline under the site name (theme change T1). The source has none to carry
-  // over, so the seed's (a placeholder such as "City Seed Site") is cleared.
-  if (input.analysis?.site && target.tagline) {
-    settings.push({ key: 'description', from: target.tagline, to: '', reason: 'The header shows the tagline under the site name; the source has none, so the seed\'s is cleared' });
+  // The header shows the tagline under the site name (theme change T1). A placeholder one (the seed's,
+  // WordPress's default) is cleared; one an editor wrote stays.
+  if (input.analysis?.site && PLACEHOLDER_TAGLINES.some((re) => re.test(target.tagline))) {
+    settings.push({ key: 'description', from: target.tagline, to: '', reason: 'The header shows the tagline under the site name, and this one is a placeholder' });
   }
 
   const site = input.analysis?.site

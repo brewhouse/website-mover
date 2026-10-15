@@ -349,8 +349,10 @@ describe('buildPlan with the site structure (M3)', () => {
     // The introduction stays as the source has it; the executor rewrites its links.
     expect(result.site!.home.intro).toBe(site.home.intro);
     expect(result.site!.home.clearOthers).toBe(true);
-    // The header shows the tagline under the site name, and the source has none: the seed's is cleared.
+    // The header shows the tagline under the site name: the seed's placeholder is cleared, a real one stays.
     expect(result.settings.find((s) => s.key === 'description')).toMatchObject({ from: 'City Seed Site', to: '' });
+    const real = buildPlan({ jobId: 'test', version: 2, source: { origin, profile: 'bjm' }, inputs: { extractSha256: 'test' }, target: { ...target, tagline: 'Strong Homes. Strong People.' }, pages: [about], snapshotPages: [], files: [], existing: [], analysis: { site } });
+    expect(real.settings.map((s) => s.key)).not.toContain('description');
     expect(result.warnings.join('\n')).not.toMatch(/no place in the framework footer/);
   });
 

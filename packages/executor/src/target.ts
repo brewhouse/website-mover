@@ -31,7 +31,11 @@ export async function probeTarget(
     throw err;
   });
   const existing = await client.get<TargetEntity[]>('/website-mover/v1/entities');
-  const settings = await client.get<{ description?: string }>('/wp/v2/settings', { _fields: 'description' });
+  // Settings need an administrator; without them the tagline is just unknown.
+  const settings = await client.get<{ description?: string }>('/wp/v2/settings', { _fields: 'description' }).catch((err: unknown) => {
+    if (err instanceof WpError && (err.status === 401 || err.status === 403)) return { description: '' };
+    throw err;
+  });
   return {
     info: {
       name,

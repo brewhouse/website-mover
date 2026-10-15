@@ -2,7 +2,7 @@ import { createWriteStream } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { blocksToHtml, externalBlock, htmlToBlocks, loadWordPress, restrictBlocks, serializeBlocks, type Block } from '@wm/blocks';
-import { jobPath, readJson, readJsonl, sourceKey, writeJson, type ExtractedPage } from '@wm/core';
+import { escapeHtml, jobPath, readJson, readJsonl, sourceKey, writeJson, type ExtractedPage } from '@wm/core';
 import { loadApprovedPlan, wpSlug, type Plan, type PlanContentType, type PlanItem, type PlanMedia, type PlanRecord, type TargetEntity } from '@wm/planner';
 import { WpError, type WpClient } from '@wm/wp-client';
 import { LinkMap, rewriteLinks } from './links.js';
@@ -40,7 +40,7 @@ export interface RunState {
 type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
 type Media = { id: number; source_url: string };
 export type SeedField = { name: string; type?: string; choices?: Record<string, string>; min?: number | string; max?: number | string };
-/** An ACF field group as the bridge's schema lists it. `local` is set for groups defined in theme or plugin code. */
+/** An ACF field group as the bridge's schema lists it. `local` is 'php' for groups defined in code, 'json' for acf-json ones. */
 export type SeedGroup = { key: string; title?: string; local?: string | false; show_in_rest?: number | boolean; location: { param: string; value: string }[][]; fields: SeedField[] };
 type Schema = {
   post_types: Record<string, { rest_base: string }>;
@@ -54,14 +54,14 @@ export function homeGroupsOf(groups: SeedGroup[]): SeedGroup[] {
 
 /**
  * The groups whose fields can be read and written through REST: "Show in REST API" is turned on for
- * groups stored in the database. A group defined in code can't be changed that way (saving it would
- * store a copy), so one without it is left out, with a warning.
+ * the others. A group defined in PHP can't be changed that way (saving it would store a copy in the
+ * database), so one without it is left out, with a warning. acf-json groups save normally.
  */
 export async function restGroups(client: WpClient, groups: SeedGroup[], warn: (msg: string) => void): Promise<SeedGroup[]> {
   const usable: SeedGroup[] = [];
   for (const g of groups) {
     if (g.show_in_rest) usable.push(g);
-    else if (g.local) warn(`The field group "${g.title ?? g.key}" is defined in code without "Show in REST API", so its fields (${g.fields.map((f) => f.name).filter(Boolean).join(', ')}) aren't set.`);
+    else if (g.local === 'php') warn(`The field group "${g.title ?? g.key}" is defined in code without "Show in REST API", so its fields (${g.fields.map((f) => f.name).filter(Boolean).join(', ')}) aren't set.`);
     else {
       await client.post(`/website-mover/v1/acf/field-groups/${g.key}/show-in-rest`, {});
       usable.push(g);
@@ -708,7 +708,7 @@ export function homeFieldValues(
   const acf: Record<string, unknown> = {};
   for (const field of fields) {
     if (!field.name || ['tab', 'message', 'accordion'].includes(field.type ?? '')) continue;
-    if (field.name in values) {
+    if (Object.hasOwn(values, field.name)) {
       acf[field.name] = values[field.name];
       continue;
     }
@@ -798,10 +798,6 @@ function placeForms(blocks: Block[], formIds: number[]): Block[] {
 /** The form's block, without its own title (the page already has it). */
 function formBlock(id: number): Block {
   return externalBlock('gravityforms/form', { formId: String(id), title: false });
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /**

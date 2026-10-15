@@ -3,10 +3,11 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { jobPath, writeJsonl } from '@wm/core';
+import { jobPath, readJson, writeJson, writeJsonl } from '@wm/core';
 import { approvePlan, buildPlan, savePlan } from '@wm/planner';
 import { WpError, type WpClient } from '@wm/wp-client';
-import { executePlan, homeFieldValues, homeGroupsOf, restGroups, restoreHome, uploadOnce, type SeedField, type SeedGroup } from '../src/index.js';
+import { executePlan, homeFieldValues, homeGroupsOf, restGroups, restoreHome, snapshotBefore, uploadOnce, type BeforeState, type SeedField, type SeedGroup } from '../src/index.js';
+import type { Plan } from '@wm/planner';
 
 it('refuses to execute content that changed after the plan was approved', async () => {
   process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
@@ -100,6 +101,8 @@ it('uses every homepage field group, and only turns on REST for groups stored in
     { key: 'group_db', title: 'Homepage Details', location: at('template-home.php'), fields: [{ name: 'banner' }] },
     { key: 'group_code_rest', local: 'php', show_in_rest: 1, location: at('template-home.php'), fields: [{ name: 'home_intro' }] },
     { key: 'group_code', title: 'Code group', local: 'php', location: at('template-home.php'), fields: [{ name: 'other' }] },
+    // acf-json groups are saved like database ones.
+    { key: 'group_json', local: 'json', location: at('template-home.php'), fields: [{ name: 'sign_up_title' }] },
     { key: 'group_news', location: at('template-news.php'), fields: [{ name: 'hide_news_image' }] },
   ];
   const posted: string[] = [];
@@ -107,11 +110,42 @@ it('uses every homepage field group, and only turns on REST for groups stored in
   const warnings: string[] = [];
 
   const home = homeGroupsOf(groups);
-  expect(home.map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_code']);
-  expect((await restGroups(client, home, (m) => warnings.push(m))).map((g) => g.key)).toEqual(['group_db', 'group_code_rest']);
-  // Saving a code-defined group through ACF would store a copy of it in the database.
-  expect(posted).toEqual(['/website-mover/v1/acf/field-groups/group_db/show-in-rest']);
+  expect(home.map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_code', 'group_json']);
+  expect((await restGroups(client, home, (m) => warnings.push(m))).map((g) => g.key)).toEqual(['group_db', 'group_code_rest', 'group_json']);
+  // Saving a PHP-defined group through ACF would store a copy of it in the database.
+  expect(posted).toEqual(['/website-mover/v1/acf/field-groups/group_db/show-in-rest', '/website-mover/v1/acf/field-groups/group_json/show-in-rest']);
   expect(warnings).toEqual(['The field group "Code group" is defined in code without "Show in REST API", so its fields (other) aren\'t set.']);
+});
+
+it('adds what a newer plan changes to an existing rollback snapshot, keeping what it recorded first', async () => {
+  process.env.WM_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'wm-'));
+  const snapshot: BeforeState = {
+    takenAt: '2026-10-15T00:00:00Z',
+    settings: { title: 'JHA Seed' },
+    options: { footer_address: '1 Demo Street' },
+    home: { pageId: 7, acf: { banner: [{ title: 'Demo slide' }] }, types: { banner: 'repeater' } },
+    menus: [],
+  };
+  await writeJson(jobPath('j', 'run', 'before.json'), snapshot);
+  // The site now holds the job's earlier changes (title, address, banner); the new values never changed.
+  const client = {
+    get: async (route: string) =>
+      route === '/wp/v2/settings'
+        ? { title: 'Jacksonville Housing', description: 'City Seed Site' }
+        : route === '/website-mover/v1/acf/options'
+          ? { footer_hours: '' }
+          : { acf: { banner: [{ title: 'Migrated slide' }], home_intro: '' } },
+  } as unknown as WpClient;
+  const plan = { settings: [{ key: 'description', from: 'City Seed Site', to: '', reason: '' }], site: { options: { footer_address: '1300 N Broad', footer_hours: 'Mon-Fri' } } } as unknown as Plan;
+
+  await snapshotBefore(client, 'j', plan, { pageId: 7, fields: [{ name: 'banner', type: 'repeater' }, { name: 'home_intro', type: 'wysiwyg' }] });
+
+  expect(await readJson<BeforeState>(jobPath('j', 'run', 'before.json'))).toEqual({
+    ...snapshot,
+    settings: { title: 'JHA Seed', description: 'City Seed Site' },
+    options: { footer_address: '1 Demo Street', footer_hours: '' },
+    home: { pageId: 7, acf: { banner: [{ title: 'Demo slide' }], home_intro: '' }, types: { banner: 'repeater', home_intro: 'wysiwyg' } },
+  });
 });
 
 it('restores the homepage fields in the form ACF accepts: empty repeaters as [], not null', async () => {

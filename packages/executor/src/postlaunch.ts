@@ -77,7 +77,7 @@ export async function runPostLaunch({ jobId, base, ga4Id, log = console.log }: {
   const by = (p: string) => problems.filter((x) => x.problem === p).length;
   log(`Post-launch: ${ok} of ${checks.size} OK; not found ${by('not-found')}, errors ${by('error')}, wrong target ${by('wrong-target')}, chains ${by('chain')}, loops ${by('loop')}`);
   log(`Left out on purpose: ${leftOut.length} legacy URLs (${leftOut.filter((l) => l.status === 200).length} still answer 200)`);
-  log(ga4Id ? (found.includes(ga4Id) ? `GA4 ${ga4Id}: on the homepage` : `  ! GA4 ${ga4Id}: not on the homepage${found.length ? ` (found ${found.join(', ')})` : ''}`) : 'GA4: no measurement ID for this job');
+  log(ga4Id ? (found.includes(ga4Id) ? `GA4 ${ga4Id}: on the homepage` : `  ! GA4 ${ga4Id}: not on the homepage${found.length ? ` (found ${found.join(', ')})` : ''}; the theme adds it on the live environment only`) : 'GA4: no measurement ID for this job');
   return report;
 }
 

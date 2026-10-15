@@ -41,10 +41,12 @@ const beforeFile = (jobId: string) => jobPath(jobId, 'run', 'before.json');
 /**
  * Saves the site structure the job is about to change, on its first run only: re-runs keep that
  * snapshot, and a job that already ran without one (before M5) gets none, since the site then holds
- * its own earlier changes, not the original.
+ * its own earlier changes, not the original. A re-run that changes something the snapshot doesn't
+ * have yet (a setting or field a newer plan adds) records it first: the job hasn't changed it before.
  */
 export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan, home: { pageId: number | null; fields: { name: string; type?: string }[] }): Promise<void> {
-  if (existsSync(beforeFile(jobId)) || (await hasRunBefore(jobId))) return;
+  if (existsSync(beforeFile(jobId))) return addToSnapshot(client, jobId, plan, home);
+  if (await hasRunBefore(jobId)) return;
   const settingKeys = ['title', ...plan.settings.map((s) => s.key)];
   const settings = await client.get<Record<string, unknown>>('/wp/v2/settings');
   const optionNames = Object.keys(plan.site?.options ?? {});
@@ -69,6 +71,37 @@ export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan
     menus,
   };
   await writeJson(beforeFile(jobId), snapshot);
+}
+
+async function addToSnapshot(client: WpClient, jobId: string, plan: Plan, home: { pageId: number | null; fields: { name: string; type?: string }[] }): Promise<void> {
+  const snapshot = await readJson<BeforeState>(beforeFile(jobId));
+  let changed = false;
+  const settingKeys = ['title', ...plan.settings.map((s) => s.key)].filter((k) => !(k in snapshot.settings));
+  if (settingKeys.length) {
+    const settings = await client.get<Record<string, unknown>>('/wp/v2/settings');
+    for (const k of settingKeys) {
+      if (!(k in settings)) continue;
+      snapshot.settings[k] = settings[k];
+      changed = true;
+    }
+  }
+  const optionNames = Object.keys(plan.site?.options ?? {}).filter((n) => !(n in snapshot.options));
+  if (optionNames.length) {
+    Object.assign(snapshot.options, await client.get<Record<string, unknown>>('/website-mover/v1/acf/options', { names: optionNames.join(',') }));
+    changed = true;
+  }
+  const fields = home.fields.filter((f) => f.name && !(snapshot.home && f.name in snapshot.home.acf));
+  if (plan.site && home.pageId && fields.length && (!snapshot.home || snapshot.home.pageId === home.pageId)) {
+    const page = await client.get<{ acf?: Record<string, unknown> }>(`/wp/v2/pages/${home.pageId}`, { context: 'edit', _fields: 'acf' });
+    snapshot.home ??= { pageId: home.pageId, acf: {}, types: {} };
+    for (const f of fields) {
+      if (!page.acf || !(f.name in page.acf)) continue;
+      snapshot.home.acf[f.name] = page.acf[f.name];
+      snapshot.home.types = { ...snapshot.home.types, [f.name]: f.type ?? '' };
+      changed = true;
+    }
+  }
+  if (changed) await writeJson(beforeFile(jobId), snapshot);
 }
 
 async function menuItems(client: WpClient, menuId: number): Promise<MenuItemSnapshot[]> {
