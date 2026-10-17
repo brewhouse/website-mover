@@ -3,14 +3,17 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./brand": "./src/brand.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "vitest run"
   },
   "dependencies": {
+    "@wm/core": "workspace:*",
     "@wm/llm": "workspace:*",
+    "@wm/net": "workspace:*",
     "zod": "^4.6.7"
   }
 }

@@ -12,6 +12,7 @@
   "dependencies": {
     "@wm/analyzer": "workspace:*",
     "@wm/core": "workspace:*",
+    "@wm/styleguide": "workspace:*",
     "zod": "^4.6.7"
   }
 }

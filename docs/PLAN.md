@@ -181,6 +181,7 @@ The general mechanism below stays for clients who do bring an approved sitemap:
 3. Cross-check: every colour AI reports must exist in the PDF.
 - Fonts: match Google Fonts → download woff2 → self-host. Commercial fonts → closest free substitute + warning, or upload licensed files in review.
 - Logo: SVG when extractable, else high-DPI PNG crop; reviewer picks or uploads. SVG upload allowed via bridge (admins only).
+- Guides with no text to cross-check (a Figma prototype): a person transcribes the guide into a brand file, every value with where the guide states it, and `wm brand` imports it (docs/m3/branding.md). The plan's Design section shows the values and WCAG contrast checks for approval.
 
 ### 6.9 HTML → blocks
 

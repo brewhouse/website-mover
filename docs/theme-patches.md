@@ -1,4 +1,4 @@
-# Theme patches T1–T16 for the team (2026-10-14)
+# Theme patches for the team: T1–T16 (2026-10-14), T17–T21 (2026-10-16)
 
 The theme changes from M0–M5 (`docs/m0/framework-assessment.md` §6, `docs/m3/design.md`, `docs/m5/results.md`) are written as a patch series for PlaneteriaWeb in the JHA seed repo. Nothing has been pushed: a push to that repo deploys to Pantheon, so the team reviews and applies them. They were tested on a local copy of the seed with JHA's migrated content.
 
@@ -80,7 +80,45 @@ Rohit applied patches 0001–0017: Pantheon `master` is now `f5f3259`. Plan v2 o
 | PHP warnings | None on the pages that showed them |
 | Rollback | The snapshot now also records the tagline, the new theme options, `home_intro` and the News page's fields |
 
-**Next patch (not applied):** `dist/theme-patches/next/0018-*.patch`. The new theme files exit when requested directly by URL; before, they printed a PHP error with the server path, which dev displays.
+Patch 0018 (the new theme files exit when requested directly by URL; before, they printed a PHP error with the server path, which dev displays) was applied after this: Pantheon `master` is `8c8bb792f`.
+
+## Branding: T17–T21 (2026-10-16)
+
+The JHA style guide's look (`docs/m3/branding.md`). The theme only gets variables and the new header and footer; the brand's values come from the tool, so the theme keeps its own look until they're set.
+
+**Patches:** `dist/theme-patches/patches/0019-…0023-*.patch` (also zipped as `dist/theme-patches/jha-theme-patches-0019-0023.zip`). They apply with `git am` to Pantheon's `master` (`8c8bb792f`, read 2026-10-16). Screenshots: `dist/theme-patches/screenshots/branding/`, before (Pantheon dev today) and after (the local seed with the patches and the brand), with side-by-side images.
+
+| # | Patch | What changes |
+|---|---|---|
+| T17 | 0019 | **Colours and heading sizes** go through CSS variables, like the fonts (T5): `--pw-color-primary`, `-secondary`, `-accent`, `-text`, `-muted`, `-surface`, `-link`, `-heading`, `-button`, … and `--pw-h1-size` … `--pw-h6-size`, `--pw-h1-case`. The theme hard-coded its palette (`#202188` 83 times) and never used its own Theme Settings colours |
+| T18 | 0020 | **Header** as in the guide: a two-part top bar (translate, phone and an optional Utility Menu on the secondary colour; the Top Menu, search and the Social Menu's icons on the primary), the logo and main menu, a breadcrumb band. Below 1200 px the top bar stacks in the mobile menu and the logo sits in the bar. **The alert bar** is printed only when an alert applies and takes its own space; closing the last alert removes it. It was an empty yellow band on every page |
+| T19 | 0021 | **Footer** as in the guide: a links band (the Explore Menu under a heading, new Footer option), the logo with phone, fax, email, an optional Footer Contact Menu and the office hours, the notices in two columns with icons (new Footer option), a bottom bar with the copyright, the Footer Menu and the address. The wave background, the old columns and the footer's social icons are gone |
+| T20 | 0022 | **Buttons** take their font, size, weight and corners from variables. **Green text** that needs contrast has its own variable (`--pw-color-secondary-strong`). **Form field borders** have one. **Keyboard focus** is visible on every control: the theme removed it on buttons, form fields, the mobile menu button and the language picker |
+| T21 | 0023 | **Fonts:** a Theme Settings option turns off the theme's Google Fonts link (Open Sans, Ubuntu), so a site with its own fonts doesn't call Google on every page. Body text size and line height have variables |
+
+Every variable, its default and what it styles is listed in the tool (`THEME_VARIABLES` in `packages/styleguide/src/brand.ts`).
+
+### After applying
+
+1. **Run the branding step** with the tool:
+   - `wm brand --job jha-dev --file inputs/jha/style-guide/brand.json`;
+   - a new plan version, reviewed in the Design tab and approved;
+   - execute.
+
+   It installs the fonts, sets the logos, writes the brand CSS to Global Styles and sets the new options from jaxha.org: the links band heading ("Industry Links"), the notice icons, the hours on two lines.
+2. **Without the brand,** the theme looks as before except for the new header and footer layout, in its own colours.
+3. **Plugins:** Ajax Search Pro still loads Open Sans from Google for its search box (its own font setting).
+
+### Tested on the local seed
+
+See `docs/m3/branding-results.md`:
+- the header and footer at phone, tablet and desktop widths, with and without the brand;
+- the alert bar with a test alert;
+- the QA stage on 30 pages (0 accessibility violations, no sideways scrolling);
+- keyboard focus on four page types;
+- no PHP warnings on 54 pages;
+- SCSS parity for each patch;
+- `git am` onto Pantheon's `master`.
 
 ## Not changed
 

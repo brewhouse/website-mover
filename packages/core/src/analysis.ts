@@ -171,9 +171,16 @@ export interface SiteAnalysis {
     social: NavLink[];
     /** Other link lists shown site-wide (e.g. "Industry Links"). */
     explore: NavLink[];
+    /** Links shown with the footer's contact details (e.g. "Staff Module"). Newer than the first M3 analyses. */
+    contact?: NavLink[];
   };
+  /** The heading over the `explore` links, verbatim (e.g. "Industry Links"). Newer than the first M3 analyses. */
+  exploreHeading?: string | null;
+  /** The alt text of the icons beside the footer notices (e.g. "Equal Housing Opportunity"). Newer than the first M3 analyses. */
+  footerIcons?: string[];
+  /** `hours` keeps the source's line breaks as newlines. */
   contact: { address: string | null; phone: string | null; email: string | null; fax: string | null; hours: string | null };
-  /** Statements shown on every page's footer (e.g. fair-housing notices), verbatim. */
+  /** Statements shown on every page's footer (e.g. fair-housing notices), verbatim: text, HTML-escaped, with a bold opening phrase kept as <strong>. */
   footerNotices: string[];
   home: {
     /** Homepage slideshow / hero slides. */

@@ -310,6 +310,9 @@ importers:
       '@wm/qa':
         specifier: workspace:*
         version: link:../../packages/qa
+      '@wm/styleguide':
+        specifier: workspace:*
+        version: link:../../packages/styleguide
       '@wm/wp-client':
         specifier: workspace:*
         version: link:../../packages/wp-client
@@ -408,6 +411,9 @@ importers:
       '@wm/planner':
         specifier: workspace:*
         version: link:../planner
+      '@wm/styleguide':
+        specifier: workspace:*
+        version: link:../styleguide
       '@wm/wp-client':
         specifier: workspace:*
         version: link:../wp-client
@@ -450,6 +456,9 @@ importers:
       '@wm/core':
         specifier: workspace:*
         version: link:../core
+      '@wm/styleguide':
+        specifier: workspace:*
+        version: link:../styleguide
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -474,9 +483,15 @@ importers:
 
   packages/styleguide:
     dependencies:
+      '@wm/core':
+        specifier: workspace:*
+        version: link:../core
       '@wm/llm':
         specifier: workspace:*
         version: link:../llm
+      '@wm/net':
+        specifier: workspace:*
+        version: link:../net
       zod:
         specifier: ^4.6.7
         version: 4.6.7

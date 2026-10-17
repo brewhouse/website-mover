@@ -4,7 +4,7 @@ import { getJob, listRuns } from '@wm/db';
 import { Badge, Card, LinkButton, Notice, PageHeader, when } from '@/components/ui';
 import { planState, previousPlan } from '@/lib/job-files';
 import { ApproveForm, ReplanButton } from './approve-form';
-import { ChangesTab, CleanupTab, DecisionsTab, FilesTab, FormsTab, MeetingsTab, PagesTab, RecordsTab, SiteTab, SkippedTab, SummaryTab, WarningsTab, type TabProps } from './tabs';
+import { ChangesTab, CleanupTab, DecisionsTab, DesignTab, FilesTab, FormsTab, MeetingsTab, PagesTab, RecordsTab, SiteTab, SkippedTab, SummaryTab, WarningsTab, type TabProps } from './tabs';
 import { requireUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -20,6 +20,7 @@ const TABS = {
   records: { label: 'Records', render: RecordsTab },
   forms: { label: 'Forms', render: FormsTab },
   site: { label: 'Site & menus', render: SiteTab },
+  design: { label: 'Design', render: DesignTab },
   cleanup: { label: 'Existing content', render: CleanupTab },
   warnings: { label: 'Warnings', render: WarningsTab },
   decisions: { label: 'Decisions', render: DecisionsTab },

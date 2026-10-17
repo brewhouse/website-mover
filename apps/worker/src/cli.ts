@@ -4,6 +4,7 @@
  *   wm scan    --job jha --origin https://www.jaxha.org --profile bjm [--cache snapshots/jha/http]
  *   wm extract --job jha
  *   wm analyze --job jha
+ *   wm brand   --job jha --file inputs/jha/style-guide/brand.json   the reviewed brand file: logos, fonts (docs/m3/branding.md)
  *   wm plan    --job jha [--target local] [--timezone America/New_York]
  *   wm approve --job jha --by "Name"
  *   wm execute --job jha [--target local]
@@ -51,6 +52,7 @@ const { positionals, values } = parseArgs({
     'rights-confirmed': { type: 'boolean', default: false },
     base: { type: 'string' },
     ga4: { type: 'string' },
+    file: { type: 'string' },
     confirm: { type: 'string' },
     approver: { type: 'boolean', default: false },
     revoke: { type: 'boolean', default: false },
@@ -77,6 +79,14 @@ if (command && (STAGES as string[]).includes(command)) {
   console.log(summary);
 } else {
   switch (command) {
+    case 'brand': {
+      const jobId = values.job ?? fail('--job is required');
+      const file = values.file ?? fail('--file <brand.json> is required');
+      const { importBrand } = await import('@wm/styleguide');
+      await importBrand(jobId, path.resolve(cwd, file), console.log);
+      console.log(`Imported into ${jobId}: run "wm plan" to put the design in a new plan version`);
+      break;
+    }
     case 'approve': {
       const jobId = values.job ?? fail('--job is required');
       const by = values.by ?? fail('--by "<your name>" is required');

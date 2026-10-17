@@ -615,12 +615,178 @@ function htmlText(html: string): string {
     .trim();
 }
 
-function OptionRow({ name, value }: { name: string; value: string }) {
+function OptionRow({ name, value }: { name: string; value: string | string[] }) {
+  const text = Array.isArray(value) ? value.join(', ') : htmlText(value);
   return (
     <>
       <dt className="font-mono text-xs text-muted">{name}</dt>
-      <dd>{value || <span className="text-muted">(cleared)</span>}</dd>
+      <dd className="whitespace-pre-line">{text || <span className="text-muted">{Array.isArray(value) ? '(none)' : '(cleared)'}</span>}</dd>
     </>
+  );
+}
+
+// ---------------------------------------------------------------- Design
+
+/** The brand (wm brand): what the site's look comes from, to check against the guide before approving. */
+export function DesignTab({ jobId, plan }: TabProps) {
+  const d = plan.design;
+  if (!d) return <Empty>This plan has no design: import the brand file with “wm brand”, then re-plan.</Empty>;
+  const colors = d.variables.filter((v) => v.name.startsWith('color-'));
+  const others = d.variables.filter((v) => !v.name.startsWith('color-'));
+  const failing = d.checks.filter((c) => !c.passes);
+  const footerColor = (d.variables.find((v) => v.name === 'color-footer') ?? d.variables.find((v) => v.name === 'color-primary'))?.value ?? '#202188';
+  const source = (v: (typeof d.variables)[number]) => (
+    <>
+      {v.token ? (
+        <>
+          <span className="font-mono text-xs">{v.token}</span> <span className="text-muted">{v.evidence}</span>
+        </>
+      ) : (
+        <span className="text-muted">—</span>
+      )}
+      {v.why && <div className="text-xs text-warn">{v.why}</div>}
+    </>
+  );
+  return (
+    <div className="grid gap-6">
+      <Card title="Guide">
+        <p className="p-4 text-sm">
+          “{d.guide.title}”{d.guide.url && (
+            <>
+              {' '}
+              (<a className="underline" href={d.guide.url} target="_blank" rel="noreferrer">open</a>)
+            </>
+          )}
+          , transcribed by {d.guide.transcribedBy} on {d.guide.transcribedAt}. Check the values against the guide before approving: approval covers them.
+        </p>
+      </Card>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card title={`Colours (${colors.length})`}>
+          <table className="data">
+            <thead>
+              <tr>
+                <th />
+                <th>Theme variable</th>
+                <th>Value</th>
+                <th>From the guide</th>
+              </tr>
+            </thead>
+            <tbody>
+              {colors.map((v) => (
+                <tr key={v.name}>
+                  <td>
+                    <span className="inline-block h-6 w-6 rounded border border-line align-middle" style={{ background: v.value }} aria-hidden="true" />
+                  </td>
+                  <td className="font-mono text-xs">--pw-{v.name}</td>
+                  <td className="font-mono text-xs">{v.value}</td>
+                  <td className="text-sm">{source(v)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+        <div className="grid content-start gap-6">
+          <Card title="Type, sizes and buttons">
+            <table className="data">
+              <tbody>
+                {others.map((v) => (
+                  <tr key={v.name}>
+                    <td className="font-mono text-xs">--pw-{v.name}</td>
+                    <td className="font-mono text-xs">{v.value}</td>
+                    <td className="text-sm">{source(v)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+          <Card title="Fonts (self-hosted through the Font Library)">
+            <ul className="grid gap-1 p-4 text-sm">
+              {d.fonts.map((f) => (
+                <li key={f.slug}>
+                  <span className="font-medium">{f.family}</span>{' '}
+                  <span className="text-muted">{f.faces.map((x) => `${x.weight}${x.style === 'italic' ? ' italic' : ''}`).join(', ')}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+          <Card title="Logos">
+            <div className="grid gap-4 p-4 text-sm sm:grid-cols-2">
+              {(['header', 'footer'] as const).map((role) => {
+                const logo = d.logos[role];
+                return (
+                  <figure key={role} className="grid gap-2">
+                    {/* The footer logo on the footer's colour, as the site shows it. */}
+                    <div className="h-32 rounded border border-line bg-white p-3" style={role === 'footer' ? { background: footerColor } : undefined}>
+                      {logo ? <img src={`/api/jobs/${jobId}/brand/${logo.file.split('/').pop()}`} alt={`${role} logo`} className="h-full w-full object-contain" /> : <span className="text-muted">none</span>}
+                    </div>
+                    <figcaption className="text-muted">
+                      {role === 'header' ? 'Header' : 'Footer'}
+                      {logo?.width ? ` · ${logo.width}×${logo.height}` : ''}
+                    </figcaption>
+                  </figure>
+                );
+              })}
+              <p className="text-muted sm:col-span-2">
+                {d.logos.evidence.replace(/([^.])$/, '$1.')}
+                {d.logos.includesName && ' The logo shows the name, so the header doesn’t repeat it as text.'}
+              </p>
+            </div>
+          </Card>
+        </div>
+      </div>
+      <Card title={`Contrast (WCAG 2.1 AA): ${d.checks.length - failing.length} of ${d.checks.length} pass`}>
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Where</th>
+              <th>Colours</th>
+              <th>Ratio</th>
+              <th>Needs</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {d.checks.map((c) => (
+              <tr key={c.what}>
+                <td>{c.what}</td>
+                <td>
+                  <span className="inline-block rounded border border-line px-2 py-0.5 text-xs font-semibold" style={{ color: c.foreground, background: c.background }}>
+                    {c.foreground} on {c.background}
+                  </span>
+                </td>
+                <td>{c.ratio}:1</td>
+                <td>{c.needs}:1</td>
+                <td>{c.passes ? <Badge tone="ok">passes</Badge> : <Badge tone="bad">fails</Badge>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+      {d.deviations.length > 0 && (
+        <Card title="Where the site differs from the guide">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>What</th>
+                <th>Guide</th>
+                <th>Site</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.deviations.map((x) => (
+                <tr key={x.what}>
+                  <td>{x.what}</td>
+                  <td>{x.guide}</td>
+                  <td>{x.site}</td>
+                  <td>{x.why}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
   );
 }
 

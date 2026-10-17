@@ -8,6 +8,7 @@ import { WpError, type WpClient } from '@wm/wp-client';
 import { LinkMap, rewriteLinks } from './links.js';
 import { probeTarget } from './target.js';
 import { snapshotBefore, type PageFields } from './rollback.js';
+import { applyDesign, verified, type DesignState } from './design.js';
 
 export type EntityKind = 'page' | 'post' | 'document' | 'image' | 'event' | 'person' | 'form' | 'record';
 
@@ -35,6 +36,8 @@ export interface RunState {
   redirectImport: { imported: number; updated: number; skipped: number; failed: number } | null;
   /** Site structure applied (M3): menu name → item count, options result, homepage slides set. */
   site: { menus: Record<string, number>; options: Record<string, string>; homeSlides: number; homeQuickLinks?: number; warnings: string[] } | null;
+  /** Branding applied (M3): logos, fonts, the brand CSS. */
+  design?: DesignState | null;
 }
 
 type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
@@ -129,6 +132,10 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
       throw new Error(`The ${name} analysis changed after this plan was made: run "wm plan" and approve again`);
     }
   }
+  // The brand's files are checked one by one as they're used; the manifest lists them.
+  if (plan.inputs.brandSha256 && (await fileSha256(jobPath(jobId, 'inputs', 'brand', 'manifest.json')).catch(() => '')) !== plan.inputs.brandSha256) {
+    throw new Error('The brand (wm brand) changed after this plan was made: run "wm plan" and approve again');
+  }
   const pages = new Map((await readJsonl<ExtractedPage>(extractFile)).map((p) => [p.sourceKey, p]));
   await mkdir(jobPath(jobId, 'run'), { recursive: true });
   const events = createWriteStream(jobPath(jobId, 'run', 'events.jsonl'), { flags: 'a' });
@@ -148,6 +155,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
     redirects: [],
     redirectImport: null,
     site: null,
+    design: null,
   };
   const save = () => writeJson(stateFile(jobId), state);
   const fail = (key: string, kind: RunState['failures'][number]['kind'], step: string, err: unknown) => {
@@ -505,6 +513,23 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
       fail: (step, err) => fail('site', 'setup', step, err),
       log,
     });
+  }
+
+  // 9c. Branding: logos, fonts and the brand CSS (M3).
+  if (plan.design) {
+    state.design = await applyDesign(client, plan, {
+      jobId,
+      upload: async (logo, key, filename) => {
+        const previous = ours.get(key);
+        if (previous) return previous.id;
+        const media = await uploadOnce(client, await verified(jobId, logo.file, logo.sha256), filename, logo.contentType, meta(key));
+        await client.post(`/wp/v2/media/${media.id}`, { title: plan.site?.title ? `${plan.site.title} logo` : 'Logo', alt_text: plan.site?.title ?? '' });
+        return media.id;
+      },
+      fail: (step, err) => fail('design', 'setup', step, err),
+      log,
+    });
+    await save();
   }
 
   // 10. Publish the drafts.

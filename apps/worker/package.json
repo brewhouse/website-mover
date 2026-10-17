@@ -19,6 +19,7 @@
     "@wm/extractor": "workspace:*",
     "@wm/planner": "workspace:*",
     "@wm/qa": "workspace:*",
+    "@wm/styleguide": "workspace:*",
     "@wm/wp-client": "workspace:*"
   }
 }

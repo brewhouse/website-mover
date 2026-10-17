@@ -90,6 +90,14 @@ export async function qaScreenshot(jobId: string, file: string): Promise<Buffer 
   return readFile(jobPath(jobId, 'qa', 'screenshots', file)).catch(() => null);
 }
 
+/** A logo from the job's brand (wm brand), for the review's Design tab. */
+export async function brandLogo(jobId: string, file: string): Promise<{ body: Buffer; type: string } | null> {
+  const m = /^logo(?:-footer)?\.(png|jpe?g|webp)$/i.exec(file);
+  if (!m) return null;
+  const body = await readFile(jobPath(jobId, 'inputs', 'brand', 'logos', file)).catch(() => null);
+  return body && { body, type: m[1]!.toLowerCase() === 'png' ? 'image/png' : m[1]!.toLowerCase() === 'webp' ? 'image/webp' : 'image/jpeg' };
+}
+
 /** Files the report page offers for download. */
 export const DOWNLOADS = { 'redirects.csv': 'text/csv', 'url-map.csv': 'text/csv', 'report.md': 'text/markdown' } as const;
 

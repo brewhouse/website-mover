@@ -52,9 +52,11 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
     .filter((l): l is NavLink => !!l?.href && !/maps\.(app\.)?goo|google\.[a-z]+\/maps/.test(l.href) && !/^\d{4}$/.test(l.label));
   const address = clean(footerBottom.find('a[href*="maps"]').first().text()) || null;
   const phone = clean($('#footerPhone a[href^="tel:"]').first().text()) || null;
-  $('#footerInfo br').replaceWith(' ');
-  const hours = clean($('#footerInfo').text()) || null;
-  const notices = $('#footerMiddle .condensedFont').toArray().map((el) => clean($(el).text())).filter(Boolean);
+  // Office hours keep their line breaks ("Monday - Friday" / "8 am - 5 pm").
+  $('#footerInfo br').replaceWith('\n');
+  const hours = $('#footerInfo').text().split('\n').map(clean).filter(Boolean).join('\n') || null;
+  // Notices keep their bold opening ("We are an Equal Housing Opportunity Provider.") and phone links.
+  const notices = $('#footerMiddle .condensedFont').toArray().map((el) => inlineHtml($, el, origin)).filter(Boolean);
 
   // The introduction under the slideshow (mission, programs): its paragraphs as they are, and its
   // "Learn More" button as a paragraph with that link. Links and image sources are made absolute (the
@@ -99,7 +101,10 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
       footer: dedupe(footer),
       social: links('#sideBar a[href*="facebook"], #sideBar a[href*="youtube"], #sideBar a[href*="instagram"], #sideBar a[href*="twitter"], #sideBar a[href*="x.com"], #sideBar a[href*="linkedin"]'),
       explore: links('#industryLinks > ul:first-of-type a'),
+      contact: links('#footerPhone a:not([href^="tel:"]), #footerInfo a'),
     },
+    exploreHeading: clean($('#nationalNews').first().text()) || null,
+    footerIcons: $('#footerIcons img').toArray().map((img) => clean($(img).attr('alt') ?? '')).filter(Boolean),
     contact: { address, phone, email: null, fax: null, hours },
     footerNotices: notices,
     home: { slides, buttons: links('#buttonRow a'), intro: intro.length ? intro.join('\n') : null },
@@ -114,7 +119,9 @@ function genericSite(html: string, origin: string): SiteAnalysis {
   const footer = $('footer a').toArray().map((a) => toLink($(a))).filter((l): l is NavLink => !!l?.href);
   return {
     siteName: null,
-    menus: { top: [], main, footer: dedupe(footer), social: footer.filter((l) => /facebook|youtube|instagram|twitter|x\.com|linkedin/.test(l.href)), explore: [] },
+    menus: { top: [], main, footer: dedupe(footer), social: footer.filter((l) => /facebook|youtube|instagram|twitter|x\.com|linkedin/.test(l.href)), explore: [], contact: [] },
+    exploreHeading: null,
+    footerIcons: [],
     contact: { address: null, phone: null, email: null, fax: null, hours: null },
     footerNotices: [],
     home: { slides: [], buttons: [], intro: null },
@@ -171,3 +178,20 @@ function abs(href: string, origin: string): string {
   }
 }
 
+/**
+ * An element's text as HTML, keeping only bold text and links (made absolute): everything else is its
+ * text, HTML-escaped, with whitespace collapsed.
+ */
+function inlineHtml($: cheerio.CheerioAPI, el: any, origin: string): string {
+  const walk = (node: any): string => {
+    if (node.type === 'text') return escapeHtml(node.data.replace(/\s+/g, ' '));
+    if (node.type !== 'tag') return '';
+    const inner = (node.children ?? []).map(walk).join('');
+    if (!inner.trim()) return inner;
+    if (node.name === 'strong' || node.name === 'b') return `<strong>${inner}</strong>`;
+    const href = node.name === 'a' ? $(node).attr('href') : undefined;
+    if (href && /^(tel:|mailto:|https?:|\/)/i.test(href)) return `<a href="${escapeHtml(abs(href, origin))}">${inner}</a>`;
+    return inner;
+  };
+  return walk(el).replace(/\s+/g, ' ').trim();
+}

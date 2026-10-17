@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ExtractedPage, SiteAnalysis, SnapshotFile, SnapshotPage } from '@wm/core';
-import { approvePlan, buildPlan, loadApprovedPlan, loadDecisions, ReviewDecisions, saveDecisions, savePlan, wpSlug, type TargetEntity, type TargetInfo } from '../src/index.js';
+import { BrandFile } from '@wm/styleguide/brand';
+import { approvePlan, buildPlan, loadApprovedPlan, loadDecisions, renderPlan, ReviewDecisions, saveDecisions, savePlan, wpSlug, type TargetEntity, type TargetInfo } from '../src/index.js';
 
 describe('wpSlug', () => {
   // Expected values are WordPress 7.0.4's sanitize_title() output (wp eval on the local seed).
@@ -284,6 +285,84 @@ describe('buildPlan with analysis (M2)', () => {
   });
 });
 
+describe('buildPlan with the footer as the theme lays it out (T19)', () => {
+  it('sets the links band heading, maps the notice icons to the theme\'s choices and plans the contact links menu', () => {
+    const site: SiteAnalysis = {
+      siteName: 'Jacksonville Housing',
+      menus: { top: [], main: [], footer: [], social: [], explore: [], contact: [{ label: 'Staff Module', href: `${origin}/staff-pages` }] },
+      exploreHeading: 'Industry Links',
+      footerIcons: ['Equal Housing Opportunity', 'Handicap Accessible', 'Accessibility Icon', 'Our Award'],
+      contact: { address: null, phone: '904-630-3810', email: null, fax: null, hours: 'Monday - Friday\n8 am - 5 pm' },
+      footerNotices: ['<strong>We are an Equal Housing Opportunity Provider.</strong> Call <a href="tel:+12027081112">(202) 708-1112</a>.'],
+      home: { slides: [], buttons: [] },
+    };
+    const result = buildPlan({ jobId: 'test', version: 1, source: { origin, profile: 'bjm' }, inputs: { extractSha256: 'test' }, target, pages: [], snapshotPages: [], files: [], existing: [], analysis: { site } });
+    expect(result.site!.options).toMatchObject({
+      footer_links_heading: 'Industry Links',
+      footer_notice_icons: ['equal_housing', 'accessible', 'universal_access'],
+      // The line break stays (the field turns it into <br>), and so does the notice's markup.
+      footer_hours: 'Monday - Friday\n8 am - 5 pm',
+      footer_notices: site.footerNotices[0],
+    });
+    expect(result.warnings.join('\n')).toMatch(/Footer icons the theme has no match for: "Our Award"/);
+    // The staff link's target isn't migrated: left out and reported like other menu links.
+    expect(result.site!.menus.find((m) => m.name === 'Footer Contact Menu')!.items).toEqual([]);
+    expect(result.warnings.join('\n')).toMatch(/Footer Contact Menu: "Staff Module"/);
+    // Older analyses (no heading or icons) don't touch those options.
+    const old = buildPlan({ jobId: 'test', version: 2, source: { origin, profile: 'bjm' }, inputs: { extractSha256: 'test' }, target, pages: [], snapshotPages: [], files: [], existing: [], analysis: { site: { ...site, exploreHeading: undefined, footerIcons: undefined } } });
+    expect(Object.keys(old.site!.options)).not.toContain('footer_links_heading');
+    expect(Object.keys(old.site!.options)).not.toContain('footer_notice_icons');
+  });
+});
+
+describe('buildPlan with a brand (M3 branding)', () => {
+  const brand = {
+    file: BrandFile.parse({
+      schema: 'website-mover/brand@1',
+      guide: { title: 'Style Guide', url: 'https://www.figma.com/proto/x', transcribedBy: 'Tester', transcribedAt: '2026-10-16' },
+      tokens: { primary: { value: '#022B58', evidence: 'Colors: Primary' }, green: { value: '#468928', evidence: 'Colors: Secondary' } },
+      fonts: [{ family: 'Montserrat', weights: [700], evidence: 'Typography' }],
+      theme: { 'color-primary': 'primary', 'color-button': 'green', 'color-button-text': '#FFFFFF', 'font-heading': '"Montserrat", sans-serif', 'font-text': '"Montserrat", sans-serif', 'h1-case': { value: 'none', why: 'Title case' } },
+      logos: { header: 'logo.png', footer: null, includesName: true, evidence: 'The logo frame' },
+      deviations: [{ what: 'Buttons', guide: '#468928', site: '#468928', why: 'kept for the test' }],
+    }),
+    manifest: {
+      importedAt: '2026-10-16T00:00:00Z',
+      brandSha256: 'b',
+      logos: { header: { file: 'logos/logo.png', sha256: 'l', contentType: 'image/png', width: 100, height: 50 }, footer: null },
+      fonts: [{ family: 'Montserrat', slug: 'montserrat', fontFamily: 'Montserrat, sans-serif', faces: [{ weight: 700, style: 'normal' as const, file: 'fonts/montserrat-700.woff2', sha256: 'f', sourceUrl: 'https://fonts.gstatic.com/x.woff2' }] }],
+    },
+    sha256: 'manifest-sha',
+  };
+
+  it('puts the theme variables with their evidence, the fonts and logos into the plan, and warns where contrast fails', () => {
+    const result = buildPlan({ jobId: 'test', version: 1, source: { origin, profile: 'bjm' }, inputs: { extractSha256: 'test' }, target, pages: [], snapshotPages: [], files: [], existing: [], brand });
+    const d = result.design!;
+    expect(result.inputs.brandSha256).toBe('manifest-sha');
+    expect(d.variables.find((v) => v.name === 'color-button')).toEqual({ name: 'color-button', value: '#468928', token: 'green', evidence: 'Colors: Secondary', why: null });
+    expect(d.variables.find((v) => v.name === 'h1-case')).toMatchObject({ value: 'none', token: null, why: 'Title case' });
+    expect(d.fonts).toEqual([{ family: 'Montserrat', slug: 'montserrat', fontFamily: 'Montserrat, sans-serif', faces: [{ weight: 700, style: 'normal', file: 'fonts/montserrat-700.woff2', sha256: 'f' }] }]);
+    // The logo shows the name, so the header doesn't repeat it; the brand's fonts replace the theme's Google ones.
+    expect(d.options).toEqual({ header_show_site_name: 0, theme_google_fonts: 0 });
+    // A brand that sets only the heading font still needs the theme's Google font for body text.
+    const { 'font-text': _text, ...headingOnly } = brand.file.theme;
+    void _text;
+    const partial = buildPlan({ jobId: 'test', version: 2, source: { origin, profile: 'bjm' }, inputs: { extractSha256: 'test' }, target, pages: [], snapshotPages: [], files: [], existing: [], brand: { ...brand, file: { ...brand.file, theme: headingOnly } } });
+    expect(partial.design!.options).toEqual({ header_show_site_name: 0 });
+    // White on the guide's green is 4.31:1: the plan says so.
+    expect(d.checks.find((c) => c.what === 'Buttons')).toMatchObject({ foreground: '#FFFFFF', background: '#468928', ratio: 4.31, needs: 4.5, passes: false });
+    expect(result.warnings).toContain('Design: Buttons: #FFFFFF on #468928 is 4.31:1; WCAG 2.1 AA needs 4.5:1.');
+    expect(renderPlan(result)).toMatch(/## Design[\s\S]*`--pw-color-button` \| `#468928` \| green: Colors: Secondary/);
+  });
+
+  it('refuses a brand file the theme can\'t use', () => {
+    const bad = { ...brand, file: { ...brand.file, theme: { 'colour-primary': 'primary', 'color-text': 'nope' } } };
+    expect(() => buildPlan({ jobId: 'test', version: 1, source: { origin, profile: 'bjm' }, inputs: { extractSha256: 'test' }, target, pages: [], snapshotPages: [], files: [], existing: [], brand: bad })).toThrow(
+      /theme\.colour-primary: the theme has no such variable[\s\S]*theme\.color-text: "nope" is neither a token nor a valid color/,
+    );
+  });
+});
+
 describe('buildPlan with the site structure (M3)', () => {
   it('links menus and homepage tiles to migrated content, fills the footer and intro, and clears placeholders the source has no value for', () => {
     const about = page('/about-us', { title: 'About Us' });
@@ -418,6 +497,7 @@ describe('buildPlan with the site structure (M3)', () => {
       ['Footer Menu', 0],
       ['Social Menu', 0],
       ['Explore Menu', 0],
+      ['Footer Contact Menu', 0],
     ]);
     expect(result.site!.home.quickLinks).toEqual([]);
     expect(result.site!.options).toMatchObject({ footer_address: '', footer_address_heading: '', footer_address_icon: '' });
