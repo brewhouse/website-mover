@@ -1,4 +1,4 @@
-import type { Plan } from './schema.js';
+import type { Plan, PlanDesign } from './schema.js';
 
 /** The plan as Markdown, for review before approval. */
 export function renderPlan(plan: Plan): string {
@@ -54,7 +54,8 @@ export function renderPlan(plan: Plan): string {
       }
       out.push('');
     }
-    out.push('**Theme options:** ' + Object.entries(s.options).map(([k, v]) => `${k} = ${v ? `"${cell(v)}"` : '(cleared)'}`).join(' · '), '');
+    const option = (v: string | string[]) => (Array.isArray(v) ? (v.length ? v.join(', ') : '(none)') : v ? `"${cell(v)}"` : '(cleared)');
+    out.push('**Theme options:** ' + Object.entries(s.options).map(([k, v]) => `${k} = ${option(v)}`).join(' · '), '');
     out.push(`**Homepage slides:** ${s.home.banner.map((b) => `"${cell(b.title)}" → \`${b.linkUrl ?? '—'}\``).join(' · ')}`, '');
     if (s.home.quickLinks.length) out.push(`**Homepage quick links:** ${s.home.quickLinks.map((q) => `"${cell(q.title)}" → \`${q.url}\``).join(' · ')}`, '');
     if (s.home.intro) out.push(`**Homepage introduction:** ${cell(s.home.intro.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160))}…`, '');
@@ -62,6 +63,7 @@ export function renderPlan(plan: Plan): string {
     if (s.home.clearOthers) out.push('The homepage template\'s other fields (the seed\'s demo placeholders) are cleared.', '');
     for (const p of s.clearPages ?? []) out.push(`The kept "${cell(p.title)}" page's own text fields (\`${p.template}\`: the seed's demo content, e.g. a sign-up box) are cleared.`, '');
   }
+  if (plan.design) out.push(...renderDesign(plan.design, cell));
   if (plan.categories.length) out.push('## News categories', '', plan.categories.join(' · '), '');
 
   if (plan.events.length) {
@@ -122,4 +124,23 @@ export function renderPlan(plan: Plan): string {
     out.push(`### ${reason} (${rows.length})`, '', ...rows.map((s) => `- ${cell(s.title) || s.sourceKey} (\`${s.sourceKey}\`)`), '');
   }
   return out.join('\n');
+}
+
+/** The Design section: what the site's look comes from, so approval checks it against the guide. */
+function renderDesign(d: PlanDesign, cell: (s: string) => string): string[] {
+  const out: string[] = ['## Design', ''];
+  out.push(`From "${cell(d.guide.title)}"${d.guide.url ? ` (${d.guide.url})` : ''}, transcribed by ${cell(d.guide.transcribedBy)} on ${d.guide.transcribedAt}. Check the values against the guide before approving.`, '');
+  out.push('| Theme variable | Value | Guide | Why |', '|---|---|---|---|');
+  out.push(...d.variables.map((v) => `| \`--pw-${v.name}\` | \`${cell(v.value)}\` | ${v.token ? `${v.token}: ${cell(v.evidence ?? '')}` : '—'} | ${cell(v.why ?? '')} |`), '');
+  if (d.fonts.length) out.push(`**Fonts** (self-hosted through the Font Library): ${d.fonts.map((f) => `${f.family} ${f.faces.map((x) => `${x.weight}${x.style === 'italic' ? 'i' : ''}`).join(' ')}`).join(' · ')}`, '');
+  const logo = (l: PlanDesign['logos']['header']) => (l ? `\`${l.file}\`${l.width ? ` (${l.width}×${l.height})` : ''}` : 'none');
+  out.push(`**Logos:** header ${logo(d.logos.header)}, footer ${logo(d.logos.footer)}. ${cell(d.logos.evidence).replace(/([^.])$/, '$1.')}${d.logos.includesName ? ' The logo shows the name, so the header doesn\'t repeat it as text.' : ''}`, '');
+  const failing = d.checks.filter((c) => !c.passes);
+  out.push(`**Contrast (WCAG 2.1 AA):** ${d.checks.length - failing.length} of ${d.checks.length} pass.`, '');
+  if (failing.length) out.push('| Fails | Colours | Ratio | Needs |', '|---|---|---|---|', ...failing.map((c) => `| ${cell(c.what)} | ${c.foreground} on ${c.background} | ${c.ratio}:1 | ${c.needs}:1 |`), '');
+  if (d.deviations.length) {
+    out.push('**Where the site differs from the guide:**', '', '| What | Guide | Site | Why |', '|---|---|---|---|');
+    out.push(...d.deviations.map((x) => `| ${cell(x.what)} | ${cell(x.guide)} | ${cell(x.site)} | ${cell(x.why)} |`), '');
+  }
+  return out;
 }

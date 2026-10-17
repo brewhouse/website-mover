@@ -21,7 +21,8 @@ import {
 import { scanSite } from '@wm/crawler';
 import { extractJob } from '@wm/extractor';
 import { analyzeForms, analyzeMeetings, analyzeRecords, analyzeSite } from '@wm/analyzer';
-import { buildPlan, latestPlanVersion, loadDecisions, savePlan } from '@wm/planner';
+import { buildPlan, latestPlanVersion, loadDecisions, savePlan, type BrandInput } from '@wm/planner';
+import { BrandFile, type BrandManifest } from '@wm/styleguide/brand';
 import { buildReport, executePlan, probeTarget, rollbackJob, runPostLaunch } from '@wm/executor';
 import { runQa } from '@wm/qa';
 import type { WpClient } from '@wm/wp-client';
@@ -87,6 +88,16 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
         (analysis as Record<string, unknown>)[key] = JSON.parse(raw.toString());
       }
       const extract = await readFile(jobPath(jobId, 'extract', 'pages.jsonl'));
+      // The brand imported with `wm brand` (optional): the plan's Design section.
+      let brand: BrandInput | undefined;
+      if (existsSync(jobPath(jobId, 'inputs', 'brand', 'manifest.json'))) {
+        const manifest = await readFile(jobPath(jobId, 'inputs', 'brand', 'manifest.json'));
+        const file = await readFile(jobPath(jobId, 'inputs', 'brand', 'brand.json'));
+        const parsed = JSON.parse(manifest.toString()) as BrandManifest;
+        // The manifest's hash goes into the plan; it vouches for brand.json only if that's unchanged.
+        if (sha256(file) !== parsed.brandSha256) throw new Error('inputs/brand/brand.json changed after "wm brand": import the brand file again');
+        brand = { file: BrandFile.parse(JSON.parse(file.toString())), manifest: parsed, sha256: sha256(manifest) };
+      }
       const { info, existing } = await probeTarget(client, name);
       const plan = buildPlan({
         jobId,
@@ -101,6 +112,7 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
         analysis,
         timezone: ctx.timezone ?? undefined,
         ga4Id: ctx.ga4Id ?? undefined,
+        brand,
         decisions: await loadDecisions(jobId),
       });
       const sha = await savePlan(plan);

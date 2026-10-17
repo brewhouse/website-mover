@@ -7,7 +7,8 @@ Credentials (passwords, license keys) go in `.env`, never here.
 inputs/
   framework/              Planeteria framework
   jha/
-    style-guide.pdf       JHA brand style guide
+    style-guide.pdf       JHA brand style guide (if it's a PDF)
+    style-guide/          a guide the PDF pipeline can't read (e.g. Figma): link.md and brand.json
     logos/                logo files
     fonts/                licensed font files (only if the brand uses commercial fonts)
     sitemap.xlsx          approved sitemap (.csv also fine)
@@ -34,7 +35,7 @@ inputs/
 ## JHA (`inputs/jha/`)
 
 **Needed for M0**
-- `style-guide.pdf`: the brand style guide.
+- `style-guide.pdf`: the brand style guide. If it's a Figma file or a web page, put its link in `style-guide/link.md`: someone transcribes it into `style-guide/brand.json` (format and checks: `docs/m3/branding.md`), which `wm brand` imports.
 
 **Needed by M3**
 - `sitemap.xlsx` or `.csv`: the approved sitemap. Columns: page title, parent page, URL path (if decided), notes. If it only exists as a PDF or image, add it as-is and we'll convert it.
@@ -44,5 +45,5 @@ inputs/
 **Optional**
 - `priority-urls.csv`: a top-pages export from Google Analytics or Search Console. Used to rank which old URLs get 301 redirects first.
 - `source-export/`: a content export from Brooks Jeffrey Marketing (jaxha.org's CMS vendor), if they'll provide one: pages with ids and parents, news with dates and categories, files with upload dates and original names. It fills gaps the crawl can't see.
-- GA4 measurement ID (`G-…`). Add it to `.env` as `GA4_MEASUREMENT_ID`.
+- GA4 measurement ID (`G-…`). It goes with the job: the intake form, or `--ga4` on `wm plan` and `wm postlaunch`.
 - Content rules: pages to leave out, a cutoff date for archiving old documents, which forms are still in use. A short `notes.md` is fine.

@@ -9,6 +9,7 @@ import { dataDir, jobPath, readJson, writeJson } from '@wm/core';
 import { loadPlan, type Plan, type TargetEntity } from '@wm/planner';
 import { WpError, type WpClient } from '@wm/wp-client';
 import { loadRunState } from './execute.js';
+import { brandCssOf, findFontFamily, fontFaces, userGlobalStyles, withoutBrandCss } from './design.js';
 
 interface MenuItemSnapshot {
   id: number;
@@ -36,6 +37,10 @@ export interface BeforeState {
   /** Kept framework pages' template text fields the job clears (the News page), read through the bridge. */
   pages?: PageState[];
   menus: { name: string; existed: boolean; items: MenuItemSnapshot[] }[];
+  /** The brand's font families as they were: whether each was installed, and which faces ("400 normal"). */
+  fonts?: { slug: string; existed: boolean; faces: string[] }[];
+  /** The tool's brand CSS block as it was (an earlier job's), or null if there was none. */
+  brandCss?: string | null;
 }
 
 type PageState = { pageId: number; acf: Record<string, unknown>; types?: Record<string, string> };
@@ -43,6 +48,37 @@ type PageState = { pageId: number; acf: Record<string, unknown>; types?: Record<
 export type PageFields = { pageId: number | null; fields: { name: string; type?: string }[] };
 
 const beforeFile = (jobId: string) => jobPath(jobId, 'run', 'before.json');
+
+/** Settings and theme options the plan changes: the site structure's and the design's (logos, header). */
+function settingKeysOf(plan: Plan): string[] {
+  return ['title', ...plan.settings.map((s) => s.key), ...(plan.design?.logos.header ? ['site_logo'] : [])];
+}
+function optionNamesOf(plan: Plan): string[] {
+  return [...Object.keys(plan.site?.options ?? {}), ...Object.keys(plan.design?.options ?? {}), ...(plan.design?.logos.footer ? ['site_footer_logo'] : [])];
+}
+/** A setting's value as REST takes it back: WordPress reports "no logo" as null but only accepts 0. */
+function restorable(key: string, value: unknown): unknown {
+  return key === 'site_logo' && value === null ? 0 : value;
+}
+
+const faceKey = (f: { font_face_settings: { fontStyle: string; fontWeight: string | number } }) => `${f.font_face_settings.fontWeight} ${f.font_face_settings.fontStyle}`;
+
+/** The tool's brand CSS block now; null when there's none, or no Global Styles to hold one (a classic theme). */
+async function currentBrandCss(client: WpClient): Promise<string | null> {
+  const gs = await userGlobalStyles(client).catch(() => null);
+  return gs ? brandCssOf(String(gs.styles.css ?? '')) : null;
+}
+
+/** The brand's font families as they are now. */
+async function fontsState(client: WpClient, slugs: string[]): Promise<NonNullable<BeforeState['fonts']>> {
+  const out: NonNullable<BeforeState['fonts']> = [];
+  for (const slug of slugs) {
+    const family = await findFontFamily(client, slug);
+    const faces = family ? await fontFaces(client, family.id) : [];
+    out.push({ slug, existed: !!family, faces: faces.map(faceKey) });
+  }
+  return out;
+}
 
 /**
  * Saves the site structure the job is about to change, on its first run only: re-runs keep that
@@ -53,9 +89,9 @@ const beforeFile = (jobId: string) => jobPath(jobId, 'run', 'before.json');
 export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan, home: PageFields, pages: PageFields[] = []): Promise<void> {
   if (existsSync(beforeFile(jobId))) return addToSnapshot(client, jobId, plan, home, pages);
   if (await hasRunBefore(jobId)) return;
-  const settingKeys = ['title', ...plan.settings.map((s) => s.key)];
+  const settingKeys = settingKeysOf(plan);
   const settings = await client.get<Record<string, unknown>>('/wp/v2/settings');
-  const optionNames = Object.keys(plan.site?.options ?? {});
+  const optionNames = optionNamesOf(plan);
   const options = optionNames.length ? await client.get<Record<string, unknown>>('/website-mover/v1/acf/options', { names: optionNames.join(',') }) : {};
   const homeState = plan.site && home.pageId && home.fields.length ? await pageState(client, home.pageId, home.fields) : null;
   const pageStates: PageState[] = [];
@@ -71,11 +107,13 @@ export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan
   }
   const snapshot: BeforeState = {
     takenAt: new Date().toISOString(),
-    settings: Object.fromEntries(settingKeys.filter((k) => k in settings).map((k) => [k, settings[k]])),
+    settings: Object.fromEntries(settingKeys.filter((k) => k in settings).map((k) => [k, restorable(k, settings[k])])),
     options,
     home: homeState,
     pages: pageStates,
     menus,
+    fonts: await fontsState(client, plan.design?.fonts.map((f) => f.slug) ?? []),
+    ...(plan.design ? { brandCss: await currentBrandCss(client) } : {}),
   };
   await writeJson(beforeFile(jobId), snapshot);
 }
@@ -83,16 +121,35 @@ export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan
 async function addToSnapshot(client: WpClient, jobId: string, plan: Plan, home: PageFields, pages: PageFields[]): Promise<void> {
   const snapshot = await readJson<BeforeState>(beforeFile(jobId));
   let changed = false;
-  const settingKeys = ['title', ...plan.settings.map((s) => s.key)].filter((k) => !(k in snapshot.settings));
+  const settingKeys = settingKeysOf(plan).filter((k) => !(k in snapshot.settings));
   if (settingKeys.length) {
     const settings = await client.get<Record<string, unknown>>('/wp/v2/settings');
     for (const k of settingKeys) {
       if (!(k in settings)) continue;
-      snapshot.settings[k] = settings[k];
+      snapshot.settings[k] = restorable(k, settings[k]);
       changed = true;
     }
   }
-  const optionNames = Object.keys(plan.site?.options ?? {}).filter((n) => !(n in snapshot.options));
+  const newFonts = (plan.design?.fonts ?? []).map((f) => f.slug).filter((slug) => !snapshot.fonts?.some((f) => f.slug === slug));
+  if (newFonts.length) {
+    (snapshot.fonts ??= []).push(...(await fontsState(client, newFonts)));
+    changed = true;
+  }
+  if (plan.design && !('brandCss' in snapshot)) {
+    snapshot.brandCss = await currentBrandCss(client);
+    changed = true;
+  }
+  // Menus a later plan adds (e.g. the Footer Contact Menu), as they are now.
+  const newMenus = (plan.site?.menus ?? []).filter((m) => !snapshot.menus.some((s) => s.name === m.name));
+  if (newMenus.length) {
+    const existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
+    for (const m of newMenus) {
+      const menu = existingMenus.find((e) => e.name === m.name);
+      snapshot.menus.push({ name: m.name, existed: !!menu, items: menu ? await menuItems(client, menu.id) : [] });
+    }
+    changed = true;
+  }
+  const optionNames = optionNamesOf(plan).filter((n) => !(n in snapshot.options));
   if (optionNames.length) {
     Object.assign(snapshot.options, await client.get<Record<string, unknown>>('/website-mover/v1/acf/options', { names: optionNames.join(',') }));
     changed = true;
@@ -330,8 +387,8 @@ export async function rollbackJob({ jobId, client, log = console.log }: { jobId:
   // 4. The site structure as it was before the job's first run.
   const snapshot = existsSync(beforeFile(jobId)) ? await readJson<BeforeState>(beforeFile(jobId)) : null;
   const before = later.length ? null : snapshot;
-  if (later.length) result.problems.push(`Not restored: settings, theme options, homepage and menus, since ${later.join(', ')} ran on this target later (roll that back first, or restore by hand)`);
-  else if (!before) result.problems.push('No snapshot of the site structure from before the first run (jobs run before M5): settings, theme options, homepage and menus were not restored');
+  if (later.length) result.problems.push(`Not restored: settings, theme options, homepage, menus and design, since ${later.join(', ')} ran on this target later (roll that back first, or restore by hand)`);
+  else if (!before) result.problems.push('No snapshot of the site structure from before the first run (jobs run before M5): settings, theme options, homepage, menus and design were not restored');
   if (before) {
     await attempt('settings', async () => {
       if (Object.keys(before.settings).length) await client.post('/wp/v2/settings', before.settings);
@@ -348,6 +405,29 @@ export async function rollbackJob({ jobId, client, log = console.log }: { jobId:
     await attempt('framework pages', async () => {
       for (const p of before.pages ?? []) await client.post(`/website-mover/v1/acf/posts/${p.pageId}/fields`, { values: p.acf });
       if (before.pages?.length) result.restored.push('framework pages');
+    });
+    await attempt('design', async () => {
+      // The brand CSS block as it was (an earlier job's, or none), and the fonts and font files the job installed.
+      const gs = before.brandCss !== undefined ? await userGlobalStyles(client).catch((err: unknown) => (before.brandCss === null ? null : Promise.reject(err))) : null;
+      if (gs) {
+        const css = [withoutBrandCss(String(gs.styles.css ?? '')), before.brandCss ?? ''].filter(Boolean).join('\n\n');
+        if (css !== String(gs.styles.css ?? '')) await client.post(`/wp/v2/global-styles/${gs.id}`, { styles: { ...gs.styles, css } });
+      }
+      // Faces the plan installs that weren't there before; a face an editor added since stays.
+      const planned = new Map((plan.design?.fonts ?? []).map((f) => [f.slug, new Set(f.faces.map((x) => `${x.weight} ${x.style}`))]));
+      for (const f of before.fonts ?? []) {
+        const family = await findFontFamily(client, f.slug);
+        if (!family) continue;
+        if (!f.existed) {
+          await client.delete(`/wp/v2/font-families/${family.id}`, { force: 'true' });
+          continue;
+        }
+        for (const face of await fontFaces(client, family.id)) {
+          const key = faceKey(face);
+          if (!f.faces.includes(key) && planned.get(f.slug)?.has(key)) await client.delete(`/wp/v2/font-families/${family.id}/font-faces/${face.id}`, { force: 'true' });
+        }
+      }
+      if (before.brandCss !== undefined || before.fonts?.length) result.restored.push('design');
     });
     await attempt('menus', async () => {
       const menus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });

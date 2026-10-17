@@ -19,6 +19,7 @@ import {
   type ReviewDecisions,
   type TargetInfo,
 } from './schema.js';
+import { planDesign, type BrandInput } from './design.js';
 import { SlugRegistry, wpSlug } from './slug.js';
 
 /** Content on the target, as listed by the bridge (`GET /website-mover/v1/entities`). */
@@ -53,6 +54,8 @@ export interface BuildPlanInput {
   decisions?: ReviewDecisions;
   /** GA4 measurement ID: set as the theme's `ga4_measurement_id` option (theme change T13). */
   ga4Id?: string;
+  /** The brand imported with `wm brand`: the Design section (M3 branding). */
+  brand?: BrandInput;
 }
 
 const EXCLUDED = 'Excluded by the reviewer';
@@ -489,6 +492,8 @@ export function buildPlan(input: BuildPlanInput): Plan {
   for (const f of planForms) if (f.sensitive.length || f.action === 'flag') warnings.push(`Form "${f.title}": ${f.reason}`);
   if (!target.redirection) warnings.push('Redirection is not active on the target: redirects are written to redirects.csv only.');
   if (decisions) warnings.push(...staleDecisions(decisions, input, cleanup, keep));
+  const design = input.brand ? planDesign(input.brand) : null;
+  if (design) warnings.push(...design.warnings);
 
   return Plan.parse({
     schema: 'website-mover/plan@1',
@@ -496,7 +501,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     version: input.version,
     createdAt: new Date().toISOString(),
     source: input.source,
-    inputs: input.inputs,
+    inputs: { ...input.inputs, brandSha256: input.brand?.sha256 ?? null },
     target,
     items,
     media,
@@ -511,6 +516,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     documentTypes,
     settings,
     site,
+    design: design?.design ?? null,
     decisions: decisions ?? null,
     siteRedirects,
     cleanup,
@@ -541,6 +547,15 @@ const MENUS: [name: string, from: keyof SiteAnalysis['menus']][] = [
   ['Footer Menu', 'footer'],
   ['Social Menu', 'social'],
   ['Explore Menu', 'explore'],
+  // Links with the footer's contact details (e.g. a staff login); theme change T19.
+  ['Footer Contact Menu', 'contact'],
+];
+
+/** The theme's notice icons (its `footer_notice_icons` choices), by the source image's alt text. */
+const NOTICE_ICONS: [RegExp, string][] = [
+  [/equal housing/i, 'equal_housing'],
+  [/handicap|wheelchair|accessible\b/i, 'accessible'],
+  [/accessibility|universal access/i, 'universal_access'],
 ];
 
 interface SiteContext {
@@ -599,7 +614,8 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
       const index = items.length - 1;
       for (const child of link.children ?? []) add(child, index);
     };
-    for (const link of site.menus[from]) add(link, null);
+    // `contact` is newer than the first M3 analyses.
+    for (const link of site.menus[from] ?? []) add(link, null);
     return { name, items };
   });
   if (dropped.length) ctx.warnings.push(`Menu links to content that isn't migrated were left out: ${dropped.join('; ')}`);
@@ -608,7 +624,7 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
   // Footer contact. Where the source has no value, the seed's placeholder (and its heading and
   // icon, which the footer would still show) is cleared. The seed's address heading ("City Hall")
   // is a demo label, so it's cleared either way.
-  const options: Record<string, string> = { footer_address_heading: '' };
+  const options: Record<string, string | string[]> = { footer_address_heading: '' };
   for (const [field, value] of [['address', site.contact.address], ['phone', site.contact.phone], ['email', site.contact.email], ['fax', site.contact.fax]] as const) {
     options[`footer_${field}`] = value ?? '';
     if (!value) Object.assign(options, { [`footer_${field}_heading`]: '', [`footer_${field}_icon`]: '' });
@@ -619,6 +635,15 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
   // One paragraph per notice: the field turns blank lines into paragraphs.
   options.footer_notices = site.footerNotices.join('\n\n');
   if (ctx.ga4Id) options.ga4_measurement_id = ctx.ga4Id;
+  // The footer's links band heading and the icons beside the notices (theme change T19); newer than
+  // the first M3 analyses.
+  if (site.exploreHeading !== undefined) options.footer_links_heading = site.exploreHeading ?? '';
+  if (site.footerIcons) {
+    const icons = site.footerIcons.map((alt) => ({ alt, choice: NOTICE_ICONS.find(([re]) => re.test(alt))?.[1] }));
+    const unknown = icons.filter((i) => !i.choice).map((i) => `"${i.alt}"`);
+    if (unknown.length) ctx.warnings.push(`Footer icons the theme has no match for: ${unknown.join(', ')}: left out.`);
+    options.footer_notice_icons = [...new Set(icons.flatMap((i) => (i.choice ? [i.choice] : [])))];
+  }
 
   const banner = site.home.slides.map((s) => {
     const target = s.link ? resolve(s.link) : null;

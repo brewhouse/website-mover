@@ -8,6 +8,8 @@ import { structured } from '@wm/llm';
 import { normalizeHex, readPdfFacts, statedColors, type PdfFacts } from './deterministic.js';
 
 export { readPdfFacts, normalizeHex, statedColors, type PdfFacts };
+export * from './brand.js';
+export * from './import.js';
 
 const Role = z.enum(['primary', 'secondary', 'accent', 'text', 'background', 'other']);
 

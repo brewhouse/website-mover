@@ -168,8 +168,8 @@ export const PlanSite = z.object({
   title: z.string().nullable(),
   /** The framework's named menus ("Main Menu", "Top Menu", ...), replaced as a whole. */
   menus: z.array(z.object({ name: z.string(), items: z.array(PlanMenuItem) })),
-  /** Theme option fields (ACF options pages) → value. Empty string clears a placeholder. */
-  options: z.record(z.string(), z.string()),
+  /** Theme option fields (ACF options pages) → value: text, or the chosen values of a checkbox field. Empty string clears a placeholder. */
+  options: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
   /** Homepage template fields. */
   home: z.object({
     banner: z.array(z.object({ title: z.string(), image: z.string().nullable(), linkUrl: z.string().nullable(), linkKey: z.string().nullable(), linkTitle: z.string().nullable() })),
@@ -184,6 +184,35 @@ export const PlanSite = z.object({
   clearPages: z.array(z.object({ pageId: z.number(), template: z.string(), title: z.string() })).default([]),
 });
 export type PlanSite = z.infer<typeof PlanSite>;
+
+/** A logo file from the brand (inputs/brand/…), uploaded to the media library. */
+export const PlanLogo = z.object({ file: z.string(), sha256: z.string(), contentType: z.string(), width: z.number().nullable(), height: z.number().nullable() });
+export type PlanLogo = z.infer<typeof PlanLogo>;
+
+/**
+ * Branding (M3, docs/m3/branding.md): the theme's CSS variables from the brand file, its fonts and
+ * logos, and the contrast checks on the result. Execution writes the variables and @font-face rules
+ * to Global Styles custom CSS, installs the fonts through the Font Library and sets the logos.
+ */
+export const PlanDesign = z.object({
+  guide: z.object({ title: z.string(), url: z.string().nullable(), transcribedBy: z.string(), transcribedAt: z.string() }),
+  /** Theme variables (without "--pw-"), with the guide's token and evidence where they come from one. */
+  variables: z.array(z.object({ name: z.string(), value: z.string(), token: z.string().nullable(), evidence: z.string().nullable(), why: z.string().nullable() })),
+  fonts: z.array(
+    z.object({
+      family: z.string(),
+      slug: z.string(),
+      fontFamily: z.string(),
+      faces: z.array(z.object({ weight: z.number(), style: z.enum(['normal', 'italic']), file: z.string(), sha256: z.string() })),
+    }),
+  ),
+  logos: z.object({ header: PlanLogo.nullable(), footer: PlanLogo.nullable(), includesName: z.boolean(), evidence: z.string() }),
+  /** Theme options the design sets: whether the header repeats the site name next to the logo. */
+  options: z.record(z.string(), z.union([z.string(), z.number()])),
+  checks: z.array(z.object({ what: z.string(), foreground: z.string(), background: z.string(), ratio: z.number(), needs: z.number(), passes: z.boolean() })),
+  deviations: z.array(z.object({ what: z.string(), guide: z.string(), site: z.string(), why: z.string() })),
+});
+export type PlanDesign = z.infer<typeof PlanDesign>;
 
 /** A site setting the plan changes (shown with its current value for review). */
 export const PlanSetting = z.object({ key: z.string(), from: z.string(), to: z.string(), reason: z.string() });
@@ -251,7 +280,12 @@ export const Plan = z.object({
   createdAt: z.string(),
   source: z.object({ origin: z.string(), profile: z.string() }),
   /** sha256 of extract/pages.jsonl: execution refuses content other than what was planned and approved. */
-  inputs: z.object({ extractSha256: z.string(), analysisSha256: z.record(z.string(), z.string()).default({}) }),
+  inputs: z.object({
+    extractSha256: z.string(),
+    analysisSha256: z.record(z.string(), z.string()).default({}),
+    /** sha256 of inputs/brand/manifest.json, which lists the brand's files with their own hashes. */
+    brandSha256: z.string().nullable().default(null),
+  }),
   target: TargetInfo,
   items: z.array(PlanItem),
   media: z.array(PlanMedia),
@@ -266,6 +300,7 @@ export const Plan = z.object({
   documentTypes: z.array(z.string()).default([]),
   settings: z.array(PlanSetting).default([]),
   site: PlanSite.nullable().default(null),
+  design: PlanDesign.nullable().default(null),
   /** The reviewer decisions this version applied. */
   decisions: ReviewDecisions.nullable().default(null),
   /** Redirects for paths the framework itself links to (not legacy URLs), e.g. its hard-coded news links. */

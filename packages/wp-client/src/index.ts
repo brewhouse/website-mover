@@ -51,6 +51,14 @@ export class WpClient {
     });
   }
 
+  /** Posts a multipart form (e.g. a font file to the Font Library). */
+  async postForm<T = unknown>(path: string, form: FormData) {
+    // Encoded once here (with its boundary), so the request is plain bytes like an upload.
+    const encoded = new Request('http://localhost/', { method: 'POST', body: form });
+    const body = new Uint8Array(await encoded.arrayBuffer());
+    return this.send<T>('POST', path, undefined, body, { 'Content-Type': encoded.headers.get('content-type')! });
+  }
+
   request<T>(method: string, path: string, body?: unknown, query?: Record<string, string | number>): Promise<T> {
     return body === undefined
       ? this.send<T>(method, path, query)
