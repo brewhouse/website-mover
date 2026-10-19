@@ -86,7 +86,7 @@ Patch 0018 (the new theme files exit when requested directly by URL; before, the
 
 The JHA style guide's look (`docs/m3/branding.md`). The theme only gets variables and the new header and footer; the brand's values come from the tool, so the theme keeps its own look until they're set.
 
-**Patches:** `dist/theme-patches/patches/0019-…0023-*.patch` (also zipped as `dist/theme-patches/jha-theme-patches-0019-0023.zip`). They apply with `git am` to Pantheon's `master` (`8c8bb792f`, read 2026-10-16). Screenshots: `dist/theme-patches/screenshots/branding/`, before (Pantheon dev today) and after (the local seed with the patches and the brand), with side-by-side images.
+**Patches:** `dist/theme-patches/patches/0019-…0023-*.patch` (also zipped as `dist/theme-patches/jha-theme-patches-0019-0023.zip`). They apply with `git am` to `8c8bb792f`. **Applied on Pantheon dev on 2026-10-18** (`master` is `124584133`), and plan v3 of `jha-dev` set the brand there (`docs/m3/branding-results.md`). Screenshots: `dist/theme-patches/screenshots/branding/`, before (Pantheon dev today) and after (the local seed with the patches and the brand), with side-by-side images.
 
 | # | Patch | What changes |
 |---|---|---|

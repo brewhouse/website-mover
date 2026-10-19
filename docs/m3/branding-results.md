@@ -1,6 +1,21 @@
 # M3 branding results (2026-10-16)
 
-**Result: branding PASSES on the local seed, with theme patches T17–T21 applied there.** The hosted seed needs the patches pushed first (`docs/theme-patches.md`), then a re-plan.
+**Result: branding PASSES on the local seed and on Pantheon dev** (job `jha-dev`, plan v3, 2026-10-18), with theme patches T17–T21 applied.
+
+## On Pantheon dev (2026-10-18)
+
+Rohit pushed patches 0019–0023 (Pantheon `master` is `124584133`) and approved plan v3 of `jha-dev` ("Rohit Mehta (approved in chat)"). Content is the same as v2; v3 adds the Design section and the footer details (links band heading, notice icons, hours on two lines, the first notice's bold opening and phone links). Rohit ran the execute stage (the tool's auto mode doesn't run writes to the hosted site).
+
+| Check | Result |
+|---|---|
+| Migration | 1,112 objects, 0 failures, 1,167 redirects. Design: both logos, Montserrat and Open Sans through the Font Library, the brand CSS, `header_show_site_name` and `theme_google_fonts` set |
+| Report | Every planned page, post, file, event, person, form and record is live; 0 invalid blocks |
+| Links | 1,005 checked; 10 broken, the source's own dial-in numbers written as links, as before |
+| QA | 30 pages at 375, 768 and 1280 px: 0 accessibility rules violated, no sideways scrolling |
+| Post-launch | 1,242 of 1,242 legacy URLs answer as planned. GA4 isn't on dev (the tag is live-only) |
+| Pages (home, About Us, News at 1440 and 375 px) | Brand colours, self-hosted fonts, both logos, no repeated site name, the footer band, icons and two-line hours. No request for the theme's Google fonts, no PHP warnings, no sideways scrolling |
+
+Screenshots: `dist/theme-patches/screenshots/branding/dev-after-*.png`.
 
 ## Local run
 
