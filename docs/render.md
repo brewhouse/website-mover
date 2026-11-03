@@ -18,6 +18,6 @@ The web app and the worker run in the same container (`scripts/render-start.sh`)
 
 ## Notes
 - Targets must be public URLs. The SSRF guard blocks private addresses, and `WM_ALLOW_PRIVATE_HOSTS` stays unset. The local seed on `localhost:8088` can't be reached from Render.
-- Brand files that the CLI reads from `inputs/` aren't in git. Upload them with the job's intake form, or copy them to the disk.
+- Files under `inputs/` aren't in git or in the image. Upload the style guide PDF on the new-job form. A `brand.json` for `wm brand` has to be copied to the disk and run from the Shell.
 - A service with a disk can't run more than one instance, and each deploy has a short downtime.
 - Disk backups: Render snapshots disks daily. Postgres backups depend on the database plan.
