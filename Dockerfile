@@ -36,3 +36,16 @@ COPY --from=web-build /app/apps/web/.next/static ./apps/web/.next/static
 USER node
 EXPOSE 3100
 CMD ["node", "apps/web/server.js"]
+
+# ---- render ----
+# One container running the web app and the worker (scripts/render-start.sh), for hosts like Render
+# where a persistent disk attaches to a single service. Kept last so a plain build (no --target)
+# produces it; docker compose names its targets and is unaffected.
+FROM worker AS render
+USER root
+RUN pnpm --filter @wm/web build \
+ && cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+ENV PORT=3100
+EXPOSE 3100
+# Starts as root only to take ownership of the disk; both processes run as the node user.
+CMD ["/app/scripts/render-start.sh"]

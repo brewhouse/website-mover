@@ -1,0 +1,36 @@
+# Render Blueprint: Website Mover as one web service (web app + queue worker) with a persistent disk
+# for job files, plus a managed Postgres. See docs/render.md.
+databases:
+  - name: website-mover-db
+    plan: basic-256mb
+    databaseName: mover
+    user: mover
+    postgresMajorVersion: "17"
+
+services:
+  - type: web
+    name: website-mover
+    runtime: docker
+    plan: standard            # 2 GB RAM: Chromium, the worker and Next.js share it; disks need a paid plan
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /login
+    disk:
+      name: wm-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: website-mover-db
+          property: connectionString
+      - key: WM_DATA_DIR
+        value: /data
+      - key: WM_TRUST_PROXY
+        value: "1"
+      - key: CREDENTIALS_ENCRYPTION_KEY
+        sync: false             # set it yourself (openssl rand -base64 32) and keep a copy
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
