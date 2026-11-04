@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import * as cheerio from 'cheerio';
-import { escapeHtml, jobPath, readJson, readJsonl, writeJson, type JobInfo, type NavLink, type SiteAnalysis, type SnapshotPage } from '@wm/core';
+import { escapeHtml, jobPath, readJson, readJsonl, sourceKey, writeJson, type JobInfo, type NavLink, type SiteAnalysis, type SnapshotPage } from '@wm/core';
 import { cleanText as clean } from './records/text.js';
 
 /**
@@ -22,8 +22,9 @@ export async function analyzeSite(jobId: string, log: (msg: string) => void = ()
   );
   const site = job.profile === 'bjm' ? bjmSite(html, job.origin) : genericSite(html, job.origin);
   site.siteName = siteName(titles);
+  site.sectionNav = await sectionNav(jobId, snapshot, job.profile);
   await writeJson(jobPath(jobId, 'analyze', 'site.json'), site);
-  log(`Site: ${site.menus.main.length} main menu items, ${site.home.slides.length} homepage slides`);
+  log(`Site: ${site.menus.main.length} main menu items, ${site.home.slides.length} homepage slides, side navigation for ${site.sectionNav.length} sections`);
   return site;
 }
 
@@ -111,6 +112,59 @@ function bjmSite(html: string, origin: string): SiteAnalysis {
   };
 }
 
+/**
+ * The side navigation of every scanned page, merged by section: a section's links are the union of what
+ * its pages list, in the order first seen. BJM pages show the section page (`#lm_main_page`) and its
+ * children (`.lm_sub_page`). On other sites, a side menu (aside, sidebar, sub-nav) is read where it nests
+ * lists (`li > a + ul`); a flat list says nothing about which page is the parent, so it's left out.
+ */
+async function sectionNav(jobId: string, snapshot: SnapshotPage[], profile: string): Promise<NonNullable<SiteAnalysis['sectionNav']>> {
+  const sections = new Map<string, { parent: NavLink; children: NavLink[]; seen: Set<string> }>();
+  const add = (parent: NavLink | null, children: NavLink[]) => {
+    const key = parent?.href && safeKey(parent.href);
+    if (!parent || !key) return;
+    let section = sections.get(key);
+    if (!section) sections.set(key, (section = { parent: { label: parent.label, href: parent.href }, children: [], seen: new Set([key]) }));
+    for (const child of children) {
+      const k = child.href && safeKey(child.href);
+      if (!k || section.seen.has(k)) continue;
+      section.seen.add(k);
+      section.children.push({ label: child.label, href: child.href });
+    }
+  };
+  for (const page of snapshot) {
+    if (page.status !== 200 || !page.html) continue;
+    const html = await readFile(jobPath(jobId, page.html), 'utf8').catch(() => '');
+    // Cheap test first: most of the parse cost is pages without a side menu.
+    if (profile === 'bjm' ? !html.includes('lm_main_page') : !/<aside|sidebar|side-?nav|sub-?nav|section-nav/i.test(html)) continue;
+    const $ = cheerio.load(html);
+    const base = page.finalUrl || page.url;
+    if (profile === 'bjm') {
+      const scope = $('#lm_container').length ? '#lm_container ' : '';
+      add(navLink($(`${scope}#lm_main_page`).first(), base), $(`${scope}a.lm_sub_page`).toArray().map((a) => navLink($(a), base)).filter((l): l is NavLink => !!l));
+    } else {
+      $(SIDE_NAV).find('li').each((_, li) => {
+        const sub = $(li).children('ul, ol').first();
+        if (!sub.length) return;
+        const children = sub.children('li').toArray().map((c) => navLink($(c).children('a').first(), base)).filter((l): l is NavLink => !!l);
+        add(navLink($(li).children('a').first(), base), children);
+      });
+    }
+  }
+  return [...sections.values()].filter((s) => s.children.length).map(({ parent, children }) => ({ parent, children }));
+}
+
+/** Where generic sites put a side menu. */
+const SIDE_NAV = 'aside nav, aside, .sidebar nav, .sidebar, .side-nav, .sidenav, .subnav, .sub-nav, .section-nav, nav[aria-label*="section" i], nav[aria-label*="sub" i]';
+
+function safeKey(url: string): string | null {
+  try {
+    return sourceKey(url);
+  } catch {
+    return null;
+  }
+}
+
 /** Unknown platforms: first <nav> list, footer links, no slides. */
 function genericSite(html: string, origin: string): SiteAnalysis {
   const $ = cheerio.load(html);
@@ -150,6 +204,7 @@ function siteName(titles: string[]): string | null {
  * Phone and email links aren't menu items.
  */
 function navLink(a: cheerio.Cheerio<any>, origin: string): NavLink | null {
+  if (!a.length) return null;
   const href = (a.attr('href') ?? '').trim();
   const label = clean(a.text()) || clean(a.attr('aria-label') ?? '') || clean(a.attr('title') ?? '');
   if (!label || /^(tel|mailto):/i.test(href)) return null;
@@ -170,9 +225,10 @@ function dedupe(items: NavLink[]): NavLink[] {
   return items.filter((item, i) => items.findIndex((o) => o.href === item.href && o.label === item.label) === i);
 }
 
+/** `href` made absolute against an origin ("https://host") or a page URL. */
 function abs(href: string, origin: string): string {
   try {
-    return new URL(href, `${origin}/`).href;
+    return new URL(href, /^https?:\/\/[^/]+$/i.test(origin) ? `${origin}/` : origin).href;
   } catch {
     return href;
   }

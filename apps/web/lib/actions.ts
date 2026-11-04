@@ -17,6 +17,7 @@ import {
   JobBusyError,
   loginBlocked,
   recordLogin,
+  setJobOptions,
   setLiveUrl,
   listRuns,
   listTargets,
@@ -27,6 +28,7 @@ import {
 import { assertPublicUrl } from '@wm/net';
 import { approvePlan, latestPlanVersion, loadDecisions, saveDecisions, type ReviewDecisions } from '@wm/planner';
 import { WpClient } from '@wm/wp-client';
+import { optionsFrom } from '@/components/job-options';
 import { planState } from './job-files';
 import { isHttps, safeNext } from './safe-next';
 import { dbReady, requireUser, SESSION_COOKIE } from './session';
@@ -154,8 +156,9 @@ export async function createJobAction(_: FormState, form: FormData): Promise<For
     await writeFile(jobPath(id, 'inputs', styleGuide), bytes);
   }
 
-  await createJob({ id, sourceUrl: new URL(sourceUrl).origin, profile, targetId, timezone, ga4Id, styleGuide, userId: user.id });
-  await audit(id, user.id, 'job.create', { sourceUrl, profile, targetId, rightsConfirmed: true });
+  const options = optionsFrom(form);
+  await createJob({ id, sourceUrl: new URL(sourceUrl).origin, profile, targetId, timezone, ga4Id, styleGuide, options, userId: user.id });
+  await audit(id, user.id, 'job.create', { sourceUrl, profile, targetId, rightsConfirmed: true, options });
   await enqueueStages(id, ['scan', 'extract', 'analyze', 'plan'], user.id);
   redirect(`/jobs/${id}`);
 }
@@ -192,6 +195,19 @@ export async function runStages(_: FormState, form: FormData): Promise<FormState
   await audit(jobId, user.id, 'run', { stages });
   revalidatePath(`/jobs/${jobId}`);
   return { ok: `Queued: ${stages.join(' → ')}` };
+}
+
+/** The job's options. They take effect from the next plan, which records them (and needs its own approval). */
+export async function saveJobOptions(_: FormState, form: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const jobId = text(form, 'jobId');
+  if (!(await getJob(jobId))) return { error: 'Unknown job.' };
+  const options = optionsFrom(form);
+  await setJobOptions(jobId, options);
+  await audit(jobId, user.id, 'job.options', options);
+  revalidatePath(`/jobs/${jobId}`);
+  const hint = options.incremental ? ' Use “Scan → plan” so the plan sees what was added on the source.' : '';
+  return { ok: `Saved. They apply from the next plan.${hint}` };
 }
 
 /** The site's live address, for the post-launch check (empty: check the target). */

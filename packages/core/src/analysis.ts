@@ -174,6 +174,12 @@ export interface SiteAnalysis {
     /** Links shown with the footer's contact details (e.g. "Staff Module"). Newer than the first M3 analyses. */
     contact?: NavLink[];
   };
+  /**
+   * The side (section) navigation inner pages show: each section page with the links listed under it,
+   * gathered from every scanned page, in source order. The plan can add them to the main menu as
+   * dropdowns (job option "side navigation in the main menu"). Absent in analyses made before it.
+   */
+  sectionNav?: { parent: NavLink; children: NavLink[] }[];
   /** The heading over the `explore` links, verbatim (e.g. "Industry Links"). Newer than the first M3 analyses. */
   exploreHeading?: string | null;
   /** The alt text of the icons beside the footer notices (e.g. "Equal Housing Opportunity"). Newer than the first M3 analyses. */

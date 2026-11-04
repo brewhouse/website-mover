@@ -96,6 +96,16 @@ export function SummaryTab({ plan }: TabProps) {
           </dd>
           <dt className="text-muted">Plan made</dt>
           <dd>{new Date(plan.createdAt).toLocaleString('en-US')}</dd>
+          <dt className="text-muted">Options</dt>
+          <dd>
+            {[
+              plan.options.incremental && `Only new content: ${plan.alreadyMigrated.length} objects already on the target are left as they are`,
+              plan.options.contentOnly && 'Content only: no menus, theme options, homepage, branding or settings',
+              plan.options.sideNavMenu && 'Side navigation added to the main menu',
+            ]
+              .filter(Boolean)
+              .join(' · ') || 'None (full migration)'}
+          </dd>
           {plan.settings.map((s) => (
             <SettingRow key={s.key} label={s.key} value={`${s.from} → ${s.to || '(cleared)'}`} note={s.reason} />
           ))}

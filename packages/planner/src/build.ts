@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import { sourceKey } from '@wm/core';
 import {
   Plan,
+  PlanOptions,
   type PlanCleanup,
+  type PlanExisting,
   type PlanContentType,
   type PlanEvent,
   type PlanForm,
@@ -56,6 +58,8 @@ export interface BuildPlanInput {
   ga4Id?: string;
   /** The brand imported with `wm brand`: the Design section (M3 branding). */
   brand?: BrandInput;
+  /** Job options: incremental, content only, side navigation in the main menu. */
+  options?: Partial<PlanOptions>;
 }
 
 const EXCLUDED = 'Excluded by the reviewer';
@@ -98,6 +102,7 @@ const PLACEHOLDER_TAGLINES = [/\bseed site\b/i, /^just another wordpress site$/i
 
 export function buildPlan(input: BuildPlanInput): Plan {
   const { pages, target, existing } = input;
+  const options = PlanOptions.parse(input.options ?? {});
   const meetings = input.analysis?.meetings;
   const forms = input.analysis?.forms;
   const records = input.analysis?.records;
@@ -128,6 +133,9 @@ export function buildPlan(input: BuildPlanInput): Plan {
     else if (e.template && KEEP_TEMPLATES[e.template]) keep.push({ ...entry, reason: KEEP_TEMPLATES[e.template]! });
     else cleanup.push(entry);
   }
+  // Incremental: the site is live, so nothing on it is demo content. Untagged pages (added by editors
+  // since the migration) stay, and keep their slugs.
+  const spared = options.incremental ? cleanup.splice(0) : [];
 
   // Custom types this plan creates (their URL bases are ours, not reserved by something else).
   const communities = (records?.communities ?? []).filter((c) => pageByKey.has(c.sourceKey) && !excluded.has(c.sourceKey));
@@ -138,7 +146,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const contentTypes: PlanContentType[] = [];
   const ownBases = new Set(communities.length ? ['communities'] : []);
 
-  const keptSlugs = existing.filter((e) => keep.some((k) => k.id === e.id)).map((e) => e.slug);
+  const keptSlugs = existing.filter((e) => keep.some((k) => k.id === e.id) || spared.some((k) => k.id === e.id)).map((e) => e.slug);
   // Old single-segment URLs that will redirect somewhere else (meeting pages merged into events,
   // community pages, table sources) must not be handed out as new slugs: the redirect would win.
   const movedAway = new Set([...meetingList.flatMap((m) => m.sourceKeys), ...communities.map((c) => c.sourceKey), ...tableList.flatMap((t) => t.sourceKeys)]);
@@ -368,7 +376,8 @@ export function buildPlan(input: BuildPlanInput): Plan {
   ]);
   // A page the reviewer switched to a post (or back) is created anew; the earlier object goes too.
   const itemTypes = new Map(items.map((i) => [i.sourceKey, i.type]));
-  for (const [key, e] of ours) {
+  // Incremental plans leave everything already on the target alone.
+  for (const [key, e] of options.incremental ? [] : ours) {
     if (e.job_id !== input.jobId || e.type === 'attachment') continue;
     const switched = itemTypes.has(key) && itemTypes.get(key) !== e.type;
     if (!plannedKeys.has(key) || switched) {
@@ -388,7 +397,8 @@ export function buildPlan(input: BuildPlanInput): Plan {
   for (const p of pages) if (included.has(p.sourceKey)) for (const img of p.images) if (img.alt) alts.set(safeKey(img.src), img.alt);
   const docInfo = new Map((records?.documents ?? []).map((d) => [safeKey(d.url), d]));
   // Files the site structure uses: slide images, and documents that menus, slides and tiles link to.
-  const siteFiles = new Set(input.analysis?.site ? siteHrefs(input.analysis.site).map(safeKey) : []);
+  const sideNav = options.sideNavMenu && !options.contentOnly;
+  const siteFiles = new Set(input.analysis?.site && !options.contentOnly ? siteHrefs(input.analysis.site, sideNav).map(safeKey) : []);
   for (const s of input.analysis?.site?.home.slides ?? []) if (s.image && s.alt) alts.set(safeKey(s.image), s.alt);
   const media: PlanMedia[] = [];
   const byHash = new Map<string, PlanMedia>();
@@ -435,17 +445,20 @@ export function buildPlan(input: BuildPlanInput): Plan {
 
   // Site settings.
   const settings: PlanSetting[] = [];
-  if (input.timezone && target.timezone !== input.timezone) {
+  if (options.contentOnly) {
+    // No site settings.
+  } else if (input.timezone && target.timezone !== input.timezone) {
     settings.push({ key: 'timezone', from: target.timezone || '(UTC offset)', to: input.timezone, reason: 'Event and meeting times are in the organization\'s local time' });
   }
   // The header shows the tagline under the site name (theme change T1). A placeholder one (the seed's,
   // WordPress's default) is cleared; one an editor wrote stays.
-  if (input.analysis?.site && PLACEHOLDER_TAGLINES.some((re) => re.test(target.tagline))) {
+  if (input.analysis?.site && !options.contentOnly && PLACEHOLDER_TAGLINES.some((re) => re.test(target.tagline))) {
     settings.push({ key: 'description', from: target.tagline, to: '', reason: 'The header shows the tagline under the site name, and this one is a placeholder' });
   }
 
-  const site = input.analysis?.site
+  const site = input.analysis?.site && !options.contentOnly
     ? planSite(input.analysis.site, {
+        sideNavMenu: sideNav,
         ga4Id: input.ga4Id,
         origin: input.source.origin,
         keep,
@@ -467,7 +480,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
 
   const siteRedirects: Plan['siteRedirects'] = [];
   const newsPage = keep.find((k) => /News listing/.test(k.reason));
-  if (newsPage?.link) {
+  if (newsPage?.link && !options.contentOnly) {
     const newsPath = new URL(newsPage.link, target.url).pathname;
     // Paths with a page of their own stay: migrated ones, and existing target pages that aren't trashed.
     const trashed = new Set(cleanup.map((c) => c.id));
@@ -476,6 +489,54 @@ export function buildPlan(input: BuildPlanInput): Plan {
     for (const from of FRAMEWORK_NEWS_PATHS) {
       if (from !== newsPath && !taken.has(from)) siteRedirects.push({ from, to: newsPath, reason: 'The framework links here for "All News"; the News page is elsewhere' });
     }
+  }
+
+  // Incremental: everything was planned as usual (so slugs, links and menus agree with what's on the
+  // target), and now what's already there comes out of the plan. It stays listed, so new content and
+  // menus link to it.
+  const alreadyMigrated: PlanExisting[] = [];
+  if (options.incremental) {
+    const settle = <T>(list: T[], key: (t: T) => string, describe: (t: T) => Omit<PlanExisting, 'key' | 'postType' | 'id' | 'path'> & { path: string }) => {
+      const fresh = list.filter((t) => {
+        const e = ours.get(key(t));
+        if (!e) return true;
+        const { path, ...rest } = describe(t);
+        alreadyMigrated.push({ key: key(t), postType: e.type, id: e.id, path: targetPath(e, target.url) ?? path, ...rest });
+        return false;
+      });
+      list.splice(0, list.length, ...fresh);
+    };
+    settle(items, (i) => i.sourceKey, (i) => ({ kind: i.type, path: i.targetPath, from: [pathAndQuery(i.sourceUrl), ...i.redirectFrom] }));
+    settle(events, (e) => e.key, (e) => ({ kind: 'event', path: e.targetPath, from: e.redirectFrom }));
+    settle(people, (p) => p.key, () => ({ kind: 'person', path: '', from: [] }));
+    settle(recordsPlan, (r) => r.sourceKey, (r) => ({ kind: 'record', path: r.targetPath, from: [pathAndQuery(r.sourceUrl), ...r.redirectFrom] }));
+    settle(tables, (t) => `table:${t.key}`, (t) => ({ kind: 'page', path: t.targetPath, from: t.redirectFrom }));
+    // A custom type's listing page lists its entries; one already on the target isn't rebuilt.
+    for (const c of contentTypes) {
+      const e = ours.get(`listing:${c.postType}`);
+      if (!e) continue;
+      alreadyMigrated.push({ key: `listing:${c.postType}`, kind: 'page', postType: e.type, id: e.id, path: targetPath(e, target.url) ?? c.listing.targetPath, from: c.listing.redirectFrom });
+      const added = recordsPlan.filter((r) => r.postType === c.postType).length;
+      if (added) warnings.push(`${added} new ${c.label.toLowerCase()} entries: the "${c.listing.title}" page already on the target isn't rebuilt, so add them to it by hand.`);
+    }
+    contentTypes.splice(0, contentTypes.length, ...contentTypes.filter((c) => recordsPlan.some((r) => r.postType === c.postType) || !ours.has(`listing:${c.postType}`)));
+    // Files: those already uploaded are linked to; new ones go up only if new content uses them.
+    const fresh = new Set([...items.map((i) => i.sourceKey), ...events.flatMap((e) => e.sourceKeys), ...recordsPlan.map((r) => r.sourceKey), ...people.map((p) => p.pageKey), 'site', 'reviewer']);
+    let unused = 0;
+    settle(media, (m) => m.sourceKey, (m) => ({ kind: m.type, path: m.redirectFrom[0] ?? '', from: m.redirectFrom }));
+    media.splice(0, media.length, ...media.filter((m) => m.usedBy.some((k) => fresh.has(k)) || (unused++, false)));
+    if (unused) warnings.push(`${unused} files that only content already on the target uses (it changed on the source since) aren't uploaded: incremental runs don't update existing content.`);
+    // Forms live on pages; those on pages already migrated are there too.
+    planForms.splice(0, planForms.length, ...planForms.filter((f) => fresh.has(f.pageKey)));
+    warnings.unshift(
+      `Incremental: ${alreadyMigrated.length} objects already on the target are left exactly as they are (changes to them on the source are not copied). Nothing is trashed.`,
+      ...(spared.length ? [`Incremental: ${spared.length} items on the target that no migration created (e.g. added by editors) are kept.`] : []),
+    );
+  }
+  if (options.contentOnly) {
+    warnings.unshift('Content only: menus, theme options, homepage fields, branding, site settings and framework redirects are left as they are on the target.');
+    if (input.timezone && target.timezone !== input.timezone) warnings.push(`Content only: the target's timezone (${target.timezone || 'UTC offset'}) isn't changed to ${input.timezone}; event times are read in the target's timezone.`);
+    if (options.sideNavMenu) warnings.push('"Side navigation in the main menu" has no effect with "Content only": menus are left as they are.');
   }
 
   const categories = [...new Set(items.flatMap((i) => i.categories))].sort();
@@ -492,7 +553,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
   for (const f of planForms) if (f.sensitive.length || f.action === 'flag') warnings.push(`Form "${f.title}": ${f.reason}`);
   if (!target.redirection) warnings.push('Redirection is not active on the target: redirects are written to redirects.csv only.');
   if (decisions) warnings.push(...staleDecisions(decisions, input, cleanup, keep));
-  const design = input.brand ? planDesign(input.brand) : null;
+  const design = input.brand && !options.contentOnly ? planDesign(input.brand) : null;
   if (design) warnings.push(...design.warnings);
 
   return Plan.parse({
@@ -516,8 +577,10 @@ export function buildPlan(input: BuildPlanInput): Plan {
     documentTypes,
     settings,
     site,
-    design: design?.design ?? null,
+    design: options.contentOnly ? null : (design?.design ?? null),
     decisions: decisions ?? null,
+    options,
+    alreadyMigrated,
     siteRedirects,
     cleanup,
     keep,
@@ -559,6 +622,8 @@ const NOTICE_ICONS: [RegExp, string][] = [
 ];
 
 interface SiteContext {
+  /** Add the source's side navigation to the main menu as dropdowns. */
+  sideNavMenu?: boolean;
   ga4Id?: string;
   origin: string;
   keep: Plan['keep'];
@@ -596,6 +661,12 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
 
   const dropped: string[] = [];
   const headings: string[] = [];
+  let main = site.menus.main;
+  if (ctx.sideNavMenu) {
+    if (!site.sectionNav) ctx.warnings.push('Side navigation in the main menu: this analysis predates side navigation. Run "Analyze → plan" (or "Scan → plan") to read it.');
+    else if (!site.sectionNav.length) ctx.warnings.push('Side navigation in the main menu: the source pages show no side navigation the tool can read.');
+    else main = withSectionNav(main, site.sectionNav, ctx.warnings);
+  }
   // Every framework menu is planned, empty ones included, so none keeps the seed's demo links.
   const menus = MENUS.map(([name, from]) => {
     const items: PlanMenuItem[] = [];
@@ -615,7 +686,7 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
       for (const child of link.children ?? []) add(child, index);
     };
     // `contact` is newer than the first M3 analyses.
-    for (const link of site.menus[from] ?? []) add(link, null);
+    for (const link of (from === 'main' ? main : site.menus[from]) ?? []) add(link, null);
     return { name, items };
   });
   if (dropped.length) ctx.warnings.push(`Menu links to content that isn't migrated were left out: ${dropped.join('; ')}`);
@@ -679,11 +750,57 @@ function staleDecisions(d: ReviewDecisions, input: BuildPlanInput, cleanup: Plan
   return stale.length ? [`Reviewer decisions that no longer match anything (ignored): ${[...new Set(stale)].join(', ')}`] : [];
 }
 
-/** Every URL the site structure points at: menu links, slide images and links, homepage tiles. */
-function siteHrefs(site: SiteAnalysis): string[] {
+/** Main menu depth with the side navigation added: top level plus two dropdown levels. */
+export const SIDE_NAV_MAX_DEPTH = 3;
+
+/**
+ * The main menu with the source's side navigation added as dropdowns. Breadth first from the menu as
+ * it is: each item gets the links its section's side menu lists, down to SIDE_NAV_MAX_DEPTH levels. A page
+ * appears once: links already in the menu (e.g. a section the side menu lists under "About Us" but the
+ * main menu has at the top level) aren't added again, and the shallowest place wins.
+ */
+export function withSectionNav(main: NavLink[], sections: NonNullable<SiteAnalysis['sectionNav']>, warnings: string[] = []): NavLink[] {
+  const key = (href: string) => (href ? safeKey(href) : '');
+  const childrenOf = new Map(sections.map((s) => [key(s.parent.href), s.children]));
+  const clone = (l: NavLink): NavLink => ({ label: l.label, href: l.href, ...(l.children ? { children: l.children.map(clone) } : {}) });
+  const menu = main.map(clone);
+  const seen = new Set<string>();
+  const mark = (links: NavLink[]) => links.forEach((l) => (l.href && seen.add(key(l.href)), mark(l.children ?? [])));
+  mark(menu);
+  let added = 0;
+  const tooDeep: string[] = [];
+  for (let level: { link: NavLink; depth: number }[] = menu.map((link) => ({ link, depth: 1 })); level.length; ) {
+    const next: typeof level = [];
+    for (const { link, depth } of level) {
+      for (const child of link.children ?? []) next.push({ link: child, depth: depth + 1 });
+      const kids = link.href ? childrenOf.get(key(link.href)) ?? [] : [];
+      for (const kid of kids) {
+        const k = key(kid.href);
+        if (!k || seen.has(k)) continue;
+        if (depth >= SIDE_NAV_MAX_DEPTH) {
+          tooDeep.push(`"${kid.label}" (under "${link.label}")`);
+          continue;
+        }
+        seen.add(k);
+        const item: NavLink = { label: kid.label, href: kid.href };
+        (link.children ??= []).push(item);
+        next.push({ link: item, depth: depth + 1 });
+        added++;
+      }
+    }
+    level = next;
+  }
+  warnings.push(`Side navigation in the main menu: ${added} links added as dropdowns.`);
+  if (tooDeep.length) warnings.push(`Side navigation links below the main menu's ${SIDE_NAV_MAX_DEPTH} levels are left out: ${[...new Set(tooDeep)].join('; ')}`);
+  return menu;
+}
+
+/** Every URL the site structure points at: menu links (with the side navigation, when it's added), slide images and links, homepage tiles. */
+function siteHrefs(site: SiteAnalysis, sideNav = false): string[] {
   const walk = (links: NavLink[]): string[] => links.flatMap((l) => [l.href, ...walk(l.children ?? [])]);
   return [
     ...Object.values(site.menus).flatMap(walk),
+    ...(sideNav ? (site.sectionNav ?? []).flatMap((s) => [s.parent.href, ...walk(s.children)]) : []),
     ...site.home.slides.flatMap((s) => [s.image ?? '', s.link ?? '']),
     ...walk(site.home.buttons ?? []),
   ].filter(Boolean);
@@ -708,6 +825,16 @@ function fallbackName(key: string, alt: string | undefined, contentType: string)
   const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/bmp': 'bmp', 'image/webp': 'webp', 'application/pdf': 'pdf' }[contentType] ?? 'bin';
   const base = (alt && wpSlug(alt, 60)) || wpSlug(key.split('/').pop()!.replace(/\.\w+(?=\?|$)/, '').replace(/[?&=]/g, '-'), 60);
   return `${base}.${ext}`;
+}
+
+/** Root-relative URL of an object on the target, from its permalink. */
+function targetPath(e: TargetEntity, base: string): string | null {
+  if (!e.link) return null;
+  try {
+    return new URL(e.link, base).pathname;
+  } catch {
+    return null;
+  }
 }
 
 function safeKey(url: string): string {

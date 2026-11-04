@@ -5,7 +5,9 @@
  *   wm extract --job jha
  *   wm analyze --job jha
  *   wm brand   --job jha --file inputs/jha/style-guide/brand.json   the reviewed brand file: logos, fonts (docs/m3/branding.md)
- *   wm plan    --job jha [--target local] [--timezone America/New_York]
+ *   wm plan    --job jha [--target local] [--timezone America/New_York] [--incremental] [--content-only] [--side-nav-menu]
+ *              --incremental: only content not on the target yet; --content-only: no menus, theme options,
+ *              homepage or branding; --side-nav-menu: the source's side navigation as main-menu dropdowns
  *   wm approve --job jha --by "Name"
  *   wm execute --job jha [--target local]
  *   wm report  --job jha [--target local]
@@ -56,6 +58,9 @@ const { positionals, values } = parseArgs({
     confirm: { type: 'string' },
     approver: { type: 'boolean', default: false },
     revoke: { type: 'boolean', default: false },
+    incremental: { type: 'boolean', default: false },
+    'content-only': { type: 'boolean', default: false },
+    'side-nav-menu': { type: 'boolean', default: false },
   },
 });
 const [command, sub] = positionals;
@@ -74,6 +79,7 @@ if (command && (STAGES as string[]).includes(command)) {
     timezone: values.timezone,
     ga4Id: values.ga4 ?? null,
     liveUrl: values.base ?? null,
+    options: { incremental: values.incremental, contentOnly: values['content-only'], sideNavMenu: values['side-nav-menu'] },
     log: console.log,
   });
   console.log(summary);

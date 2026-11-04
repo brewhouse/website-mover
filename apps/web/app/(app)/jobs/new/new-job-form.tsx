@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
+import { OptionFields } from '@/components/job-options';
 import { Button, Field, inputClass, Notice } from '@/components/ui';
 import { createJobAction, type FormState } from '@/lib/actions';
 
@@ -48,6 +49,7 @@ export function NewJobForm({ targets, timezones }: { targets: { id: number; labe
       <Field label="Style guide PDF" htmlFor="styleGuide" hint="Optional now; colours, fonts and logo come from it (up to 50 MB).">
         <input id="styleGuide" name="styleGuide" type="file" accept="application/pdf" className="text-sm" />
       </Field>
+      <OptionFields values={v} />
       <label className="flex items-start gap-2 text-sm">
         <input type="checkbox" name="rights" required defaultChecked={v.rights === 'on'} className="mt-0.5" />
         <span>We have the client’s permission to copy this site’s content into the target.</span>

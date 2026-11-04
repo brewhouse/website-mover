@@ -261,6 +261,27 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   const links = LinkMap.forPlan(plan);
   const images = new Map<string, { id: number; url: string }>();
   const mediaByKey = new Map<string, RunEntity>();
+  // Incremental plans: content an earlier migration put on the target. New content, menus and homepage
+  // links point at it, found again by source key (its ID and URL as they are now).
+  const prior = new Map<string, RunEntity & { postType: string }>();
+  for (const p of plan.alreadyMigrated) {
+    const e = ours.get(p.key);
+    if (!e) {
+      log(`  ! ${p.key} was on the target when planned but isn't now: links to it stay as planned`);
+      continue;
+    }
+    const path = (e.link && safePath(e.link, info.url)) || p.path;
+    const entity = { kind: p.kind, id: e.id, path, action: 'updated' as const, warnings: [], postType: e.type };
+    prior.set(p.key, entity);
+    if (p.kind === 'person') continue;
+    links.set(p.key, path);
+    links.addPaths(p.from, path);
+    if (p.kind === 'image' || p.kind === 'document') {
+      for (const key of [p.key, ...p.from.map((r) => safeKey(new URL(r, plan.source.origin).href))]) mediaByKey.set(key, entity);
+      if (p.kind === 'image') images.set(path, { id: e.id, url: path });
+    }
+  }
+  if (prior.size) log(`Already on the target (left as they are, linked to): ${prior.size}`);
   const alts = imageAlts(pages);
   log(`Media: ${plan.media.length} files`);
   await mapLimit(plan.media, 3, async (m) => {
@@ -360,7 +381,8 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   }
   for (const ct of plan.contentTypes) {
     const entries = plan.records.filter((r) => r.postType === ct.postType).sort((a, b) => a.title.localeCompare(b.title));
-    docs.push({
+    // Incremental: a listing page already on the target lists the earlier entries; it isn't rebuilt (the plan warns).
+    if (!prior.has(`listing:${ct.postType}`)) docs.push({
       key: `listing:${ct.postType}`,
       kind: 'page',
       route: '/wp/v2/pages',
@@ -505,6 +527,7 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   // 9b. Site structure: title, theme options, homepage fields, menus (after everything they link to exists).
   if (plan.site) {
     state.site = await applySite(client, plan, state, {
+      prior,
       frontPage: existing.find((e) => e.front_page)?.id ?? null,
       fieldGroups: schema.acf.field_groups,
       mediaId,
@@ -618,6 +641,8 @@ async function applySite(
   plan: Plan,
   state: RunState,
   ctx: {
+    /** Incremental: content already on the target (with its post type), for menu and homepage links. */
+    prior: Map<string, RunEntity & { postType: string }>;
     frontPage: number | null;
     /** The seed's field groups (the templates' fields, their types and row limits). */
     fieldGroups: SeedGroup[];
@@ -656,7 +681,7 @@ async function applySite(
     await attempt('homepage fields', async () => {
       const groups = await restGroups(client, homeGroups, (msg) => warnings.push(msg));
       const values = homeFieldValues(groups.flatMap((g) => g.fields), site.home, {
-        link: (key, url) => (key && state.entities[key]?.path) || url,
+        link: (key, url) => (key && (state.entities[key] ?? ctx.prior.get(key))?.path) || url,
         mediaId: ctx.mediaId,
         html: (html) => {
           const { html: rewritten, unresolved } = ctx.html(html);
@@ -704,11 +729,12 @@ async function applySite(
       }
       const ids: number[] = [];
       for (const [order, item] of menu.items.entries()) {
-        const entity = item.key ? state.entities[item.key] : undefined;
+        const earlier = item.key ? ctx.prior.get(item.key) : undefined;
+        const entity = (item.key ? state.entities[item.key] : undefined) ?? earlier;
         // Link to the object itself where it's a page, post or entry, so the menu follows slug changes.
         const target =
           entity && (entity.kind === 'page' || entity.kind === 'post' || entity.kind === 'record')
-            ? { type: 'post_type', object: ctx.postTypeOf(item.key!), object_id: entity.id }
+            ? { type: 'post_type', object: earlier && entity === earlier ? earlier.postType : ctx.postTypeOf(item.key!), object_id: entity.id }
             : { type: 'custom', url: entity?.path || item.url };
         const created = await client.post<{ id: number }>('/wp/v2/menu-items', {
           title: item.title,
@@ -1015,6 +1041,15 @@ function postDate(date: string | null): { date?: string; date_gmt?: string } {
 
 async function fileSha256(file: string): Promise<string> {
   return createHash('sha256').update(await readFile(file)).digest('hex');
+}
+
+/** Root-relative path of a target URL. */
+function safePath(url: string, base: string): string | null {
+  try {
+    return new URL(url, base).pathname;
+  } catch {
+    return null;
+  }
 }
 
 function safeKey(url: string): string {

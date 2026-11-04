@@ -68,6 +68,7 @@ async function handle(runId: number): Promise<void> {
       timezone: job.timezone,
       ga4Id: job.ga4Id,
       liveUrl: job.liveUrl,
+      options: job.options,
       log,
     });
     log(`Finished ${run.stage}`);

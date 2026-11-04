@@ -40,6 +40,18 @@ export async function targetCredentials(id: number): Promise<{ name: string; bas
 
 // ---------- Jobs ----------
 
+/** How a job migrates (see PlanOptions in @wm/planner, which the plan records). */
+export interface JobOptions {
+  /** Only content that isn't on the target yet; nothing already there is changed or trashed. */
+  incremental: boolean;
+  /** Content only: no menus, theme options, homepage fields, branding or site settings. */
+  contentOnly: boolean;
+  /** Add the source's side navigation to the main menu as dropdowns. */
+  sideNavMenu: boolean;
+}
+
+export const NO_OPTIONS: JobOptions = { incremental: false, contentOnly: false, sideNavMenu: false };
+
 export interface Job {
   id: string;
   sourceUrl: string;
@@ -51,12 +63,13 @@ export interface Job {
   styleGuide: string | null;
   /** The live address, once launched (post-launch check). */
   liveUrl: string | null;
+  options: JobOptions;
   createdBy: string;
   createdAt: Date;
 }
 
 const jobSelect = `select j.id, j.source_url as "sourceUrl", j.profile, j.target_id as "targetId", t.name as "targetName", j.timezone,
-  j.ga4_id as "ga4Id", j.style_guide as "styleGuide", j.live_url as "liveUrl", u.name as "createdBy", j.created_at as "createdAt"
+  j.ga4_id as "ga4Id", j.style_guide as "styleGuide", j.live_url as "liveUrl", j.options, u.name as "createdBy", j.created_at as "createdAt"
   from jobs j join targets t on t.id = j.target_id join users u on u.id = j.created_by`;
 
 export async function createJob(j: {
@@ -67,25 +80,34 @@ export async function createJob(j: {
   timezone: string | null;
   ga4Id: string | null;
   styleGuide: string | null;
+  options?: JobOptions;
   userId: number;
 }): Promise<void> {
   await db().query(
-    `insert into jobs (id, source_url, profile, target_id, timezone, ga4_id, style_guide, rights_confirmed_by, created_by)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
-    [j.id, j.sourceUrl, j.profile, j.targetId, j.timezone, j.ga4Id, j.styleGuide, j.userId],
+    `insert into jobs (id, source_url, profile, target_id, timezone, ga4_id, style_guide, rights_confirmed_by, created_by, options)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)`,
+    [j.id, j.sourceUrl, j.profile, j.targetId, j.timezone, j.ga4Id, j.styleGuide, j.userId, JSON.stringify(j.options ?? NO_OPTIONS)],
   );
+}
+
+export async function setJobOptions(id: string, options: JobOptions): Promise<void> {
+  await db().query('update jobs set options = $2 where id = $1', [id, JSON.stringify(options)]);
 }
 
 export async function setLiveUrl(id: string, liveUrl: string | null): Promise<void> {
   await db().query('update jobs set live_url = $2 where id = $1', [id, liveUrl]);
 }
 
+/** Options stored before a field existed read as off. */
+const withOptions = (j: Job): Job => ({ ...j, options: { ...NO_OPTIONS, ...(j.options ?? {}) } });
+
 export async function getJob(id: string): Promise<Job | null> {
-  return (await db().query<Job>(`${jobSelect} where j.id = $1`, [id])).rows[0] ?? null;
+  const job = (await db().query<Job>(`${jobSelect} where j.id = $1`, [id])).rows[0];
+  return job ? withOptions(job) : null;
 }
 
 export async function listJobs(): Promise<(Job & { lastRun: StageRun | null })[]> {
-  const jobs = (await db().query<Job>(`${jobSelect} order by j.created_at desc`)).rows;
+  const jobs = (await db().query<Job>(`${jobSelect} order by j.created_at desc`)).rows.map(withOptions);
   const runs = (await db().query<StageRun>(`select distinct on (job_id) ${runCols} from stage_runs order by job_id, id desc`)).rows;
   return jobs.map((j) => ({ ...j, lastRun: runs.find((r) => r.jobId === j.id) ?? null }));
 }

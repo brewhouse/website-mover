@@ -1,8 +1,10 @@
 'use client';
 
 import { useActionState } from 'react';
+import type { JobOptions } from '@wm/db';
+import { OptionFields } from '@/components/job-options';
 import { Button, inputClass, Notice } from '@/components/ui';
-import { rollback, runStages, saveLiveUrl, type FormState } from '@/lib/actions';
+import { rollback, runStages, saveJobOptions, saveLiveUrl, type FormState } from '@/lib/actions';
 
 export interface RunChoice {
   run: string;
@@ -50,6 +52,26 @@ export function LiveUrlForm({ jobId, liveUrl }: { jobId: string; liveUrl: string
         <input id="liveUrl" name="liveUrl" type="url" placeholder="https://www.example.org" defaultValue={state.values?.liveUrl ?? liveUrl ?? ''} className={inputClass} />
         <Button size="sm" type="submit" disabled={pending}>
           Save
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** The job's options (incremental, content only, side navigation in the main menu). */
+export function JobOptionsForm({ jobId, options, planned }: { jobId: string; options: JobOptions; planned: JobOptions | null }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(saveJobOptions, {});
+  const differs = planned && (Object.keys(options) as (keyof JobOptions)[]).some((k) => options[k] !== planned[k]);
+  return (
+    <form action={action} className="grid gap-3 p-4">
+      {state.error && <Notice tone="bad">{state.error}</Notice>}
+      {state.ok && <Notice tone="ok">{state.ok}</Notice>}
+      {differs && !state.ok && <Notice tone="warn">The latest plan was made with different options: plan again for these to apply.</Notice>}
+      <input type="hidden" name="jobId" value={jobId} />
+      <OptionFields values={options} />
+      <div>
+        <Button size="sm" type="submit" disabled={pending}>
+          Save options
         </Button>
       </div>
     </form>

@@ -10,6 +10,13 @@ export function renderPlan(plan: Plan): string {
   out.push(`# Migration plan: ${plan.jobId} v${plan.version}`, '');
   out.push(`Created ${plan.createdAt}. Source ${plan.source.origin} (${plan.source.profile}). Target ${plan.target.name}: ${plan.target.url} (WordPress ${plan.target.wordpress}, theme ${plan.target.theme}).`, '');
   out.push('Approve with `wm approve --job ' + plan.jobId + ' --by "<your name>"`. Execution follows this exact plan.', '');
+  const o = plan.options;
+  const on = [
+    o.incremental && `**only new content** (${plan.alreadyMigrated.length} objects already on the target are left as they are; nothing is trashed)`,
+    o.contentOnly && '**content only** (no menus, theme options, homepage, branding or site settings)',
+    o.sideNavMenu && '**side navigation in the main menu**',
+  ].filter(Boolean);
+  out.push(`Options: ${on.length ? on.join('; ') : 'none (full migration)'}.`, '');
 
   out.push('## Summary', '', '| | Count |', '|---|---|');
   out.push(`| Pages | ${e.pages} |`, `| News posts | ${e.posts} |`, `| Documents | ${e.documents} (${mb(plan.media.filter((m) => m.type === 'document').reduce((n, m) => n + m.bytes, 0))}) |`);

@@ -273,6 +273,37 @@ export const ReviewDecisions = z.object({
 });
 export type ReviewDecisions = z.infer<typeof ReviewDecisions>;
 
+/**
+ * How the job migrates (job options, chosen on the intake form or the job page). They're part of the
+ * plan, so the approval covers them and execution follows the plan, not the job's current settings.
+ */
+export const PlanOptions = z.object({
+  /**
+   * Only content that isn't on the target yet: anything without an object tagged with its source key
+   * (by any job). What's there already is left exactly as it is, and nothing is trashed.
+   */
+  incremental: z.boolean().default(false),
+  /** Content only: no menus, theme options, homepage fields, branding, site settings or framework redirects. */
+  contentOnly: z.boolean().default(false),
+  /** Add the source's side (section) navigation to the main menu as dropdowns. */
+  sideNavMenu: z.boolean().default(false),
+});
+export type PlanOptions = z.infer<typeof PlanOptions>;
+
+/** Content an earlier migration put on the target, which an incremental plan leaves alone but links to. */
+export const PlanExisting = z.object({
+  key: z.string(),
+  kind: z.enum(['page', 'post', 'record', 'event', 'person', 'document', 'image']),
+  /** Post type on the target (menus link pages, posts and entries as objects). */
+  postType: z.string(),
+  id: z.number(),
+  /** Root-relative URL on the target. */
+  path: z.string(),
+  /** Source URLs (path + query) that lead to it, so new content links there. */
+  from: z.array(z.string()),
+});
+export type PlanExisting = z.infer<typeof PlanExisting>;
+
 export const Plan = z.object({
   schema: z.literal('website-mover/plan@1'),
   jobId: z.string(),
@@ -303,6 +334,9 @@ export const Plan = z.object({
   design: PlanDesign.nullable().default(null),
   /** The reviewer decisions this version applied. */
   decisions: ReviewDecisions.nullable().default(null),
+  options: PlanOptions.default({ incremental: false, contentOnly: false, sideNavMenu: false }),
+  /** Incremental plans: content already on the target, left as it is (empty otherwise). */
+  alreadyMigrated: z.array(PlanExisting).default([]),
   /** Redirects for paths the framework itself links to (not legacy URLs), e.g. its hard-coded news links. */
   siteRedirects: z.array(z.object({ from: z.string(), to: z.string(), reason: z.string() })).default([]),
   cleanup: z.array(PlanCleanup),

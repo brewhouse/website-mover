@@ -134,4 +134,13 @@ create index login_attempts_email on login_attempts (email, at);
 create index login_attempts_ip on login_attempts (ip, at);
 `,
   },
+  {
+    name: '006_job_options.sql',
+    sql: `
+-- How a job migrates: incremental (only content not on the target yet), content only (no menus, theme
+-- options, homepage or branding), and the side navigation added to the main menu. The plan stage reads
+-- them; each plan records the options it was made with.
+alter table jobs add column options jsonb not null default '{}';
+`,
+  },
 ];

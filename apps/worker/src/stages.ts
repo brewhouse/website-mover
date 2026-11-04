@@ -21,7 +21,7 @@ import {
 import { scanSite } from '@wm/crawler';
 import { extractJob } from '@wm/extractor';
 import { analyzeForms, analyzeMeetings, analyzeRecords, analyzeSite } from '@wm/analyzer';
-import { buildPlan, latestPlanVersion, loadDecisions, savePlan, type BrandInput } from '@wm/planner';
+import { buildPlan, latestPlanVersion, loadDecisions, savePlan, type BrandInput, type PlanOptions } from '@wm/planner';
 import { BrandFile, type BrandManifest } from '@wm/styleguide/brand';
 import { buildReport, executePlan, probeTarget, rollbackJob, runPostLaunch } from '@wm/executor';
 import { runQa } from '@wm/qa';
@@ -41,6 +41,8 @@ export interface StageContext {
   ga4Id?: string | null;
   /** The live address for the post-launch check (else the target). */
   liveUrl?: string | null;
+  /** Job options the plan applies (incremental, content only, side navigation in the main menu). */
+  options?: Partial<PlanOptions>;
   log: (message: string) => void;
 }
 
@@ -114,9 +116,11 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
         ga4Id: ctx.ga4Id ?? undefined,
         brand,
         decisions: await loadDecisions(jobId),
+        options: ctx.options,
       });
       const sha = await savePlan(plan);
-      log(`Plan v${plan.version} (${sha.slice(0, 12)})`);
+      const on = Object.entries(plan.options).filter(([, v]) => v).map(([k]) => k);
+      log(`Plan v${plan.version} (${sha.slice(0, 12)})${on.length ? `, options: ${on.join(', ')}` : ''}`);
       for (const w of plan.warnings) log(`  ! ${w}`);
       return { version: plan.version, sha256: sha, expected: plan.expected, warnings: plan.warnings.length };
     }

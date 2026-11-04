@@ -31,4 +31,8 @@ Internal tool that migrates a website into a blank WordPress "seed" site: scans 
   - A job's GA4 ID goes with the job (intake form; CLI `--ga4` on plan and postlaunch), never from the environment.
   - Branding from a brand file: `wm brand --job … --file inputs/<client>/style-guide/brand.json`, then re-plan.
   - Behind a reverse proxy, set `WM_TRUST_PROXY=1` so login limits use the client's address.
+- Job options (`jobs.options`, intake form and the job page's Options card; CLI `wm plan --incremental --content-only --side-nav-menu`). Each plan records them in `plan.options`, so the approval covers them and execution reads the plan, not the job:
+  - **Incremental:** plans as usual, then drops everything whose source key is already tagged on the target (by any job) into `plan.alreadyMigrated`. The executor links new content and menus to those objects but never writes them, and nothing is trashed. "Already there" comes from the target itself (`_wm_source_key`), so it works for a job that a different machine migrated first. Items trashed on the target aren't listed by the bridge, so they count as new.
+  - **Content only:** no `site`, `design`, `settings` or `siteRedirects` in the plan. Content types, forms, content redirects and demo-content cleanup still run.
+  - **Side nav in main menu:** the analyzer reads every page's side menu into `site.sectionNav` (BJM: `#lm_main_page` + `.lm_sub_page`), and the planner merges it into the Main Menu breadth-first, each page once, at most `SIDE_NAV_MAX_DEPTH` (3) levels.
 - SSRF guard (`@wm/net`): the tool refuses private addresses. `.env` sets `WM_ALLOW_PRIVATE_HOSTS=localhost` for the local seed (development only).

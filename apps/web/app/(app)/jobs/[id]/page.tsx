@@ -4,7 +4,7 @@ import { LiveLog } from '@/components/live-log';
 import { RunStatus } from '@/components/run-status';
 import { Badge, Card, Empty, LinkButton, PageHeader, when, type Tone } from '@/components/ui';
 import { loadReport, planState, stagesOnDisk } from '@/lib/job-files';
-import { LiveUrlForm, RollbackForm, RunButtons, type RunChoice } from './run-buttons';
+import { JobOptionsForm, LiveUrlForm, RollbackForm, RunButtons, type RunChoice } from './run-buttons';
 import { requireUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -64,6 +64,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         subtitle={
           <>
             {job.sourceUrl} → {job.targetName} · {job.profile} profile{job.timezone ? ` · ${job.timezone}` : ''}
+            {job.options.incremental ? ' · incremental' : ''}
+            {job.options.contentOnly ? ' · content only' : ''}
+            {job.options.sideNavMenu ? ' · side nav in main menu' : ''}
           </>
         }
         actions={
@@ -104,6 +107,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         <div className="grid content-start gap-6">
           <Card title="Run">
             <RunButtons jobId={id} choices={choices} busy={!!active} />
+          </Card>
+          <Card title="Options">
+            <JobOptionsForm jobId={id} options={job.options} planned={plan?.plan.options ?? null} />
           </Card>
           <Card title="Live address">
             <LiveUrlForm jobId={id} liveUrl={job.liveUrl} />
@@ -188,6 +194,8 @@ function describe(action: string, detail: unknown): string {
       return `ran ${(d.stages as string[]).join(' → ')}`;
     case 'plan.approve':
       return `approved plan v${d.version}`;
+    case 'job.options':
+      return `set options: ${Object.entries(d).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'}`;
     default:
       return action.startsWith('decision.') ? `${action.slice(9)} ${d.key ?? d.id ?? ''}${d.slug !== undefined ? ` → ${d.slug ?? '(source slug)'}` : ''}${d.type !== undefined ? ` → ${d.type ?? '(as source)'}` : ''}` : action;
   }
