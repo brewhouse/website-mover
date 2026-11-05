@@ -101,7 +101,7 @@ export async function snapshotBefore(client: WpClient, jobId: string, plan: Plan
   }
   const existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
   const menus: BeforeState['menus'] = [];
-  for (const m of plan.site?.menus ?? []) {
+  for (const m of plannedMenus(plan)) {
     const menu = existingMenus.find((e) => e.name === m.name);
     menus.push({ name: m.name, existed: !!menu, items: menu ? await menuItems(client, menu.id) : [] });
   }
@@ -139,8 +139,8 @@ async function addToSnapshot(client: WpClient, jobId: string, plan: Plan, home: 
     snapshot.brandCss = await currentBrandCss(client);
     changed = true;
   }
-  // Menus a later plan adds (e.g. the Footer Contact Menu), as they are now.
-  const newMenus = (plan.site?.menus ?? []).filter((m) => !snapshot.menus.some((s) => s.name === m.name));
+  // Menus a later plan adds (e.g. the Footer Contact Menu, side navigation menus), as they are now.
+  const newMenus = plannedMenus(plan).filter((m) => !snapshot.menus.some((s) => s.name === m.name));
   if (newMenus.length) {
     const existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
     for (const m of newMenus) {
@@ -215,6 +215,11 @@ async function fillPageState(
     changed = true;
   }
   return changed;
+}
+
+/** Every menu the plan replaces: the framework's named menus and the side navigation menus. */
+function plannedMenus(plan: Plan): { name: string }[] {
+  return [...(plan.site?.menus ?? []), ...(plan.sideMenus ?? [])];
 }
 
 async function menuItems(client: WpClient, menuId: number): Promise<MenuItemSnapshot[]> {

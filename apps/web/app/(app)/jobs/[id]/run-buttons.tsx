@@ -58,10 +58,10 @@ export function LiveUrlForm({ jobId, liveUrl }: { jobId: string; liveUrl: string
   );
 }
 
-/** The job's options (incremental, content only, side navigation in the main menu). */
+/** The job's options (incremental, content only, side navigation in the main menu or on pages). */
 export function JobOptionsForm({ jobId, options, planned }: { jobId: string; options: JobOptions; planned: JobOptions | null }) {
   const [state, action, pending] = useActionState<FormState, FormData>(saveJobOptions, {});
-  const differs = planned && (Object.keys(options) as (keyof JobOptions)[]).some((k) => options[k] !== planned[k]);
+  const differs = planned && (Object.keys(options) as (keyof JobOptions)[]).some((k) => !!options[k] !== !!planned[k]);
   return (
     <form action={action} className="grid gap-3 p-4">
       {state.error && <Notice tone="bad">{state.error}</Notice>}

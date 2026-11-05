@@ -17,6 +17,11 @@ export const OPTION_FIELDS: { name: keyof JobOptions; label: string; hint: strin
     label: 'Add the side navigation to the main menu',
     hint: 'The source’s left-hand section menus become dropdowns under the matching main menu items (up to three levels). A page appears once in the menu. Has no effect with “Content only”.',
   },
+  {
+    name: 'sideNavPages',
+    label: 'Side navigation on pages',
+    hint: 'Each left-hand section menu on the source becomes a WordPress menu (“Side Navigation: …”, under Appearance → Menus), shown beside every page it links to, as on the source. With “Only new content” and “Content only”, the menus are all a run writes to pages already migrated: their content stays as it is. Needs theme change T22 on the target to show.',
+  },
 ];
 
 export function OptionFields({ values }: { values: Partial<Record<keyof JobOptions, boolean | string>> }) {
@@ -38,5 +43,5 @@ export function OptionFields({ values }: { values: Partial<Record<keyof JobOptio
 
 /** The options a form submitted. */
 export function optionsFrom(form: FormData): JobOptions {
-  return { incremental: form.get('incremental') === 'on', contentOnly: form.get('contentOnly') === 'on', sideNavMenu: form.get('sideNavMenu') === 'on' };
+  return { incremental: form.get('incremental') === 'on', contentOnly: form.get('contentOnly') === 'on', sideNavMenu: form.get('sideNavMenu') === 'on', sideNavPages: form.get('sideNavPages') === 'on' };
 }

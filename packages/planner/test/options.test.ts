@@ -193,3 +193,58 @@ describe('side navigation in the main menu', () => {
     expect(plan({ sideNavMenu: true }, { pages }).warnings.join('\n')).toMatch(/predates side navigation/);
   });
 });
+
+describe('side navigation on pages', () => {
+  // Already migrated by an earlier job: the section pages, and a file one side menu links to.
+  const pages = ['/hcv-program', '/hcv-landlords', '/landlord-faq', '/about-us'].map((p) => page(p));
+  const existing = [
+    entity(10, { slug: 'hcv-program', link: `${target.url}/hcv-program/`, source_key: 'jaxha.org/hcv-program', job_id: 'jha-dev' }),
+    entity(11, { slug: 'hcv-landlords', link: `${target.url}/hcv-landlords/`, source_key: 'jaxha.org/hcv-landlords', job_id: 'jha-dev' }),
+    entity(12, { slug: 'landlord-faq', link: `${target.url}/landlord-faq/`, source_key: 'jaxha.org/landlord-faq', job_id: 'jha-dev' }),
+    entity(13, { slug: 'about-us', link: `${target.url}/about-us/`, source_key: 'jaxha.org/about-us', job_id: 'jha-dev' }),
+  ];
+  const sectionNav = [
+    { parent: link('HCV Program', '/hcv-program'), children: [link('HCV Landlords', '/hcv-landlords'), link('Gone', '/not-migrated')] },
+    { parent: link('HCV Landlords', '/hcv-landlords'), children: [link('Landlord FAQ', '/landlord-faq')] },
+    { parent: link('Nowhere', '/nowhere'), children: [link('Also gone', '/also-gone')] },
+  ];
+
+  it('plans one menu per section, linking to the pages already on the target, and writes nothing else', () => {
+    const p = plan({ incremental: true, contentOnly: true, sideNavPages: true }, { pages, existing, site: site({ sectionNav }) });
+    expect(p.items).toEqual([]);
+    expect(p.site).toBeNull();
+    expect(p.cleanup).toEqual([]);
+    expect(p.sideMenus.map((m) => [m.name, m.items.map((i) => [i.title, i.key, i.url, i.parent])])).toEqual([
+      ['Side Navigation: HCV Program', [
+        ['HCV Program', 'jaxha.org/hcv-program', '/hcv-program/', null],
+        ['HCV Landlords', 'jaxha.org/hcv-landlords', '/hcv-landlords/', 0],
+      ]],
+      ['Side Navigation: HCV Landlords', [
+        ['HCV Landlords', 'jaxha.org/hcv-landlords', '/hcv-landlords/', null],
+        ['Landlord FAQ', 'jaxha.org/landlord-faq', '/landlord-faq/', 0],
+      ]],
+    ]);
+    // The executor links menu items to these objects.
+    expect(p.alreadyMigrated.map((e) => e.key)).toEqual(expect.arrayContaining(['jaxha.org/hcv-program', 'jaxha.org/hcv-landlords', 'jaxha.org/landlord-faq']));
+    const w = p.warnings.join('\n');
+    expect(w).toMatch(/2 menus .* with 4 links/);
+    expect(w).toMatch(/"Gone" \(https:\/\/www\.jaxha\.org\/not-migrated, under "HCV Program"\)/);
+    expect(w).toMatch(/"Nowhere" .* and its links/);
+    expect(renderPlan(p)).toMatch(/side navigation on pages\*\* \(2 menus\)/);
+  });
+
+  it('plans no side menus without the option, and says when the analysis has none', () => {
+    expect(plan({}, { pages, site: site({ sectionNav }) }).sideMenus).toEqual([]);
+    const p = plan({ sideNavPages: true }, { pages });
+    expect(p.sideMenus).toEqual([]);
+    expect(p.warnings.join('\n')).toMatch(/Side navigation on pages: this analysis predates/);
+  });
+
+  it('names menus apart when two sections share a label', () => {
+    const p = plan({ sideNavPages: true }, { pages, site: site({ sectionNav: [
+      { parent: link('Forms', '/hcv-program'), children: [] },
+      { parent: link('Forms', '/about-us'), children: [] },
+    ] }) });
+    expect(p.sideMenus.map((m) => m.name)).toEqual(['Side Navigation: Forms', 'Side Navigation: Forms (2)']);
+  });
+});

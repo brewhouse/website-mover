@@ -102,6 +102,7 @@ export function SummaryTab({ plan }: TabProps) {
               plan.options.incremental && `Only new content: ${plan.alreadyMigrated.length} objects already on the target are left as they are`,
               plan.options.contentOnly && 'Content only: no menus, theme options, homepage, branding or settings',
               plan.options.sideNavMenu && 'Side navigation added to the main menu',
+              plan.options.sideNavPages && `Side navigation on pages: ${plan.sideMenus.length} menus`,
             ]
               .filter(Boolean)
               .join(' · ') || 'None (full migration)'}
@@ -526,30 +527,45 @@ export function FormsTab({ plan }: TabProps) {
 
 // ---------------------------------------------------------------- Site
 
+/** Planned menus with their items (children indented). */
+function MenuList({ menus }: { menus: TabProps['plan']['sideMenus'] }) {
+  return (
+    <div className="grid gap-4 p-4 text-sm">
+      {menus.map((m) => (
+        <div key={m.name}>
+          <div className="mb-1 font-medium">
+            {m.name} <span className="font-normal text-muted">({m.items.length ? `${m.items.length} items` : 'emptied'})</span>
+          </div>
+          <ul className="grid gap-0.5">
+            {m.items.map((item, i) => (
+              <li key={i} style={{ paddingLeft: item.parent === null ? 0 : 16 }} className="flex gap-2">
+                <span>{item.title}</span>
+                <span className="truncate font-mono text-xs text-muted">{item.url}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SiteTab({ plan }: TabProps) {
   const site = plan.site;
-  if (!site) return <Empty>This plan doesn’t set the site structure (run the analysis).</Empty>;
+  const side = plan.sideMenus?.length ? (
+    <Card title="Side navigation menus (shown beside the pages they link to; each replaced as a whole)">
+      <MenuList menus={plan.sideMenus} />
+    </Card>
+  ) : null;
+  if (!site) return side ?? <Empty>This plan doesn’t set the site structure (run the analysis).</Empty>;
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-      <Card title="Menus (each replaced as a whole)">
-        <div className="grid gap-4 p-4 text-sm">
-          {site.menus.map((m) => (
-            <div key={m.name}>
-              <div className="mb-1 font-medium">
-                {m.name} <span className="font-normal text-muted">({m.items.length ? `${m.items.length} items` : 'emptied'})</span>
-              </div>
-              <ul className="grid gap-0.5">
-                {m.items.map((item, i) => (
-                  <li key={i} style={{ paddingLeft: item.parent === null ? 0 : 16 }} className="flex gap-2">
-                    <span>{item.title}</span>
-                    <span className="truncate font-mono text-xs text-muted">{item.url}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </Card>
+      <div className="grid content-start gap-6">
+        <Card title="Menus (each replaced as a whole)">
+          <MenuList menus={site.menus} />
+        </Card>
+        {side}
+      </div>
       <div className="grid content-start gap-6">
         <Card title="Site and footer">
           <dl className="grid gap-x-4 gap-y-1.5 p-4 text-sm sm:grid-cols-[180px_1fr]">

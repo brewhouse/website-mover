@@ -399,6 +399,8 @@ export function buildPlan(input: BuildPlanInput): Plan {
   // Files the site structure uses: slide images, and documents that menus, slides and tiles link to.
   const sideNav = options.sideNavMenu && !options.contentOnly;
   const siteFiles = new Set(input.analysis?.site && !options.contentOnly ? siteHrefs(input.analysis.site, sideNav).map(safeKey) : []);
+  // The side menus link to files too (option "side navigation on pages").
+  if (options.sideNavPages) for (const href of sectionNavHrefs(input.analysis?.site?.sectionNav ?? [])) siteFiles.add(safeKey(href));
   for (const s of input.analysis?.site?.home.slides ?? []) if (s.image && s.alt) alts.set(safeKey(s.image), s.alt);
   const media: PlanMedia[] = [];
   const byHash = new Map<string, PlanMedia>();
@@ -456,6 +458,17 @@ export function buildPlan(input: BuildPlanInput): Plan {
     settings.push({ key: 'description', from: target.tagline, to: '', reason: 'The header shows the tagline under the site name, and this one is a placeholder' });
   }
 
+  // Everything a menu can link to, by the source URLs that lead to it (planned before incremental
+  // settles what's already on the target, so menus link to both).
+  const menuEntries: SiteContext['entries'] = [
+      ...items.map((i) => ({ key: i.sourceKey, path: i.targetPath, from: [pathAndQuery(i.sourceUrl), ...i.redirectFrom] })),
+      ...events.map((e) => ({ key: e.key, path: e.targetPath, from: e.redirectFrom })),
+      ...recordsPlan.map((r) => ({ key: r.sourceKey, path: r.targetPath, from: [pathAndQuery(r.sourceUrl), ...r.redirectFrom] })),
+      ...tables.map((t) => ({ key: `table:${t.key}`, path: t.targetPath, from: t.redirectFrom })),
+      ...contentTypes.map((c) => ({ key: `listing:${c.postType}`, path: c.listing.targetPath, from: c.listing.redirectFrom })),
+      // Files: the executor links to the uploaded file; until then, the legacy URL (it redirects there).
+      ...media.map((m) => ({ key: m.sourceKey, path: m.redirectFrom[0]!, from: m.redirectFrom })),
+  ];
   const site = input.analysis?.site && !options.contentOnly
     ? planSite(input.analysis.site, {
         sideNavMenu: sideNav,
@@ -463,20 +476,14 @@ export function buildPlan(input: BuildPlanInput): Plan {
         origin: input.source.origin,
         keep,
         target,
-        entries: [
-          ...items.map((i) => ({ key: i.sourceKey, path: i.targetPath, from: [pathAndQuery(i.sourceUrl), ...i.redirectFrom] })),
-          ...events.map((e) => ({ key: e.key, path: e.targetPath, from: e.redirectFrom })),
-          ...recordsPlan.map((r) => ({ key: r.sourceKey, path: r.targetPath, from: [pathAndQuery(r.sourceUrl), ...r.redirectFrom] })),
-          ...tables.map((t) => ({ key: `table:${t.key}`, path: t.targetPath, from: t.redirectFrom })),
-          ...contentTypes.map((c) => ({ key: `listing:${c.postType}`, path: c.listing.targetPath, from: c.listing.redirectFrom })),
-          // Files: the executor links to the uploaded file; until then, the legacy URL (it redirects there).
-          ...media.map((m) => ({ key: m.sourceKey, path: m.redirectFrom[0]!, from: m.redirectFrom })),
-        ],
+        entries: menuEntries,
         pages,
         existing,
         warnings,
       })
     : null;
+
+  const sideMenus = options.sideNavPages ? planSideMenus(input.analysis?.site?.sectionNav, menuResolver({ origin: input.source.origin, keep, target, entries: menuEntries }), warnings) : [];
 
   const siteRedirects: Plan['siteRedirects'] = [];
   const newsPage = keep.find((k) => /News listing/.test(k.reason));
@@ -537,6 +544,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     warnings.unshift('Content only: menus, theme options, homepage fields, branding, site settings and framework redirects are left as they are on the target.');
     if (input.timezone && target.timezone !== input.timezone) warnings.push(`Content only: the target's timezone (${target.timezone || 'UTC offset'}) isn't changed to ${input.timezone}; event times are read in the target's timezone.`);
     if (options.sideNavMenu) warnings.push('"Side navigation in the main menu" has no effect with "Content only": menus are left as they are.');
+    if (options.sideNavPages) warnings.push('Content only: the side navigation menus are still written ("Side navigation on pages" is on).');
   }
 
   const categories = [...new Set(items.flatMap((i) => i.categories))].sort();
@@ -581,6 +589,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
     decisions: decisions ?? null,
     options,
     alreadyMigrated,
+    sideMenus,
     siteRedirects,
     cleanup,
     keep,
@@ -634,8 +643,11 @@ interface SiteContext {
   warnings: string[];
 }
 
-/** Menus, footer options, homepage fields and the site title from the source's shared structure. */
-function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
+/**
+ * Where a source menu link goes on the target: a planned entry (its key and path), a framework page
+ * that replaces a source listing, or the URL itself for other sites. Null: content that isn't migrated.
+ */
+function menuResolver(ctx: Pick<SiteContext, 'origin' | 'keep' | 'target' | 'entries'>): (href: string) => { key: string | null; url: string } | null {
   const byKey = new Map<string, { key: string | null; path: string }>();
   for (const e of ctx.entries) for (const from of e.from) byKey.set(safeKey(new URL(from, ctx.origin).href), { key: e.key, path: e.path });
   // Listings the framework replaces with its own pages.
@@ -658,7 +670,12 @@ function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
     for (const [re, to] of replacements) if (re.test(url.pathname.toLowerCase()) && to) return { key: null, url: to };
     return null;
   };
+  return resolve;
+}
 
+/** Menus, footer options, homepage fields and the site title from the source's shared structure. */
+function planSite(site: SiteAnalysis, ctx: SiteContext): PlanSite {
+  const resolve = menuResolver(ctx);
   const dropped: string[] = [];
   const headings: string[] = [];
   let main = site.menus.main;
@@ -795,12 +812,66 @@ export function withSectionNav(main: NavLink[], sections: NonNullable<SiteAnalys
   return menu;
 }
 
+/** Names of the side navigation menus: the theme (change T22) shows menus named so beside the pages they link to. */
+export const SIDE_MENU_PREFIX = 'Side Navigation: ';
+
+/**
+ * Option "side navigation on pages": one menu per source section, its page at the top and the links the
+ * side menu lists under it. Links resolve like the main menu's (to the migrated object, so they follow
+ * slug changes). A section whose links all point at content that isn't migrated gets no menu.
+ */
+export function planSideMenus(
+  sections: SiteAnalysis['sectionNav'],
+  resolve: (href: string) => { key: string | null; url: string } | null,
+  warnings: string[] = [],
+): Plan['sideMenus'] {
+  if (!sections) {
+    warnings.push('Side navigation on pages: this analysis predates side navigation. Run "Analyze → plan" (or "Scan → plan") to read it.');
+    return [];
+  }
+  if (!sections.length) {
+    warnings.push('Side navigation on pages: the source pages show no side navigation the tool can read.');
+    return [];
+  }
+  const menus: Plan['sideMenus'] = [];
+  const names = new Set<string>();
+  const dropped: string[] = [];
+  for (const { parent, children } of sections) {
+    const kids = children.flatMap((c) => {
+      const to = resolve(c.href);
+      if (!to) dropped.push(`"${c.label}" (${c.href}, under "${parent.label}")`);
+      return to ? [{ title: c.label, sourceUrl: c.href, key: to.key, url: to.url, parent: 0 }] : [];
+    });
+    const top = resolve(parent.href);
+    if (!top && !kids.length) {
+      dropped.push(`"${parent.label}" (${parent.href}) and its links`);
+      continue;
+    }
+    // Two sections with the same label (different pages) get distinct menus.
+    let name = `${SIDE_MENU_PREFIX}${parent.label}`.slice(0, 180);
+    for (let n = 2; names.has(name); n++) name = `${SIDE_MENU_PREFIX}${parent.label} (${n})`;
+    names.add(name);
+    menus.push({ name, items: [{ title: parent.label, sourceUrl: parent.href, key: top?.key ?? null, url: top?.url ?? '#', parent: null }, ...kids] });
+  }
+  const links = menus.reduce((n, m) => n + m.items.length, 0);
+  warnings.push(
+    `Side navigation on pages: ${menus.length} menus ("${SIDE_MENU_PREFIX}…") with ${links} links. The theme shows each beside the pages it links to (theme change T22); a later run replaces them as a whole, so edit them on the source or after the last run.`,
+  );
+  if (dropped.length) warnings.push(`Side navigation links to content that isn't migrated were left out: ${dropped.slice(0, 20).join('; ')}${dropped.length > 20 ? `; and ${dropped.length - 20} more` : ''}`);
+  return menus;
+}
+
+/** Every URL the side navigation links to. */
+function sectionNavHrefs(sections: NonNullable<SiteAnalysis['sectionNav']>): string[] {
+  return sections.flatMap((s) => [s.parent.href, ...s.children.map((c) => c.href)]).filter(Boolean);
+}
+
 /** Every URL the site structure points at: menu links (with the side navigation, when it's added), slide images and links, homepage tiles. */
 function siteHrefs(site: SiteAnalysis, sideNav = false): string[] {
   const walk = (links: NavLink[]): string[] => links.flatMap((l) => [l.href, ...walk(l.children ?? [])]);
   return [
     ...Object.values(site.menus).flatMap(walk),
-    ...(sideNav ? (site.sectionNav ?? []).flatMap((s) => [s.parent.href, ...walk(s.children)]) : []),
+    ...(sideNav ? sectionNavHrefs(site.sectionNav ?? []) : []),
     ...site.home.slides.flatMap((s) => [s.image ?? '', s.link ?? '']),
     ...walk(site.home.buttons ?? []),
   ].filter(Boolean);

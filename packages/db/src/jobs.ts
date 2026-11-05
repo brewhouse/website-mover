@@ -48,9 +48,11 @@ export interface JobOptions {
   contentOnly: boolean;
   /** Add the source's side navigation to the main menu as dropdowns. */
   sideNavMenu: boolean;
+  /** The source's side navigation on the pages that show it (one menu per section, shown by the theme). */
+  sideNavPages: boolean;
 }
 
-export const NO_OPTIONS: JobOptions = { incremental: false, contentOnly: false, sideNavMenu: false };
+export const NO_OPTIONS: JobOptions = { incremental: false, contentOnly: false, sideNavMenu: false, sideNavPages: false };
 
 export interface Job {
   id: string;

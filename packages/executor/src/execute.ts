@@ -38,6 +38,8 @@ export interface RunState {
   site: { menus: Record<string, number>; options: Record<string, string>; homeSlides: number; homeQuickLinks?: number; warnings: string[] } | null;
   /** Branding applied (M3): logos, fonts, the brand CSS. */
   design?: DesignState | null;
+  /** Side navigation menus written (option "side navigation on pages"): menu name → item count. */
+  sideMenus?: Record<string, number>;
 }
 
 type Post = { id: number; slug: string; link: string; status: string; meta?: Record<string, unknown> };
@@ -524,6 +526,9 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
   });
   await save();
 
+  // Post type of a planned entry a menu links to.
+  const postTypeOf = (key: string): string => plan.records.find((r) => r.sourceKey === key)?.postType ?? (plan.items.find((i) => i.sourceKey === key)?.type === 'post' ? 'post' : 'page');
+
   // 9b. Site structure: title, theme options, homepage fields, menus (after everything they link to exists).
   if (plan.site) {
     state.site = await applySite(client, plan, state, {
@@ -532,10 +537,25 @@ export async function executePlan({ jobId, client, log = console.log }: { jobId:
       fieldGroups: schema.acf.field_groups,
       mediaId,
       html: (html) => rewriteLinks(html, links, plan.source.origin),
-      postTypeOf: (key) => plan.records.find((r) => r.sourceKey === key)?.postType ?? (plan.items.find((i) => i.sourceKey === key)?.type === 'post' ? 'post' : 'page'),
+      postTypeOf,
       fail: (step, err) => fail('site', 'setup', step, err),
       log,
     });
+  }
+
+  // 9b'. Side navigation menus (option "side navigation on pages"): the theme shows each beside the
+  // pages it links to. With "Content only" or "Only new content" these are the only menus written.
+  if (plan.sideMenus?.length) {
+    state.sideMenus = await writeMenus(client, plan.sideMenus, state, { prior, postTypeOf }, async (step, fn) => {
+      try {
+        await fn();
+      } catch (err) {
+        fail('site', 'setup', `side navigation ${step}`, err);
+      }
+    });
+    const written = Object.values(state.sideMenus);
+    log(`Side navigation: ${written.length} of ${plan.sideMenus.length} menus, ${written.reduce((n, c) => n + c, 0)} links`);
+    await save();
   }
 
   // 9c. Branding: logos, fonts and the brand CSS (M3).
@@ -713,12 +733,30 @@ async function applySite(
   }
 
   // Named menus are replaced as a whole: the seed's items are demo links.
+  const menus = await writeMenus(client, site.menus, state, ctx, attempt);
+  ctx.log(`Site: title, ${Object.keys(site.options).length} options, ${home.slides} homepage slides, ${home.quickLinks} quick links, menus ${Object.entries(menus).map(([n, c]) => `${n} (${c})`).join(', ')}`);
+  for (const w of warnings) ctx.log(`  ! ${w}`);
+  return { menus, options, homeSlides: home.slides, homeQuickLinks: home.quickLinks, warnings };
+}
+
+/**
+ * Writes named menus, each replaced as a whole (created when missing; an empty planned menu that
+ * doesn't exist isn't created). Items link to the object itself where it's a page, post or entry, so
+ * the menu follows slug changes; events, files and other sites by URL. Returns name → item count.
+ */
+async function writeMenus(
+  client: WpClient,
+  planned: Plan['sideMenus'],
+  state: RunState,
+  ctx: { prior: Map<string, RunEntity & { postType: string }>; postTypeOf: (key: string) => string },
+  attempt: (step: string, fn: () => Promise<void>) => Promise<void>,
+): Promise<Record<string, number>> {
   const menus: Record<string, number> = {};
   let existingMenus: { id: number; name: string }[] = [];
   await attempt('menus', async () => {
     existingMenus = await client.get<{ id: number; name: string }[]>('/wp/v2/menus', { per_page: 100 });
   });
-  for (const menu of site.menus) {
+  for (const menu of planned) {
     await attempt(`menu ${menu.name}`, async () => {
       let id = existingMenus.find((m) => m.name === menu.name)?.id;
       if (!id && !menu.items.length) return; // nothing to empty
@@ -731,7 +769,6 @@ async function applySite(
       for (const [order, item] of menu.items.entries()) {
         const earlier = item.key ? ctx.prior.get(item.key) : undefined;
         const entity = (item.key ? state.entities[item.key] : undefined) ?? earlier;
-        // Link to the object itself where it's a page, post or entry, so the menu follows slug changes.
         const target =
           entity && (entity.kind === 'page' || entity.kind === 'post' || entity.kind === 'record')
             ? { type: 'post_type', object: earlier && entity === earlier ? earlier.postType : ctx.postTypeOf(item.key!), object_id: entity.id }
@@ -749,9 +786,7 @@ async function applySite(
       menus[menu.name] = ids.length;
     });
   }
-  ctx.log(`Site: title, ${Object.keys(site.options).length} options, ${home.slides} homepage slides, ${home.quickLinks} quick links, menus ${Object.entries(menus).map(([n, c]) => `${n} (${c})`).join(', ')}`);
-  for (const w of warnings) ctx.log(`  ! ${w}`);
-  return { menus, options, homeSlides: home.slides, homeQuickLinks: home.quickLinks, warnings };
+  return menus;
 }
 
 function menuItems(client: WpClient, menu: number) {

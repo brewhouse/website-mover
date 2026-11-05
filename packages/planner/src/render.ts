@@ -15,6 +15,7 @@ export function renderPlan(plan: Plan): string {
     o.incremental && `**only new content** (${plan.alreadyMigrated.length} objects already on the target are left as they are; nothing is trashed)`,
     o.contentOnly && '**content only** (no menus, theme options, homepage, branding or site settings)',
     o.sideNavMenu && '**side navigation in the main menu**',
+    o.sideNavPages && `**side navigation on pages** (${plan.sideMenus.length} menus)`,
   ].filter(Boolean);
   out.push(`Options: ${on.length ? on.join('; ') : 'none (full migration)'}.`, '');
 
@@ -27,6 +28,12 @@ export function renderPlan(plan: Plan): string {
   if (plan.records.length) out.push(`| Custom-type entries | ${e.records} |`);
   if (plan.tables.length) out.push(`| Tables | ${e.tables} |`);
   out.push(`| Redirects | ${e.redirects} |`, `| Existing content to trash | ${e.cleanup} |`, `| Not migrated | ${plan.notMigrated.length} |`, '');
+
+  if (plan.sideMenus.length) {
+    out.push('## Side navigation menus', '', 'Each menu is shown beside the pages it links to (theme change T22). A menu with this name on the target is replaced as a whole.', '');
+    for (const m of plan.sideMenus) out.push(`- **${cell(m.name)}**: ${m.items.length} links`);
+    out.push('');
+  }
 
   if (plan.warnings.length) out.push('## Warnings', '', ...plan.warnings.map((w) => `- ${w}`), '');
 

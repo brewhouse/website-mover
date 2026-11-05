@@ -120,6 +120,14 @@ See `docs/m3/branding-results.md`:
 - SCSS parity for each patch;
 - `git am` onto Pantheon's `master`.
 
+## Side navigation: T22 (2026-11-05)
+
+For the job option **Side navigation on pages**. The tool writes one WordPress menu per source section (`Side Navigation: <section>`); T22 shows it beside the pages it links to. **Not applied yet.** It is one new file plus one line in `functions.php`, not a `git am` patch, because it was written without a clone of the seed repo: `dist/theme-patches/T22-side-navigation/` (zipped as `dist/theme-patches/T22-side-navigation.zip`, with a README).
+
+| # | File | What changes |
+|---|---|---|
+| T22 | `inc/section-nav.php` | A `the_content` filter: on a page, the side menu goes in a left column (below the content under 992 px); on an event or post it links to, after the content. The page shows a side menu whose top item is the page, otherwise one that lists it. The current link is marked `aria-current`. Colours come from the T17 variables. Filter `pw_section_nav_menu` overrides the choice |
+
 ## Not changed
 
 - **Plugin notices:** the Add Admin CSS plugin raises PHP 8.2 "dynamic property" deprecations. WordPress hides them (WP_DEBUG is off), but the plugin should be updated.

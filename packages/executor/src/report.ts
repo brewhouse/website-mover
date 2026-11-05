@@ -33,6 +33,8 @@ export interface Report {
   invalid: { sourceKey: string; errors: string[] }[];
   warnings: Record<string, number>;
   site: RunState['site'];
+  /** Side navigation menus written: name → item count. */
+  sideMenus?: Record<string, number>;
   /** Same-site links and images on the migrated pages that don't answer 200 (after redirects). */
   links?: { checked: number; broken: { url: string; status: number; pageCount: number; pages: string[] }[] };
 }
@@ -170,6 +172,7 @@ export async function buildReport({ jobId, client, log = console.log }: { jobId:
     invalid,
     warnings,
     site: state.site,
+    sideMenus: state.sideMenus,
     links: { checked: linksOn.size, broken: brokenLinks },
   };
 
@@ -209,6 +212,9 @@ export function renderReport(r: Report): string {
   if (r.site) {
     out.push('## Site structure', '', `Homepage slides: ${r.site.homeSlides}. Quick links: ${r.site.homeQuickLinks ?? 0}. Menus: ${Object.entries(r.site.menus).map(([n, c]) => `${n} (${c} items)`).join(', ') || 'none'}.`, '');
     if (r.site.warnings.length) out.push(...r.site.warnings.map((w) => `- ${w}`), '');
+  }
+  if (r.sideMenus && Object.keys(r.sideMenus).length) {
+    out.push('## Side navigation', '', `${Object.keys(r.sideMenus).length} menus, shown beside the pages they link to (theme change T22):`, '', ...Object.entries(r.sideMenus).map(([n, c]) => `- ${n} (${c} items)`), '');
   }
   if (r.links?.broken.length) out.push(`## Broken links and images (${r.links.broken.length} of ${r.links.checked})`, '', ...r.links.broken.map((b) => `- \`${b.url}\` → ${b.status || 'no answer'} (on ${b.pageCount} page(s), e.g. ${b.pages[0]})`), '');
   if (r.redirects.broken.length) out.push('## Redirects not working', '', ...r.redirects.broken.map((b) => `- \`${b.from}\` → expected \`${b.to}\`, got ${b.got}`), '');

@@ -67,6 +67,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
             {job.options.incremental ? ' · incremental' : ''}
             {job.options.contentOnly ? ' · content only' : ''}
             {job.options.sideNavMenu ? ' · side nav in main menu' : ''}
+            {job.options.sideNavPages ? ' · side nav on pages' : ''}
           </>
         }
         actions={

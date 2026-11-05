@@ -287,6 +287,12 @@ export const PlanOptions = z.object({
   contentOnly: z.boolean().default(false),
   /** Add the source's side (section) navigation to the main menu as dropdowns. */
   sideNavMenu: z.boolean().default(false),
+  /**
+   * The source's side (section) navigation on the pages that show it: one WordPress menu per section
+   * ("Side Navigation: <section>"), which the theme shows beside every page the menu links to (theme
+   * change T22). Works with "Content only" and "Only new content": then only the menus are written.
+   */
+  sideNavPages: z.boolean().default(false),
 });
 export type PlanOptions = z.infer<typeof PlanOptions>;
 
@@ -334,7 +340,9 @@ export const Plan = z.object({
   design: PlanDesign.nullable().default(null),
   /** The reviewer decisions this version applied. */
   decisions: ReviewDecisions.nullable().default(null),
-  options: PlanOptions.default({ incremental: false, contentOnly: false, sideNavMenu: false }),
+  options: PlanOptions.default({ incremental: false, contentOnly: false, sideNavMenu: false, sideNavPages: false }),
+  /** Option "side navigation on pages": the section menus, each replaced as a whole (empty otherwise). */
+  sideMenus: z.array(z.object({ name: z.string(), items: z.array(PlanMenuItem) })).default([]),
   /** Incremental plans: content already on the target, left as it is (empty otherwise). */
   alreadyMigrated: z.array(PlanExisting).default([]),
   /** Redirects for paths the framework itself links to (not legacy URLs), e.g. its hard-coded news links. */
