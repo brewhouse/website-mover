@@ -6,3 +6,12 @@ export { matchFrames, nameTokens, shellTexts, type FrameMatch, type FrameRole } 
 export { screenshotPages, launchBrowser, scrollThrough, WIDTHS, type PageShot } from './screenshots.js';
 export { ingestDesign, type Inventory, type IngestOptions } from './ingest.js';
 export { renderInventory } from './report.js';
+export { buildModel, structure, type DesignModel, type Component, type Section, type Collection, type Leaf, type LeafKind, type MenuItem } from './model.js';
+export { modelDesign, renderModel, type ModelOptions, type SchemaSource } from './model-run.js';
+export { indexFramework, frameworkIndex, phpClasses, blockRegistry, type FrameworkIndex, type FrameworkFile } from './framework.js';
+export { groupsFor, describeGroups, type TargetSchema, type AcfField, type AcfFieldGroup } from './schema.js';
+export * from './plan-schema.js';
+export { draftProposal, fieldName, partKey, Proposal, ProposalPart, ProposalField } from './propose.js';
+export { buildDesignPlan, checkProposal, labelSource, vocabulary, slugify, type Vocabulary, type PlanInput } from './plan.js';
+export { renderDesignPlan } from './plan-render.js';
+export { planDesign, approveDesignPlan, loadDesignPlan, loadApprovedDesignPlan, latestDesignPlanVersion, loadDesignDecisions, applyDecisions, DesignDecisions, DesignApproval, type DesignPlanOptions } from './plan-run.js';

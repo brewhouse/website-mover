@@ -26,6 +26,16 @@
  *              unpacks the mockups, reads and renders the Figma frames, screenshots the pages and
  *              matches frames to pages (design/inventory.md). Later runs reuse the zip and Figma read
  *              unless given again; --refresh re-reads Figma. Needs FIGMA_ACCESS_TOKEN.
+ *   wm design model --job nb --theme bases/<site>/wp-content/themes/planeteriaweb [--target env:NEWPORT]
+ *              shell, sections, lists and their fields, the framework file each section restyles, and
+ *              the target's post types they fit (design/model.md). Without --target, reuses the
+ *              schema read last time.
+ *   wm design plan --job nb --theme <same folder> [--ai]
+ *              a new plan version from the model (design/plan/plan.vN.md), with the reviewer's
+ *              decisions (review/design-decisions.json). --ai lets the AI refine the rules' draft.
+ *   wm design approve --job nb --by "Name"
+ * --target env:NAME reads NAME_URL, NAME_USER and NAME_APP_PASSWORD from .env (a hosted target
+ * without the web app's database).
  *
  * Web app administration (needs DATABASE_URL):
  *   wm user add      --email a@b.org --name "Full Name" [--approver] [--password-env VAR]
@@ -70,6 +80,8 @@ const { positionals, values } = parseArgs({
     'side-nav-menu': { type: 'boolean', default: false },
     'side-nav-pages': { type: 'boolean', default: false },
     zip: { type: 'string' },
+    theme: { type: 'string' },
+    ai: { type: 'boolean', default: false },
     figma: { type: 'string' },
     refresh: { type: 'boolean', default: false },
     'no-screenshots': { type: 'boolean', default: false },
@@ -106,9 +118,31 @@ if (command && (STAGES as string[]).includes(command)) {
       break;
     }
     case 'design': {
-      if (sub !== 'ingest') fail('wm design ingest');
-      const { ingestDesign } = await import('@wm/design');
+      const design = await import('@wm/design');
       const jobId = values.job ?? fail('--job is required');
+      if (sub === 'model') {
+        const theme = values.theme ?? fail('--theme <framework theme folder in the site clone> is required');
+        // Only an explicit --target is read; the default "local" would be the Docker seed.
+        const explicit = process.argv.some((a) => a === '--target' || a.startsWith('--target='));
+        const target = explicit ? (await cliTarget(values.target!)).client : undefined;
+        await design.modelDesign({ jobId, themeRoot: path.resolve(cwd, theme), target, log: console.log });
+        console.log(`Model: data/jobs/${jobId}/design/model.md`);
+        break;
+      }
+      if (sub === 'plan') {
+        const theme = values.theme ?? fail('--theme <framework theme folder in the site clone> is required');
+        const { plan } = await design.planDesign({ jobId, themeRoot: path.resolve(cwd, theme), ai: values.ai, log: console.log });
+        console.log(`Plan: data/jobs/${jobId}/design/plan/plan.v${plan.version}.md`);
+        break;
+      }
+      if (sub === 'approve') {
+        const by = values.by ?? fail('--by "<your name>" is required');
+        const approval = await design.approveDesignPlan(jobId, by);
+        console.log(`Approved design plan v${approval.planVersion} (${approval.planSha256.slice(0, 12)}) by ${by}`);
+        break;
+      }
+      if (sub !== 'ingest') fail('wm design ingest | model | plan | approve');
+      const { ingestDesign } = design;
       const inv = await ingestDesign({
         jobId,
         zip: values.zip ? path.resolve(cwd, values.zip) : undefined,
@@ -188,9 +222,15 @@ if (command && (STAGES as string[]).includes(command)) {
   }
 }
 
-/** 'local' is the Docker seed from .env; other names are targets saved in the web app. */
+/** 'local' is the Docker seed from .env; env:NAME reads NAME_* from .env; other names are targets saved in the web app. */
 async function cliTarget(name: string): Promise<{ name: string; client: WpClient }> {
   if (name === 'local') return { name, client: connectTarget('local') };
+  // env:NEWPORT → NEWPORT_URL, NEWPORT_USER, NEWPORT_APP_PASSWORD from .env (no database needed).
+  if (name.startsWith('env:')) {
+    const prefix = name.slice(4).toUpperCase();
+    const get = (k: string) => process.env[`${prefix}_${k}`] ?? fail(`$${prefix}_${k} is not set`);
+    return { name: prefix.toLowerCase(), client: new WpClient({ baseUrl: get('URL'), user: get('USER'), appPassword: get('APP_PASSWORD') }) };
+  }
   const db = await import('@wm/db');
   const target = (await db.listTargets()).find((t) => t.name === name) ?? fail(`No saved target "${name}"`);
   const creds = await db.targetCredentials(target.id);

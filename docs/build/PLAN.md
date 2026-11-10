@@ -260,6 +260,74 @@ Later runs reuse the zip and the Figma read; `--refresh` re-reads Figma.
 **What the mockups tell us** (for B2): page titles and h1s aren't reliable. `page-builder1.html`'s h1 is
 "Classifieds", and `result.html`'s title says 403. Template names come from the file and frame names.
 
+## B2 progress: model and plan (2026-11-10)
+
+**Model** (`wm design model --job newport --theme <theme folder> --target env:NEWPORT`, writes
+`design/model.json` and `.md`). No AI. It produces:
+- **Shell:**
+  - the header, sidebar and footer most pages share, and their menus (sidebar, footer)
+  - one content root for all pages (`div.page_main`), found from text that isn't shell
+- **Sections:** each page is split by layout:
+  - wrappers and containers of sections are split;
+  - a title block that wraps the whole page (department detail) is cut into its title and the
+    sections below;
+  - repeated loose siblings (search results) form one section.
+- **Lists:**
+  - siblings with the same markup, where runs of identical children count once;
+  - every item's values are kept for sample content;
+  - pagination, breadcrumbs and select options are skipped;
+  - filter-tag lists are marked as filters;
+  - a few lines of different kinds (email, phone, cell) are fields, not a list.
+- **Values:** headings, text, rich text, images (icons apart), links, emails, phones and dates.
+- **Framework:** each component is matched to the theme file with the largest share of its classes.
+  A block's render template wins when it is within 0.2 of the best and scores at least 0.35
+  (`page.php` holds some block markup inline).
+- **Schema:** existing post types are matched by name, the head noun of the label and synonyms
+  (news → post, staff → people). Newport result: 7 pages and 15 lists.
+
+**Plan** (`wm design plan`, then `wm design approve`; versions in `design/plan/`).
+1. The rules write a draft **proposal**: page kinds, a binding for each part (theme, core, fields,
+   repeater, query, filter, block) and field names and types.
+2. `--ai` asks OpenAI to refine the draft. It returns the same shape.
+3. Reviewer decisions (`review/design-decisions.json`) apply on top.
+4. `buildDesignPlan` checks everything:
+   - parts and values must exist in the model;
+   - post types and taxonomies must exist or be declared new;
+   - new labels must appear in the mockups (page text, Figma text or layer names, class names).
+
+   Anything that fails falls back to the draft, with a warning.
+
+Rules worth knowing:
+- **Detail pages:** a detail page without a post type becomes a new one (`album_detail.html` →
+  `album`), and a list that links to it is that type's archive.
+- **Archives:** an archive's largest list shows its own entries. Archives become framework page
+  templates found by name (`template-news.php`, `template-department.php`, `template-documents.php`).
+  The exception is The Events Calendar, which keeps its plugin views.
+- **Pages with nothing to edit:** 404, 403, search and the plugin views get no fields.
+- **Entry templates:** section headings and "View all" links are template words. "Label: value"
+  pairs name their field (Address, Fax, Hours).
+- **Reuse:** existing fields are reused by name or label. Fields are added to an existing group
+  only if it is the only group there or its title names the type. Media uses ACF's
+  `attachment == all`.
+- **Sample content:** every list item becomes an entry with the mockup's words. Titles come from
+  the item's heading, or its title/name text. Identical items are one entry.
+
+Newport, plan v8 (rules only):
+- **Templates:** 14, with 10 framework files restyled and 3 new.
+- **Content types:** 1 new post type (Albums) and 1 new taxonomy.
+- **Fields:** 141 new, in 10 existing groups and 6 new ones. B0.2's fields are reused
+  (`quick_links_heading`, `calendar_heading`, `calendar_more`, `throwback_title`).
+- **Blocks:** 8, of which 6 are restyled framework blocks.
+- **Sample content:** 47 pages and entries, 23 images.
+- **Warnings:** none.
+
+Still to do:
+- **AI refinement:** run it once `OPENAI_API_KEY` and `OPENAI_MODEL` are in `.env`. The rule-made
+  field names are serviceable, not good (`calendar_text`, `meta`).
+- **Review screen:** templates beside their frames, and editing decisions.
+- **Filters:** the "Filter by Department" drop-downs suggest relating posts to departments. That's
+  for the AI or a reviewer.
+
 ## Status (2026-11-09)
 
 - **Newport repo:** cloned at `bases/newport-beach-intranet`. It is read-only.
