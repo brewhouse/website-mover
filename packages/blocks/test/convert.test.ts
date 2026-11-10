@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  acfBlock,
   buttons,
   columns,
   cover,
@@ -140,6 +141,22 @@ describe('htmlToBlocks', () => {
     expect(report.names).toEqual(['core/html']);
     expect(report.warnings.map((w) => w.kind)).toEqual(['html']);
     expect(warnings).toEqual(['dropped iframe https://tracker.example.com/pixel']);
+  });
+});
+
+describe('acfBlock', () => {
+  it('serializes an ACF block as a self-closing comment with its field data', () => {
+    const block = acfBlock('acf/angled-clickable-image', {
+      section_heading: 'Clickable Images',
+      _section_heading: 'field_wm_ci_section_heading',
+      angled_clickable_images: 1,
+      angled_clickable_images_0_link: { title: 'Image Title', url: '#', target: '' },
+    });
+    const html = serializeBlocks([block]);
+    expect(html).toMatch(/^<!-- wp:acf\/angled-clickable-image \{"name":"acf\/angled-clickable-image","data":\{/);
+    expect(html.endsWith('"mode":"preview"} /-->')).toBe(true);
+    const parsed = loadWordPress().parse(html)[0]!;
+    expect(parsed.attributes.data).toEqual(block.attributes.data);
   });
 });
 

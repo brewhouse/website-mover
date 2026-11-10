@@ -388,3 +388,22 @@ export function externalBlock(name: string, attributes: Record<string, string | 
   }
   return wp.createBlock(name, attributes);
 }
+
+/**
+ * An ACF block (`acf/<name>`), stored the way ACF saves it: the field values in `data`, each with
+ * its field key under `_<name>`. Repeaters are flattened as ACF does: `<repeater>` = row count,
+ * `<repeater>_<i>_<sub>` = value. ACF renders the block with the theme's template, so it saves no HTML.
+ */
+export function acfBlock(name: string, data: Record<string, unknown>, mode: 'preview' | 'edit' | 'auto' = 'preview'): Block {
+  const wp = loadWordPress();
+  if (!wp.getBlockType(name)) {
+    wp.registerBlockType(name, {
+      apiVersion: 3,
+      title: name,
+      category: 'widgets',
+      attributes: { name: { type: 'string' }, data: { type: 'object' }, mode: { type: 'string' } },
+      save: () => null,
+    } as never);
+  }
+  return wp.createBlock(name, { name, data, mode });
+}
