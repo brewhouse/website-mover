@@ -2,7 +2,7 @@
 
 Internal tool that migrates a website into a blank WordPress "seed" site: scans the source, proposes a migration plan for human approval, then rebuilds everything as Gutenberg content styled from a brand style guide PDF.
 
-**The full design is in `docs/PLAN.md` — read it before starting work.** Status: M0–M5 pass on the local seed (`docs/m0/` … `docs/m5/` results). JHA is migrated to the hosted seed (Pantheon dev, job `jha-dev`), with theme changes T1–T16 applied there (`docs/theme-patches.md`). M3 branding (from JHA's Figma guide, `docs/m3/branding.md`) passes on the local seed and on Pantheon dev, with theme patches T17–T21 applied there.
+**The full design is in `docs/PLAN.md` — read it before starting work.** Status: M0–M5 pass on the local seed (`docs/m0/` … `docs/m5/` results). JHA is migrated to the hosted seed (Pantheon dev, job `jha-dev`), with theme changes T1–T16 applied there (`docs/theme-patches.md`). M3 branding (from JHA's Figma guide, `docs/m3/branding.md`) passes on the local seed and on Pantheon dev, with theme patches T17–T21 applied there. Build from design (`docs/build/PLAN.md`, pilot Newport Beach intranet): B0–B0.2 deployed on Newport dev; B1 ingest done (`packages/design`, `wm design ingest`).
 
 ## Key decisions (don't re-litigate)
 - Flow: Scan → Plan (versioned JSON) → Approve → Execute → Verify → QA → Report. Execution only follows the approved plan, using scan-time snapshots.

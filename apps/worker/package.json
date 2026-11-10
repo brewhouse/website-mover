@@ -15,6 +15,7 @@
     "@wm/core": "workspace:*",
     "@wm/crawler": "workspace:*",
     "@wm/db": "workspace:*",
+    "@wm/design": "workspace:*",
     "@wm/executor": "workspace:*",
     "@wm/extractor": "workspace:*",
     "@wm/planner": "workspace:*",

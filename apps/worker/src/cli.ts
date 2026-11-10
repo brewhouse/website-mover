@@ -21,6 +21,12 @@
  * --target local is the Docker seed configured in .env; any other name is a target saved in the
  * web app (needs DATABASE_URL).
  *
+ * Build from design (docs/build/PLAN.md):
+ *   wm design ingest --job nb --zip inputs/nb/mockups.zip --figma "https://www.figma.com/design/<key>/…?node-id=…" [--refresh] [--no-screenshots]
+ *              unpacks the mockups, reads and renders the Figma frames, screenshots the pages and
+ *              matches frames to pages (design/inventory.md). Later runs reuse the zip and Figma read
+ *              unless given again; --refresh re-reads Figma. Needs FIGMA_ACCESS_TOKEN.
+ *
  * Web app administration (needs DATABASE_URL):
  *   wm user add      --email a@b.org --name "Full Name" [--approver] [--password-env VAR]
  *   wm user grant    --email a@b.org [--revoke]           approver permission
@@ -63,6 +69,10 @@ const { positionals, values } = parseArgs({
     'content-only': { type: 'boolean', default: false },
     'side-nav-menu': { type: 'boolean', default: false },
     'side-nav-pages': { type: 'boolean', default: false },
+    zip: { type: 'string' },
+    figma: { type: 'string' },
+    refresh: { type: 'boolean', default: false },
+    'no-screenshots': { type: 'boolean', default: false },
   },
 });
 const [command, sub] = positionals;
@@ -93,6 +103,21 @@ if (command && (STAGES as string[]).includes(command)) {
       const { importBrand } = await import('@wm/styleguide');
       await importBrand(jobId, path.resolve(cwd, file), console.log);
       console.log(`Imported into ${jobId}: run "wm plan" to put the design in a new plan version`);
+      break;
+    }
+    case 'design': {
+      if (sub !== 'ingest') fail('wm design ingest');
+      const { ingestDesign } = await import('@wm/design');
+      const jobId = values.job ?? fail('--job is required');
+      const inv = await ingestDesign({
+        jobId,
+        zip: values.zip ? path.resolve(cwd, values.zip) : undefined,
+        figmaUrl: values.figma,
+        refresh: values.refresh,
+        skipScreenshots: values['no-screenshots'],
+        log: console.log,
+      });
+      console.log(`Inventory: data/jobs/${jobId}/design/inventory.md (${inv.pages.length} pages, ${inv.frames.length} frames)`);
       break;
     }
     case 'approve': {
@@ -159,7 +184,7 @@ if (command && (STAGES as string[]).includes(command)) {
       break;
     }
     default:
-      fail(`Unknown command "${command ?? ''}". Commands: ${STAGES.join(', ')}, approve, user, target, job`);
+      fail(`Unknown command "${command ?? ''}". Commands: ${STAGES.join(', ')}, design, approve, user, target, job`);
   }
 }
 
