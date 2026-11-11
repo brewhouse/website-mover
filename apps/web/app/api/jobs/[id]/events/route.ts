@@ -18,8 +18,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     async start(controller) {
       const send = (event: string, data: unknown, eventId?: number) =>
         controller.enqueue(encoder.encode(`${eventId ? `id: ${eventId}\n` : ''}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      // Open the stream at once (proxies hold a response back until its first bytes), and keep it
+      // open with a comment line now and then while nothing happens (a new job has no runs or log).
+      controller.enqueue(encoder.encode(': connected\n\n'));
       let lastRun = '';
+      let quiet = 0;
       while (!request.signal.aborted) {
+        if (++quiet >= 15) {
+          quiet = 0;
+          controller.enqueue(encoder.encode(': ping\n\n'));
+        }
         try {
           for (const e of await eventsSince(id, after)) {
             after = e.id;
@@ -39,5 +47,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       controller.close();
     },
   });
-  return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive' } });
+  return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' } });
 }
