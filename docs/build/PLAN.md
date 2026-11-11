@@ -179,7 +179,7 @@ The change set makes these changes:
 | **B0 Spike** | Bridge on Newport; Figma read (done); the shell (header, sidebar, footer) and `page-builder1.html` → `page.php` plus two ACF blocks; one filled page | A page on Newport dev matches the mockup at both widths, and its fields are editable in wp-admin |
 | **B1 Ingest** ✅ | Zip intake, screenshots, Figma frames and styles, frame ↔ page matching | Inventory of the 14 pages and 24 frames, with matches |
 | **B2 Model & plan** | Shell detection, collections and fields, reuse of the existing schema, AI proposal, plan schema, review screen | An approvable plan for Newport |
-| **B3 Theme generator** | Bootstrap 5 port, shell, templates, ACF blocks, assets, change set | PHP lint passes; no notices; it installs cleanly on a copy of the Newport repo |
+| **B3 Theme generator** (lint ✅, applies ✅, notices: checked in B4) | Bootstrap 5 port, shell, templates, ACF blocks, assets, change set | PHP lint passes; no notices; it installs cleanly on a copy of the Newport repo |
 | **B4 Execute** | Types, fields, media, pages, events, menus, options, forms, rollback | Newport built on dev |
 | **B5 Verify & report** | Visual diff, report, QA | Per-template differences under an agreed threshold |
 
@@ -351,6 +351,46 @@ Design jobs now run in the web app and worker (on Render too).
   - Changes are saved to `review/design-decisions.json` and apply on Re-plan.
   - The Frames tab corrects frame matches (`review/design-matches.json`), applied at the next ingest.
 - **Approval:** approvers only. It binds the exact plan version and bytes.
+
+## B3: theme generator (2026-11-11)
+
+`packages/design/src/theme/` and `wm design theme --job <job> [--theme <folder>]`; in the web app, the
+**Theme change set** run (after approval) and a card with the downloads. Output goes to
+`design/theme-changes/v<plan>/`: `files/` (repo paths), `changes.patch`, `theme-changes-v<N>.zip`,
+`README.md` and `manifest.json`.
+
+- **Plans record where each value sits:** `PlanPart.values` (field key or `core:*`, and its path from the
+  section or list item). Plans made before B3 don't have it; the generator asks for a re-plan.
+- **Templates:** the mockup's own markup from the content root, with the plan's bindings:
+  - fields → `get_field`, lists → `have_rows` or `wmd_query(post_type, count)`, filter lists → the
+    taxonomy's terms (`?wmd_term=`), core values → title, content, featured image, excerpt, date, term;
+  - an archive's main list is paged and drives the mockup's pagination; search results loop the main
+    query; breadcrumbs and search forms are WordPress's; an entry's title links to it; initials badges
+    come from the title; a carousel's first row is active;
+  - links to other mockup pages point at their pages; images and inline backgrounds load from the
+    theme's assets;
+  - a content-root class named after another mockup page is left out (page-builder1's "classifieds").
+- **Blocks:** render templates for the restyled and new ACF blocks; new ones are registered in
+  `inc/wm-design.php`.
+- **Shell:** `header.php` keeps the theme's `<head>` (minus its Google Fonts) and prints the mockup's
+  header; `sidebar.php` (menu with the mockup's classes and icons, the signed-in user's card);
+  `footer.php` keeps everything from `wp_footer()` on.
+- **Assets:** the mockup's stylesheets, scripts, fonts and the images the CSS and templates use, under
+  `assets/<job>/` with their layout kept. `inc/wm-design.php` drops the theme's Bootstrap 4, `custom.css`
+  and `responsive.css` (and scripts the mockup replaces), enqueues the mockup's in its order (after
+  the theme's footer scripts), and turns off `wp-block-styles`. `functions.php` gets one `require_once`.
+- **Checks:** `php -l` on every PHP file (the Docker image now has `php-cli` and `git`), and the patch
+  is a `git diff` against the uploaded theme.
+
+Newport (plan v9, rules only): 12 templates, 8 blocks, 18 files replaced and 65 new (25 PHP, 56
+assets, 3.8 MB). **PHP lint passes**, and the patch applies cleanly to the Newport clone
+(`git apply --check`). 11 things to check, among them:
+- `department-detail.html` and `department-detail-dept.html` both map to `single-departments.php`;
+- the dashboard's widget cards and the document repositories are lists without bound fields, so
+  they keep the mockup's sample text until a reviewer gives them a post type;
+- The Events Calendar's views aren't templated (its markup is styled where the class names match).
+
+Not done yet: loading it in WordPress (no notices) — that comes with B4 on Newport dev.
 
 ## Status (2026-11-09)
 

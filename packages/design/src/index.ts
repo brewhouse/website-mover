@@ -16,3 +16,6 @@ export { buildDesignPlan, checkProposal, labelSource, vocabulary, slugify, type 
 export { renderDesignPlan } from './plan-render.js';
 export { planDesign, approveDesignPlan, loadDesignPlan, loadApprovedDesignPlan, latestDesignPlanVersion, loadDesignDecisions, applyDecisions, DesignDecisions, DesignApproval, type DesignPlanOptions } from './plan-run.js';
 export { designState, designHeadline, saveDesignDecisions, saveFrameMatches, designImagePath, type DesignState } from './review.js';
+export { generateTheme, type ThemeInput, type ThemeChangeSet, type ThemeFile } from './theme/generate.js';
+export { generateThemeChanges, latestThemeChanges, renderThemeReadme, type ThemeManifest, type ThemeRunOptions } from './theme/theme-run.js';
+export { writeZip } from './zip.js';

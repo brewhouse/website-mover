@@ -226,10 +226,22 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
       const source = (f: ProposalField) => ({ page: p.page, component: part.component, path: f.path });
       const sampleOf = (f: ProposalField) => scopeLeaves.find((l) => l.path === f.path)?.sample || null;
       const keys: string[] = [];
+      const values: { field: string; path: string }[] = [];
+      const bind = (field: string, f: ProposalField) => values.push({ field, path: f.path });
+      /** Sub-field keys of a list field, in the proposal's order (reused sub-fields keep their names). */
+      const bindSubs = (list: PlanField, fields: ProposalField[]) => {
+        for (const f of fields.filter((x) => !x.core)) {
+          const sub = list.subFields.find((x) => x.name === f.name) ?? list.subFields.find((x) => x.label === f.label) ?? list.subFields.find((x) => sameField(x as unknown as AcfField, f.name, f.label));
+          if (sub) bind(sub.key, f);
+        }
+      };
       let fieldGroup: string | null = null;
 
       if (part.binding === 'core' || part.binding === 'theme' || part.binding === 'menu') {
-        for (const f of part.fields) keys.push(`core:${f.core ?? f.name}`);
+        for (const f of part.fields) {
+          keys.push(`core:${f.core ?? f.name}`);
+          bind(`core:${f.core ?? f.name}`, f);
+        }
         if (pageEntry && part.binding === 'core') {
           for (const f of part.fields) {
             // An entry's title is its heading; a page keeps the title the proposal gave it.
@@ -244,11 +256,13 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
           for (const f of part.fields) {
             if (f.core) {
               keys.push(`core:${f.core}`);
+              bind(`core:${f.core}`, f);
               if (pageEntry) setCore(pageEntry, f.core, valueOf(f.type, f.path, leafRecord(scopeLeaves)), useMedia);
               continue;
             }
             const field = addField(g, { name: f.name, label: f.label, type: f.type, source: source(f), sample: sampleOf(f) });
             keys.push(field.key);
+            bind(field.key, f);
             if (pageEntry) pageEntry.fields[field.key] = valueOf(field.type, f.path, leafRecord(scopeLeaves), (src) => useMedia(src, `${p.page} ${part.component}`));
           }
         } else {
@@ -257,6 +271,7 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
           const subFields = part.fields.filter((f) => !f.core).map((f) => subField(f, source(f), sampleOf(f)));
           const field = addField(g, { name, label, type: 'repeater', source: { page: p.page, component: part.component, path: part.collection ?? '' }, sample: null, subFields });
           keys.push(field.key);
+          bindSubs(field, part.fields);
           if (pageEntry && coll) pageEntry.fields[field.key] = rows(coll, part.fields, field, (src) => useMedia(src, `${p.page} ${part.component}`));
         }
       } else if (part.binding === 'query' && part.postType) {
@@ -264,10 +279,13 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
         fieldGroup = g.key;
         const fieldKeys = new Map<ProposalField, string>();
         for (const f of part.fields) {
-          if (f.core) keys.push(`core:${f.core}`);
-          else {
+          if (f.core) {
+            keys.push(`core:${f.core}`);
+            bind(`core:${f.core}`, f);
+          } else {
             const field = addField(g, { name: f.name, label: f.label, type: f.type, source: source(f), sample: sampleOf(f) });
             keys.push(field.key);
+            bind(field.key, f);
             fieldKeys.set(f, field.key);
           }
         }
@@ -301,11 +319,13 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
           const subFields = part.fields.filter((f) => !f.core).map((f) => subField(f, source(f), sampleOf(f)));
           const field = addField(g, { name: `${name}_items`.replace(/(_items)+$/, '_items'), label: humanize(name), type: 'repeater', source: { page: p.page, component: part.component, path: part.collection ?? '' }, sample: null, subFields });
           keys.push(field.key);
+          bindSubs(field, part.fields);
           data[field.key] = rows(coll, part.fields, field, (src) => useMedia(src, `${p.page} ${part.block}`));
         } else {
           for (const f of part.fields.filter((x) => !x.core)) {
             const field = addField(g, { name: f.name, label: f.label, type: f.type, source: source(f), sample: sampleOf(f) });
             keys.push(field.key);
+            bind(field.key, f);
             data[field.key] = valueOf(field.type, f.path, leafRecord(scopeLeaves), (src) => useMedia(src, `${p.page} ${part.block}`));
           }
         }
@@ -316,7 +336,7 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
           else pageEntry.blocks.push({ block: part.block, fields: data });
         }
       }
-      planParts.push({ component: part.component, path: part.path, collection: part.collection, heading: section.heading, binding: part.binding, postType: part.postType, taxonomy: part.taxonomy, block: part.block, fieldGroup, fields: keys, framework: componentFw.get(part.component) ? { file: componentFw.get(part.component)!.file, share: componentFw.get(part.component)!.share } : null, note: null });
+      planParts.push({ component: part.component, path: part.path, collection: part.collection, heading: section.heading, binding: part.binding, postType: part.postType, taxonomy: part.taxonomy, block: part.block, fieldGroup, fields: keys, framework: componentFw.get(part.component) ? { file: componentFw.get(part.component)!.file, share: componentFw.get(part.component)!.share } : null, note: null, values });
     }
     templates.push({ page: p.page, frames: pm.frames, kind: t.kind, postType: p.postType, file: t.file, action: t.action, parts: planParts });
     if (pageEntry) {

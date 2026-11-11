@@ -15,7 +15,8 @@ RUN pnpm install --frozen-lockfile
 # ---- worker ----
 FROM deps AS worker
 # poppler-utils: style guide PDF facts (pdfinfo, pdftotext, pdffonts, pdfimages, pdftoppm).
-RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils ca-certificates && rm -rf /var/lib/apt/lists/*
+# php-cli and git: the design theme change set is linted (php -l) and diffed (git diff --no-index).
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils ca-certificates php-cli git && rm -rf /var/lib/apt/lists/*
 # Chromium for the QA stage (Playwright + axe-core), in a folder the node user can read.
 # Chromium's own sandbox can't start in a container without extra privileges (tested): the container is
 # the boundary, and every request the browser makes still goes through the SSRF check.

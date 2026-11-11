@@ -121,7 +121,7 @@ export async function listJobs(): Promise<(Job & { lastRun: StageRun | null })[]
 
 // ---------- Stage runs ----------
 
-export const STAGES = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback', 'ingest', 'model', 'design_plan'] as const;
+export const STAGES = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback', 'ingest', 'model', 'design_plan', 'design_theme'] as const;
 /** A design job's stages (docs/build/PLAN.md): mockups and Figma in, an approvable plan out. */
 export const DESIGN_STAGES = ['ingest', 'model', 'design_plan'] as const;
 export type Stage = (typeof STAGES)[number];

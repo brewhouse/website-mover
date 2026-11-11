@@ -97,7 +97,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
 const PHONE = /^\+?[\d\s().-]{7,}(ext\.?\s*\d+)?$/i;
 const DATE = /^(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d{1,2},? \d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}|date\/timestamp|date)$/i;
 
-interface El {
+export interface El {
   type: string;
   name: string;
   attribs: Record<string, string>;
@@ -105,10 +105,10 @@ interface El {
   parent: El | null;
 }
 
-const elementChildren = (el: El): El[] => el.children.filter((c): c is El => c.type === 'tag' && !SKIP.has((c as El).name));
+export const elementChildren = (el: El): El[] => el.children.filter((c): c is El => c.type === 'tag' && !SKIP.has((c as El).name));
 const classesOf = (el: El): string[] => (el.attribs.class ?? '').split(/\s+/).filter(Boolean);
-const distinctive = (el: El): string | undefined => classesOf(el).find((c) => !LAYOUT.test(c));
-const selector = (el: El): string => `${el.name}${distinctive(el) ? `.${distinctive(el)}` : ''}`;
+export const distinctive = (el: El): string | undefined => classesOf(el).find((c) => !LAYOUT.test(c));
+export const selector = (el: El): string => `${el.name}${distinctive(el) ? `.${distinctive(el)}` : ''}`;
 const ownText = (el: El): string => el.children.filter((c) => c.type === 'text').map((c) => (c as { data: string }).data).join(' ').replace(/\s+/g, ' ').trim();
 const fullText = ($: cheerio.CheerioAPI, el: El): string => $(el as never).text().replace(/\s+/g, ' ').trim();
 /** Text of an element without a cheerio handle (for structure checks). */
@@ -169,7 +169,7 @@ function headingIn(el: El, $: cheerio.CheerioAPI): string | null {
 }
 
 /** Small or vector images: arrows, logos, social icons. They belong to the theme, not the content. */
-function isIcon(img: El): boolean {
+export function isIcon(img: El): boolean {
   const w = Number(img.attribs.width ?? 0);
   return (w > 0 && w <= 40) || /icon|logo|arrow|chevron|\.svg(\?|$)/i.test(img.attribs.src ?? '');
 }

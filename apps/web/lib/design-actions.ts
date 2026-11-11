@@ -64,6 +64,7 @@ const DESIGN_RUNS: Record<string, Stage[]> = {
   all: [...DESIGN_STAGES],
   model: ['model', 'design_plan'],
   plan: ['design_plan'],
+  theme: ['design_theme'],
 };
 
 export async function runDesignStages(_: FormState, form: FormData): Promise<FormState> {

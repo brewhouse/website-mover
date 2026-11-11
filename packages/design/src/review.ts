@@ -3,11 +3,12 @@
  * inventory and the reviewer's decisions. No browser or AI client is loaded from here.
  */
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { jobPath, readJson, writeJson } from '@wm/core';
 import type { Inventory } from './ingest.js';
 import { DesignApproval, DesignDecisions, latestDesignPlanVersion, loadDesignDecisions, loadDesignPlan } from './plan-run.js';
 import type { DesignPlan } from './plan-schema.js';
+import type { ThemeManifest } from './theme/theme-run.js';
 
 export { approveDesignPlan, DesignApproval, DesignDecisions, latestDesignPlanVersion, loadDesignDecisions, loadDesignPlan } from './plan-run.js';
 export { partKey, type Proposal, type ProposalPart, type ProposalField } from './propose.js';
@@ -15,6 +16,7 @@ export { Binding, PageKind, FieldType, type DesignPlan, type PlanTemplate, type 
 export type { Inventory } from './ingest.js';
 export { parseFigmaUrl } from './figma.js';
 export type { FrameMatch } from './match.js';
+export type { ThemeManifest } from './theme/theme-run.js';
 
 export interface DesignState {
   plan: DesignPlan;
@@ -75,4 +77,21 @@ export async function saveFrameMatches(jobId: string, matches: Record<string, st
 export function designImagePath(jobId: string, kind: 'frame' | 'shot', name: string): string | null {
   if (!/^[A-Za-z0-9_.-]+\.png$/.test(name) || name.includes('..')) return null;
   return kind === 'frame' ? jobPath(jobId, 'design', 'figma', 'frames', name) : jobPath(jobId, 'design', 'screenshots', name);
+}
+
+/** The latest theme change set's manifest (design/theme-changes/vN/), if one was made. */
+export async function latestThemeManifest(jobId: string): Promise<ThemeManifest | null> {
+  const names = await readdir(jobPath(jobId, 'design', 'theme-changes')).catch(() => [] as string[]);
+  const v = Math.max(0, ...names.map((n) => Number(/^v(\d+)$/.exec(n)?.[1] ?? 0)));
+  return v ? readJson<ThemeManifest>(jobPath(jobId, 'design', 'theme-changes', `v${v}`, 'manifest.json')).catch(() => null) : null;
+}
+
+/** Downloads of a theme change set: the zip, the patch and the README. */
+export function themeDownload(jobId: string, version: number, name: string): { file: string; type: string; filename: string } | null {
+  if (!Number.isInteger(version) || version < 1) return null;
+  const dir = (f: string) => jobPath(jobId, 'design', 'theme-changes', `v${version}`, f);
+  if (name === 'zip') return { file: dir(`theme-changes-v${version}.zip`), type: 'application/zip', filename: `${jobId}-theme-changes-v${version}.zip` };
+  if (name === 'patch') return { file: dir('changes.patch'), type: 'text/x-diff; charset=utf-8', filename: `${jobId}-theme-changes-v${version}.patch` };
+  if (name === 'readme') return { file: dir('README.md'), type: 'text/markdown; charset=utf-8', filename: `${jobId}-theme-changes-v${version}-README.md` };
+  return null;
 }

@@ -154,4 +154,13 @@ alter table stage_runs add constraint stage_runs_stage_check
   check (stage in ('scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback', 'ingest', 'model', 'design_plan'));
 `,
   },
+  {
+    name: '008_design_theme.sql',
+    sql: `
+-- B3: a design job's theme change set (design/theme-changes/vN/), made from the approved plan.
+alter table stage_runs drop constraint stage_runs_stage_check;
+alter table stage_runs add constraint stage_runs_stage_check
+  check (stage in ('scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback', 'ingest', 'model', 'design_plan', 'design_theme'));
+`,
+  },
 ];

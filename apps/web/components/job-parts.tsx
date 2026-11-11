@@ -43,6 +43,7 @@ function summarize(r: StageRun): string {
   if (r.stage === 'report' && 'failures' in s) return `${s.failures} failures`;
   if (r.stage === 'scan' && 'pages' in s) return `${s.pages} pages`;
   if (r.stage === 'design_plan' && s.version) return `Design plan v${s.version}, ${s.warnings} warnings`;
+  if (r.stage === 'design_theme' && s.version) return `Theme change set v${s.version}: ${s.files} files, lint ${s.lint}, ${s.warnings} warnings`;
   if (r.stage === 'ingest' && 'pages' in s) return `${s.pages} pages, ${s.frames} frames${s.unmatched ? `, ${s.unmatched} unmatched` : ''}`;
   if (r.stage === 'model' && 'components' in s) return `${s.components} components in ${s.sections} sections`;
   return '';
@@ -53,6 +54,8 @@ export function describe(action: string, detail: unknown): string {
   switch (action) {
     case 'job.create':
       return d.kind === 'design' ? 'created the design job (use of the designs confirmed)' : 'created the job (rights confirmed)';
+    case 'design.theme_download':
+      return `downloaded theme change set v${d.version} (${d.name})`;
     case 'design.upload':
       return `uploaded ${d.name} (${Math.round(Number(d.bytes) / 1024 / 1024)} MB)`;
     case 'job.register':

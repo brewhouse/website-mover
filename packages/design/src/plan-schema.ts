@@ -112,6 +112,12 @@ export const PlanPart = z.object({
   /** Framework file this part restyles, when one matched. */
   framework: z.object({ file: z.string(), share: z.number() }).nullable(),
   note: z.string().nullable(),
+  /**
+   * Where each value sits in the mockup: field key (sub-field key inside a list, or "core:title")
+   * and its path from the part's root (the section, or one list item). The theme generator binds
+   * these elements. Plans made before B3 don't have it.
+   */
+  values: z.array(z.object({ field: z.string(), path: z.string() })).default([]),
 });
 export type PlanPart = z.infer<typeof PlanPart>;
 

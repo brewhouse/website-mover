@@ -27,7 +27,7 @@ import { buildReport, executePlan, probeTarget, rollbackJob, runPostLaunch } fro
 import { runQa } from '@wm/qa';
 import type { WpClient } from '@wm/wp-client';
 
-export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa' | 'postlaunch' | 'rollback' | 'ingest' | 'model' | 'design_plan';
+export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa' | 'postlaunch' | 'rollback' | 'ingest' | 'model' | 'design_plan' | 'design_theme';
 
 export interface StageContext {
   jobId: string;
@@ -179,6 +179,13 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
       const { plan, sha256: sha } = await design.planDesign({ jobId, themeRoot: jobPath(jobId, 'design', 'theme'), ai, log });
       for (const w of plan.warnings) log(`  ! ${w}`);
       return { version: plan.version, sha256: sha, expected: plan.expected, warnings: plan.warnings.length };
+    }
+    case 'design_theme': {
+      const design = await import('@wm/design');
+      const m = await design.generateThemeChanges({ jobId, log });
+      for (const w of m.warnings) log(`  ! ${w}`);
+      for (const f of m.files.filter((x) => x.lint === 'error')) log(`  ! PHP lint: ${f.path}: ${f.lintMessage}`);
+      return { version: m.planVersion, files: m.files.length, replaced: m.files.filter((f) => f.action === 'replace').length, lint: m.lint, warnings: m.warnings.length };
     }
     case 'qa': {
       const qa = await runQa({ jobId, baseUrl: target().client.baseUrl, log });

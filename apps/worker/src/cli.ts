@@ -34,6 +34,9 @@
  *              a new plan version from the model (design/plan/plan.vN.md), with the reviewer's
  *              decisions (review/design-decisions.json). --ai lets the AI refine the rules' draft.
  *   wm design approve --job nb --by "Name"
+ *   wm design theme --job nb [--theme <framework theme folder>]
+ *              the theme change set for the approved plan (design/theme-changes/vN/: files, patch,
+ *              zip, README). Without --theme, the theme unpacked from the job's upload.
  * --target env:NAME reads NAME_URL, NAME_USER and NAME_APP_PASSWORD from .env (a hosted target
  * without the web app's database).
  *
@@ -141,7 +144,12 @@ if (command && (STAGES as string[]).includes(command)) {
         console.log(`Approved design plan v${approval.planVersion} (${approval.planSha256.slice(0, 12)}) by ${by}`);
         break;
       }
-      if (sub !== 'ingest') fail('wm design ingest | model | plan | approve');
+      if (sub === 'theme') {
+        const m = await design.generateThemeChanges({ jobId, themeRoot: values.theme ? path.resolve(cwd, values.theme) : undefined, log: console.log });
+        console.log(`Theme change set: data/jobs/${jobId}/design/theme-changes/v${m.planVersion}/README.md`);
+        break;
+      }
+      if (sub !== 'ingest') fail('wm design ingest | model | plan | approve | theme');
       const { ingestDesign } = design;
       const inv = await ingestDesign({
         jobId,
