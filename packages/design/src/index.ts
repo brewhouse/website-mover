@@ -1,5 +1,5 @@
 export { readZip, safeName, type ZipEntry } from './zip.js';
-export { unpackMockups, dropReason, type IntakeResult } from './intake.js';
+export { unpackMockups, unpackTheme, dropReason, type IntakeResult } from './intake.js';
 export { parsePage, readPages, normText, type MockupPage } from './pages.js';
 export { FigmaClient, parseFigmaUrl, summarizeFrames, frameKind, type FigmaFrame, type FigmaStyle, type FigmaRef } from './figma.js';
 export { matchFrames, nameTokens, shellTexts, type FrameMatch, type FrameRole } from './match.js';
@@ -15,3 +15,4 @@ export { draftProposal, fieldName, partKey, Proposal, ProposalPart, ProposalFiel
 export { buildDesignPlan, checkProposal, labelSource, vocabulary, slugify, type Vocabulary, type PlanInput } from './plan.js';
 export { renderDesignPlan } from './plan-render.js';
 export { planDesign, approveDesignPlan, loadDesignPlan, loadApprovedDesignPlan, latestDesignPlanVersion, loadDesignDecisions, applyDecisions, DesignDecisions, DesignApproval, type DesignPlanOptions } from './plan-run.js';
+export { designState, designHeadline, saveDesignDecisions, saveFrameMatches, designImagePath, type DesignState } from './review.js';

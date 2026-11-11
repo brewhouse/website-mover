@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import { afterAll, describe, expect, it } from 'vitest';
-import { dropReason, matchFrames, nameTokens, parseFigmaUrl, parsePage, readZip, safeName, summarizeFrames, unpackMockups, type FigmaFrame, type MockupPage } from '../src/index.js';
+import { dropReason, unpackTheme, matchFrames, nameTokens, parseFigmaUrl, parsePage, readZip, safeName, summarizeFrames, unpackMockups, type FigmaFrame, type MockupPage } from '../src/index.js';
 
 /** A minimal ZIP writer for tests: deflated entries, optional unix mode. */
 function makeZip(files: { name: string; data?: string; mode?: number }[]): Buffer {
@@ -81,6 +81,33 @@ describe('intake', () => {
     expect(r).toMatchObject({ kept: 2, strippedPrefix: 'Site' });
     expect((await readdir(out)).sort()).toEqual(['css', 'index.html']);
     expect(await readFile(path.join(out, 'index.html'), 'utf8')).toBe('<h1>Home</h1>');
+  });
+});
+
+describe('theme intake', () => {
+  it('finds the named theme in a repo zip and keeps only PHP, JSON and style.css', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'wm-theme-'));
+    tmp.push(dir);
+    const zip = path.join(dir, 't.zip');
+    const t = 'site/wp-content/themes';
+    await writeFile(
+      zip,
+      makeZip([
+        { name: `${t}/twentytwentytwo/functions.php`, data: '<?php' },
+        { name: `${t}/twentytwentytwo/style.css`, data: '/* parent */' },
+        { name: `${t}/planeteriaweb/functions.php`, data: '<?php // child' },
+        { name: `${t}/planeteriaweb/style.css`, data: '/* child */' },
+        { name: `${t}/planeteriaweb/template-parts/blocks/a.php`, data: '<div class="a">' },
+        { name: `${t}/planeteriaweb/theme.json`, data: '{}' },
+        { name: `${t}/planeteriaweb/img/logo.png`, data: 'png' },
+        { name: `${t}/planeteriaweb/node_modules/x/index.php`, data: '<?php' },
+      ]),
+    );
+    const out = path.join(dir, 'theme');
+    const r = await unpackTheme(zip, out);
+    expect(r).toMatchObject({ files: 4, prefix: `${t}/planeteriaweb/` });
+    expect(await readFile(path.join(out, 'functions.php'), 'utf8')).toBe('<?php // child');
+    expect((await readdir(out)).sort()).toEqual(['functions.php', 'style.css', 'template-parts', 'theme.json']);
   });
 });
 

@@ -54,8 +54,12 @@ export interface JobOptions {
 
 export const NO_OPTIONS: JobOptions = { incremental: false, contentOnly: false, sideNavMenu: false, sideNavPages: false };
 
+export type JobKind = 'migrate' | 'design';
+
 export interface Job {
   id: string;
+  /** migrate: copy a site; design: build one from mockups (sourceUrl is then the Figma link). */
+  kind: JobKind;
   sourceUrl: string;
   profile: string;
   targetId: number;
@@ -70,12 +74,13 @@ export interface Job {
   createdAt: Date;
 }
 
-const jobSelect = `select j.id, j.source_url as "sourceUrl", j.profile, j.target_id as "targetId", t.name as "targetName", j.timezone,
+const jobSelect = `select j.id, j.kind, j.source_url as "sourceUrl", j.profile, j.target_id as "targetId", t.name as "targetName", j.timezone,
   j.ga4_id as "ga4Id", j.style_guide as "styleGuide", j.live_url as "liveUrl", j.options, u.name as "createdBy", j.created_at as "createdAt"
   from jobs j join targets t on t.id = j.target_id join users u on u.id = j.created_by`;
 
 export async function createJob(j: {
   id: string;
+  kind?: JobKind;
   sourceUrl: string;
   profile: string;
   targetId: number;
@@ -86,9 +91,9 @@ export async function createJob(j: {
   userId: number;
 }): Promise<void> {
   await db().query(
-    `insert into jobs (id, source_url, profile, target_id, timezone, ga4_id, style_guide, rights_confirmed_by, created_by, options)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)`,
-    [j.id, j.sourceUrl, j.profile, j.targetId, j.timezone, j.ga4Id, j.styleGuide, j.userId, JSON.stringify(j.options ?? NO_OPTIONS)],
+    `insert into jobs (id, source_url, profile, target_id, timezone, ga4_id, style_guide, rights_confirmed_by, created_by, options, kind)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10)`,
+    [j.id, j.sourceUrl, j.profile, j.targetId, j.timezone, j.ga4Id, j.styleGuide, j.userId, JSON.stringify(j.options ?? NO_OPTIONS), j.kind ?? 'migrate'],
   );
 }
 
@@ -116,7 +121,9 @@ export async function listJobs(): Promise<(Job & { lastRun: StageRun | null })[]
 
 // ---------- Stage runs ----------
 
-export const STAGES = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback'] as const;
+export const STAGES = ['scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback', 'ingest', 'model', 'design_plan'] as const;
+/** A design job's stages (docs/build/PLAN.md): mockups and Figma in, an approvable plan out. */
+export const DESIGN_STAGES = ['ingest', 'model', 'design_plan'] as const;
 export type Stage = (typeof STAGES)[number];
 
 export interface StageRun {

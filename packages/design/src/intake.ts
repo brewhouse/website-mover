@@ -38,6 +38,34 @@ export function dropReason(file: string): string | null {
   return null;
 }
 
+/**
+ * The framework theme from a zip (the theme folder, or the whole site repo): only its PHP and JSON
+ * files and style.css, which is what the framework match reads. The theme is the folder holding
+ * functions.php and style.css nearest the top (a "wp-content/themes/planeteriaweb/" inside is found).
+ */
+export async function unpackTheme(zipFile: string, dest: string, theme = 'planeteriaweb', limits?: ZipLimits): Promise<{ root: string; files: number; prefix: string }> {
+  const entries = readZip(await readFile(zipFile), limits).filter((e) => !e.isDirectory);
+  const dirs = entries.filter((e) => /(^|\/)functions\.php$/.test(e.name)).map((e) => e.name.replace(/functions\.php$/, ''));
+  const withStyle = dirs.filter((d) => entries.some((e) => e.name === `${d}style.css`));
+  // Prefer the named theme (a repo zip holds a parent theme too), then the shallowest.
+  const prefix = [...withStyle].sort((a, b) => Number(b.includes(`${theme}/`)) - Number(a.includes(`${theme}/`)) || a.split('/').length - b.split('/').length)[0];
+  if (prefix === undefined) throw new Error('No theme in the zip: it needs a folder with functions.php and style.css');
+  await rm(dest, { recursive: true, force: true });
+  await mkdir(dest, { recursive: true });
+  let files = 0;
+  for (const e of entries) {
+    if (!e.name.startsWith(prefix)) continue;
+    const rel = e.name.slice(prefix.length);
+    if (!/\.(php|json)$|^style\.css$/.test(rel) || rel.split('/').some((p) => p.startsWith('.') || p === 'node_modules' || p === 'vendor')) continue;
+    const out = path.join(dest, rel);
+    if (!out.startsWith(dest + path.sep)) throw new Error(`Unsafe path in ZIP: ${e.name}`);
+    await mkdir(path.dirname(out), { recursive: true });
+    await writeFile(out, e.read());
+    files++;
+  }
+  return { root: dest, files, prefix };
+}
+
 export async function unpackMockups(zipFile: string, dest: string, limits?: ZipLimits): Promise<IntakeResult> {
   const entries = readZip(await readFile(zipFile), limits).filter((e) => !e.isDirectory);
   // Most zips wrap everything in one folder ("Newport-beach/"): drop it so pages sit at the root.

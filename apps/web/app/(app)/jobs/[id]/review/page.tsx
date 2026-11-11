@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { getJob, listRuns } from '@wm/db';
 import { Badge, Card, LinkButton, Notice, PageHeader, when } from '@/components/ui';
 import { planState, previousPlan } from '@/lib/job-files';
@@ -34,6 +34,7 @@ export default async function ReviewPage({ params, searchParams }: { params: Pro
   const sp = await searchParams;
   const job = await getJob(id);
   if (!job) notFound();
+  if (job.kind === 'design') redirect(`/jobs/${id}/design`);
   const state = await planState(id);
   if (!state) {
     return (

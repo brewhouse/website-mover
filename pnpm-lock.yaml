@@ -246,6 +246,9 @@ importers:
       '@wm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@wm/design':
+        specifier: workspace:*
+        version: link:../../packages/design
       '@wm/net':
         specifier: workspace:*
         version: link:../../packages/net

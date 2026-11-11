@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { listJobs } from '@wm/db';
 import { RunStatus } from '@/components/run-status';
 import { Badge, Card, Empty, LinkButton, PageHeader, when } from '@/components/ui';
+import { designHeadline } from '@wm/design/review';
 import { planHeadline } from '@/lib/job-files';
 import { requireUser } from '@/lib/session';
 
@@ -10,12 +11,12 @@ export const metadata = { title: 'Jobs' };
 export default async function JobsPage() {
   await requireUser();
   const jobs = await listJobs();
-  const plans = await Promise.all(jobs.map((j) => planHeadline(j.id).catch(() => null)));
+  const plans = await Promise.all(jobs.map((j) => (j.kind === 'design' ? designHeadline(j.id) : planHeadline(j.id)).catch(() => null)));
   return (
     <>
       <PageHeader
         title="Jobs"
-        subtitle="Each job moves one source site into one WordPress target."
+        subtitle="Each job moves one source site, or builds one from a design, into one WordPress target."
         actions={
           <LinkButton href="/jobs/new" variant="primary">
             New job
@@ -46,7 +47,7 @@ export default async function JobsPage() {
                           {job.id}
                         </Link>
                       </td>
-                      <td className="text-muted">{new URL(job.sourceUrl).host}</td>
+                      <td className="text-muted">{job.kind === 'design' ? 'Figma design' : new URL(job.sourceUrl).host}</td>
                       <td>{job.targetName}</td>
                       <td>
                         <RunStatus run={job.lastRun} />

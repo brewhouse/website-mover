@@ -114,7 +114,8 @@ export async function planDesign(opts: DesignPlanOptions): Promise<{ plan: Desig
   let proposal = draft;
   let ai: string | null = null;
   if (opts.ai) {
-    const { refineProposal } = await import('./ai.js');
+    // Only the worker and CLI plan; the web app's bundle leaves the AI client out.
+    const { refineProposal } = (await import(/* webpackIgnore: true */ './ai.js')) as typeof import('./ai.js');
     log(`AI: refining the draft with ${process.env.OPENAI_MODEL}`);
     proposal = await refineProposal({ model, schema: target.schema, draft, frames: inventory.frames, log });
     ai = process.env.OPENAI_MODEL ?? null;

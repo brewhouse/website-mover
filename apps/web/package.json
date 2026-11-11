@@ -12,6 +12,7 @@
   "dependencies": {
     "@wm/core": "workspace:*",
     "@wm/db": "workspace:*",
+    "@wm/design": "workspace:*",
     "@wm/net": "workspace:*",
     "@wm/planner": "workspace:*",
     "@wm/wp-client": "workspace:*",

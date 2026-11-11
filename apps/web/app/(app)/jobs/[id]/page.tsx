@@ -1,9 +1,11 @@
 import { notFound } from 'next/navigation';
-import { getJob, listAudit, listRuns, recentEvents, type StageRun } from '@wm/db';
+import { getJob, listAudit, listRuns, recentEvents } from '@wm/db';
 import { LiveLog } from '@/components/live-log';
 import { RunStatus } from '@/components/run-status';
+import { describe, RunsTable } from '@/components/job-parts';
 import { Badge, Card, Empty, LinkButton, PageHeader, when, type Tone } from '@/components/ui';
 import { loadReport, planState, stagesOnDisk } from '@/lib/job-files';
+import { DesignJob } from './design-job';
 import { JobOptionsForm, LiveUrlForm, RollbackForm, RunButtons, type RunChoice } from './run-buttons';
 import { requireUser } from '@/lib/session';
 
@@ -18,6 +20,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
   const { id } = await params;
   const job = await getJob(id);
   if (!job) notFound();
+  if (job.kind === 'design') return <DesignJob job={job} />;
   const [runs, events, plan, report, auditTrail, onDisk] = await Promise.all([listRuns(id), recentEvents(id), planState(id), loadReport(id), listAudit(id, 20), stagesOnDisk(id)]);
   const active = runs.find((r) => r.status === 'queued' || r.status === 'running');
   const lastOf = (stage: string) => runs.find((r) => r.stage === stage) ?? null;
@@ -140,64 +143,4 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
       </div>
     </>
   );
-}
-
-function RunsTable({ runs }: { runs: StageRun[] }) {
-  const took = (r: StageRun) => (r.startedAt && r.finishedAt ? `${Math.max(1, Math.round((+new Date(r.finishedAt) - +new Date(r.startedAt)) / 1000))} s` : '—');
-  return (
-    <div className="max-h-80 overflow-y-auto">
-      <table className="data">
-        <thead>
-          <tr>
-            <th>Stage</th>
-            <th>Requested</th>
-            <th>Took</th>
-            <th>Result</th>
-          </tr>
-        </thead>
-        <tbody>
-          {runs.map((r) => (
-            <tr key={r.id}>
-              <td>
-                <RunStatus run={r} />
-              </td>
-              <td className="text-muted">
-                {when(r.queuedAt)}
-                {r.requestedBy ? ` · ${r.requestedBy}` : ''}
-              </td>
-              <td className="tabular-nums">{took(r)}</td>
-              <td className="max-w-md text-muted">{r.error ? <span className="text-bad">{r.error}</span> : summarize(r)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function summarize(r: StageRun): string {
-  const s = (r.summary ?? {}) as Record<string, unknown>;
-  if (r.stage === 'plan' && s.version) return `Plan v${s.version}, ${s.warnings} warnings`;
-  if (r.stage === 'execute' && 'objects' in s) return `${s.objects} objects, ${s.failures} failures, ${s.redirects} redirects`;
-  if (r.stage === 'report' && 'failures' in s) return `${s.failures} failures`;
-  if (r.stage === 'scan' && 'pages' in s) return `${s.pages} pages`;
-  return '';
-}
-
-function describe(action: string, detail: unknown): string {
-  const d = (detail ?? {}) as Record<string, unknown>;
-  switch (action) {
-    case 'job.create':
-      return 'created the job (rights confirmed)';
-    case 'job.register':
-      return `registered the job on ${d.target}`;
-    case 'run':
-      return `ran ${(d.stages as string[]).join(' → ')}`;
-    case 'plan.approve':
-      return `approved plan v${d.version}`;
-    case 'job.options':
-      return `set options: ${Object.entries(d).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'}`;
-    default:
-      return action.startsWith('decision.') ? `${action.slice(9)} ${d.key ?? d.id ?? ''}${d.slug !== undefined ? ` → ${d.slug ?? '(source slug)'}` : ''}${d.type !== undefined ? ` → ${d.type ?? '(as source)'}` : ''}` : action;
-  }
 }

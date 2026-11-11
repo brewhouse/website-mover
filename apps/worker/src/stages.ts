@@ -4,7 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import {
   jobPath,
   readJson,
@@ -27,11 +27,11 @@ import { buildReport, executePlan, probeTarget, rollbackJob, runPostLaunch } fro
 import { runQa } from '@wm/qa';
 import type { WpClient } from '@wm/wp-client';
 
-export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa' | 'postlaunch' | 'rollback';
+export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa' | 'postlaunch' | 'rollback' | 'ingest' | 'model' | 'design_plan';
 
 export interface StageContext {
   jobId: string;
-  /** Source site and its profile (scan only; later stages read job.json). */
+  /** Source site and its profile (scan only; later stages read job.json). For a design job, origin is the Figma link. */
   source?: { origin: string; profile: string; cacheDir?: string };
   /** The WordPress target (plan, execute, report). */
   target?: { name: string; client: WpClient };
@@ -142,6 +142,43 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
     case 'postlaunch': {
       const r = await runPostLaunch({ jobId, base: ctx.liveUrl || target().client.baseUrl, ga4Id: ctx.ga4Id, log });
       return { checked: r.checked, ok: r.ok, problems: r.problems.length, ga4Found: r.ga4.found };
+    }
+    // ── Build from design (docs/build/PLAN.md) ──
+    case 'ingest': {
+      const design = await import('@wm/design');
+      // The uploads are unpacked again only when they're newer than what was unpacked from them.
+      const newer = async (input: string, done: string) => {
+        const a = await stat(jobPath(jobId, ...input.split('/'))).catch(() => null);
+        if (!a) return false;
+        const b = await stat(jobPath(jobId, ...done.split('/'))).catch(() => null);
+        return !b || a.mtimeMs > b.mtimeMs;
+      };
+      if (await newer('inputs/theme.zip', 'design/theme/style.css')) {
+        const t = await design.unpackTheme(jobPath(jobId, 'inputs', 'theme.zip'), jobPath(jobId, 'design', 'theme'));
+        log(`Theme: ${t.files} PHP/JSON files from ${t.prefix || 'the top of the zip'}`);
+      }
+      const inv = await design.ingestDesign({
+        jobId,
+        zip: (await newer('inputs/mockups.zip', 'design/intake.json')) ? jobPath(jobId, 'inputs', 'mockups.zip') : undefined,
+        figmaUrl: ctx.source?.origin,
+        log,
+      });
+      return { pages: inv.pages.length, frames: inv.frames.length, unmatched: inv.gaps.unmatchedFrames.length, ambiguous: inv.gaps.ambiguous.length };
+    }
+    case 'model': {
+      const design = await import('@wm/design');
+      if (!existsSync(jobPath(jobId, 'design', 'theme', 'functions.php'))) fail('No framework theme yet: upload the theme zip on the job page');
+      const m = await design.modelDesign({ jobId, themeRoot: jobPath(jobId, 'design', 'theme'), target: target().client, log });
+      return { components: m.components.length, sections: m.pages.reduce((n, p) => n + p.sections.length, 0), fits: m.schema.pages.length + m.schema.collections.length };
+    }
+    case 'design_plan': {
+      const design = await import('@wm/design');
+      // The AI refines the rules' draft whenever it's configured.
+      const ai = Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL);
+      if (!ai) log('  ! OPENAI_API_KEY / OPENAI_MODEL not set: the plan is the rules\' draft only');
+      const { plan, sha256: sha } = await design.planDesign({ jobId, themeRoot: jobPath(jobId, 'design', 'theme'), ai, log });
+      for (const w of plan.warnings) log(`  ! ${w}`);
+      return { version: plan.version, sha256: sha, expected: plan.expected, warnings: plan.warnings.length };
     }
     case 'qa': {
       const qa = await runQa({ jobId, baseUrl: target().client.baseUrl, log });

@@ -34,3 +34,5 @@ services:
         sync: false
       - key: OPENAI_MODEL
         sync: false
+      - key: FIGMA_ACCESS_TOKEN  # build-from-design jobs read the Figma file with it (read-only token)
+        sync: false

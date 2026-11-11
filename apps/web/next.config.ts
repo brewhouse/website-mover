@@ -14,9 +14,9 @@ process.env.WM_DATA_DIR ??= path.join(root, 'data');
 
 const config: NextConfig = {
   // Workspace packages are TypeScript source.
-  transpilePackages: ['@wm/core', '@wm/db', '@wm/net', '@wm/planner', '@wm/wp-client'],
+  transpilePackages: ['@wm/core', '@wm/db', '@wm/design', '@wm/net', '@wm/planner', '@wm/wp-client'],
   // Node-only libraries, loaded from node_modules at runtime rather than bundled.
-  serverExternalPackages: ['pg', 'pg-boss', 'undici'],
+  serverExternalPackages: ['pg', 'pg-boss', 'undici', 'cheerio'],
   // The packages import their TypeScript files with .js specifiers (NodeNext style); Turbopack can't
   // map those, so the web app builds with webpack.
   webpack: (webpackConfig: { resolve: { extensionAlias?: Record<string, string[]> } }) => {

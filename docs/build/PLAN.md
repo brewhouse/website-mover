@@ -328,6 +328,30 @@ Still to do:
 - **Filters:** the "Filter by Department" drop-downs suggest relating posts to departments. That's
   for the AI or a reviewer.
 
+## B2: design jobs in the web app (2026-11-10)
+
+Design jobs now run in the web app and worker (on Render too).
+
+- **Intake** (`/jobs/new/design`):
+  - the job name, the Figma link (stored as the job's `source_url`) and the target;
+  - the mockup zip and a zip of the framework theme (the theme folder, or the whole site repo, where
+    the named theme is found);
+  - the job has `kind = 'design'`.
+- **Uploads:** the zips are sent as raw request bodies to `PUT /api/jobs/<id>/inputs/<name>` and
+  streamed to `inputs/` on the server. Checks: login, a ZIP signature, and a 600 MB limit. They can be
+  replaced from the job page; the next ingest unpacks them again if they're newer.
+- **Stages** (migration 007): `ingest` (unpack the theme's PHP/JSON, ingest the mockups and Figma),
+  `model` (target from the job), and `design_plan`. The plan uses the AI whenever `OPENAI_API_KEY` and
+  `OPENAI_MODEL` are set. Ingest needs `FIGMA_ACCESS_TOKEN`.
+- **Review** (`/jobs/<id>/design`): approval, Summary, Templates, Content types, Fields, Blocks,
+  Menus, Sample content, Frames and Warnings.
+  - The Templates tab shows each mockup beside its Figma frame and screenshot. A reviewer can change
+    the page's title, kind and post type, and each part's binding, post type, taxonomy, block and
+    field names and labels.
+  - Changes are saved to `review/design-decisions.json` and apply on Re-plan.
+  - The Frames tab corrects frame matches (`review/design-matches.json`), applied at the next ingest.
+- **Approval:** approvers only. It binds the exact plan version and bytes.
+
 ## Status (2026-11-09)
 
 - **Newport repo:** cloned at `bases/newport-beach-intranet`. It is read-only.

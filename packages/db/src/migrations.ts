@@ -143,4 +143,15 @@ create index login_attempts_ip on login_attempts (ip, at);
 alter table jobs add column options jsonb not null default '{}';
 `,
   },
+  {
+    name: '007_design_jobs.sql',
+    sql: `
+-- Build from design (docs/build/PLAN.md): a job either migrates a site or builds one from mockups.
+-- A design job's source_url is its Figma link; its stages are ingest, model and design_plan.
+alter table jobs add column kind text not null default 'migrate' check (kind in ('migrate', 'design'));
+alter table stage_runs drop constraint stage_runs_stage_check;
+alter table stage_runs add constraint stage_runs_stage_check
+  check (stage in ('scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback', 'ingest', 'model', 'design_plan'));
+`,
+  },
 ];
