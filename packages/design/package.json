@@ -11,9 +11,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@wm/blocks": "workspace:*",
     "@wm/core": "workspace:*",
     "@wm/llm": "workspace:*",
     "@wm/net": "workspace:*",
+    "@wm/wp-client": "workspace:*",
     "cheerio": "^1.2.0",
     "playwright": "1.64.0",
     "zod": "^4.6.7"

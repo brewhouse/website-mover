@@ -405,6 +405,9 @@ importers:
 
   packages/design:
     dependencies:
+      '@wm/blocks':
+        specifier: workspace:*
+        version: link:../blocks
       '@wm/core':
         specifier: workspace:*
         version: link:../core
@@ -414,6 +417,9 @@ importers:
       '@wm/net':
         specifier: workspace:*
         version: link:../net
+      '@wm/wp-client':
+        specifier: workspace:*
+        version: link:../wp-client
       cheerio:
         specifier: ^1.2.0
         version: 1.2.0

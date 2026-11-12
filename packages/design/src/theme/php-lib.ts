@@ -20,6 +20,8 @@ export interface LibraryInput {
   dequeueStyles: string[];
   dequeueScripts: string[];
   blocks: { name: string; title: string; template: string; icon: string }[];
+  /** Linked entries (plan relations): field name, filter parameter, related type, types that carry it. */
+  relations?: { name: string; param: string; relatesTo: string; on: string[] }[];
   /** Where it came from, for the file header. */
   origin: string;
 }
@@ -57,6 +59,10 @@ export function helperLibrary(x: LibraryInput): string {
 		)
 	);`,
     )
+    .join('\n');
+
+  const relations = (x.relations ?? [])
+    .map((r) => `\t\t${q(r.name)} => array(\n\t\t\t'param'     => ${q(r.param)},\n\t\t\t'post_type' => ${q(r.relatesTo)},\n\t\t\t'on'        => array( ${r.on.map(q).join(', ')} ),\n\t\t),`)
     .join('\n');
 
   return `<?php
@@ -231,6 +237,112 @@ function wmd_tel( $value ) {
 	return preg_replace( '/[^0-9+]/', '', wmd_text( $value ) );
 }
 
+/**
+ * Entries linked to another post type's entries by a post-object field: field name => the filter's
+ * query parameter, the related post type and the post types that carry the field.
+ */
+function wmd_relations() {
+	return array(
+${relations}
+	);
+}
+
+/** The related entry a drop-down picked (?department=slug), or null. */
+function wmd_related_selected( $name ) {
+	$rels = wmd_relations();
+	if ( empty( $rels[ $name ] ) ) {
+		return null;
+	}
+	$param = $rels[ $name ]['param'];
+	$slug  = isset( $_GET[ $param ] ) ? sanitize_title( wp_unslash( $_GET[ $param ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification
+	if ( '' === $slug ) {
+		return null;
+	}
+	$post = get_page_by_path( $slug, OBJECT, $rels[ $name ]['post_type'] );
+	return $post ? $post : null;
+}
+
+/** The entries a drop-down offers, by title. */
+function wmd_related_choices( $name ) {
+	$rels = wmd_relations();
+	if ( empty( $rels[ $name ] ) ) {
+		return array();
+	}
+	return get_posts(
+		array(
+			'post_type'      => $rels[ $name ]['post_type'],
+			'posts_per_page' => -1,
+			'orderby'        => 'title',
+			'order'          => 'ASC',
+			'no_found_rows'  => true,
+		)
+	);
+}
+
+/** The drop-down's "all" label: the related post type's own "All …" label. */
+function wmd_related_all_label( $name ) {
+	$rels = wmd_relations();
+	$obj  = empty( $rels[ $name ] ) ? null : get_post_type_object( $rels[ $name ]['post_type'] );
+	return $obj ? $obj->labels->all_items : __( 'All' );
+}
+
+/**
+ * meta_query clauses for a list of a post type: the entry a drop-down picked, else the related
+ * entry whose own page this is (a department's page lists that department's news).
+ */
+function wmd_relation_meta_query( $post_type ) {
+	$clauses = array();
+	foreach ( wmd_relations() as $name => $rel ) {
+		if ( ! in_array( $post_type, $rel['on'], true ) ) {
+			continue;
+		}
+		$picked = wmd_related_selected( $name );
+		$id     = $picked ? $picked->ID : ( is_singular( $rel['post_type'] ) ? get_queried_object_id() : 0 );
+		if ( $id ) {
+			$clauses[] = array(
+				'key'   => $name,
+				'value' => $id,
+			);
+		}
+	}
+	return $clauses;
+}
+
+/** The current post's date in a format: an event's start date (The Events Calendar), else the post date. */
+function wmd_date( $format = '' ) {
+	$format = $format ? $format : get_option( 'date_format' );
+	if ( 'tribe_events' === get_post_type() && function_exists( 'tribe_get_start_date' ) ) {
+		return tribe_get_start_date( null, false, $format );
+	}
+	return get_the_date( $format );
+}
+
+/** An event's time span ("2:00 PM - 3:00 PM"), or "All day"; empty for other posts. */
+function wmd_time_range() {
+	if ( 'tribe_events' !== get_post_type() || ! function_exists( 'tribe_get_start_date' ) ) {
+		return '';
+	}
+	if ( function_exists( 'tribe_event_is_all_day' ) && tribe_event_is_all_day() ) {
+		return __( 'All day' );
+	}
+	$fmt   = get_option( 'time_format' );
+	$start = tribe_get_start_date( null, false, $fmt );
+	$end   = tribe_get_end_date( null, false, $fmt );
+	return $end && $end !== $start ? $start . ' - ' . $end : $start;
+}
+
+/** How many images the current post holds: its first gallery field, else its attached images. */
+function wmd_image_count() {
+	if ( function_exists( 'get_field_objects' ) ) {
+		foreach ( (array) get_field_objects() as $field ) {
+			if ( isset( $field['type'] ) && 'gallery' === $field['type'] ) {
+				return is_array( $field['value'] ) ? count( $field['value'] ) : 0;
+			}
+		}
+	}
+	return count( get_attached_media( 'image' ) );
+}
+
 /** The first term of the current post, in its post type's first public taxonomy with terms. */
 function wmd_first_term( $post = null ) {
 	$post = get_post( $post );
@@ -294,7 +406,30 @@ function wmd_current_term() {
 
 /** Link that filters the current page's list by a term. */
 function wmd_term_filter_url( $term ) {
-	return add_query_arg( 'wmd_term', $term->slug, get_permalink() );
+	return add_query_arg( 'wmd_term', $term->slug, wmd_filter_base_url( 'wmd_term' ) );
+}
+
+/** This listing page's URL with the filters in use, except $leave_out (a parameter, or a relation's name). */
+function wmd_filter_base_url( $leave_out = '' ) {
+	$url  = get_permalink( get_queried_object_id() );
+	$term = wmd_current_term();
+	if ( $term && 'wmd_term' !== $leave_out ) {
+		$url = add_query_arg( 'wmd_term', $term, $url );
+	}
+	foreach ( wmd_relations() as $name => $rel ) {
+		$picked = $name === $leave_out ? null : wmd_related_selected( $name );
+		if ( $picked ) {
+			$url = add_query_arg( $rel['param'], $picked->post_name, $url );
+		}
+	}
+	return $url;
+}
+
+/** A drop-down choice's URL: the listing filtered by that entry ($post null: all of them). */
+function wmd_related_filter_url( $name, $post = null ) {
+	$rels = wmd_relations();
+	$url  = wmd_filter_base_url( $name );
+	return $post && ! empty( $rels[ $name ] ) ? add_query_arg( $rels[ $name ]['param'], $post->post_name, $url ) : $url;
 }
 
 /**
@@ -310,6 +445,10 @@ function wmd_query( $post_type, $per_page, $paged = false ) {
 	);
 	if ( $paged ) {
 		$args['paged'] = max( 1, (int) get_query_var( 'paged' ), (int) get_query_var( 'page' ) );
+	}
+	$related = wmd_relation_meta_query( $post_type );
+	if ( $related ) {
+		$args['meta_query'] = $related; // phpcs:ignore WordPress.DB.SlowDBQuery
 	}
 	$term = wmd_current_term();
 	if ( $term ) {

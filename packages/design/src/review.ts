@@ -17,6 +17,7 @@ export type { Inventory } from './ingest.js';
 export { parseFigmaUrl } from './figma.js';
 export type { FrameMatch } from './match.js';
 export type { ThemeManifest } from './theme/theme-run.js';
+export type { BuildState } from './build.js';
 
 export interface DesignState {
   plan: DesignPlan;
@@ -94,4 +95,9 @@ export function themeDownload(jobId: string, version: number, name: string): { f
   if (name === 'patch') return { file: dir('changes.patch'), type: 'text/x-diff; charset=utf-8', filename: `${jobId}-theme-changes-v${version}.patch` };
   if (name === 'readme') return { file: dir('README.md'), type: 'text/markdown; charset=utf-8', filename: `${jobId}-theme-changes-v${version}-README.md` };
   return null;
+}
+
+/** What the last build on the target did (design/build/state.json), or null. Type-only import: the web app doesn't load the builder. */
+export async function latestBuildState(jobId: string): Promise<import('./build.js').BuildState | null> {
+  return readJson<import('./build.js').BuildState>(jobPath(jobId, 'design', 'build', 'state.json')).catch(() => null);
 }

@@ -34,7 +34,7 @@ export const pages = [
     file: 'news.html',
     frames: [],
     html: shell(`${intro('News')}
-      <div class="listing_filter"><ul class="filter_tags"><li><a href="#">All</a></li><li><a href="#">HR</a></li><li><a href="#">IT</a></li></ul></div>
+      <div class="listing_filter"><div class="listing_select"><label for="newsDept">Filter by Department</label><select id="newsDept" name="department"><option value="hr">HR</option><option value="it">IT</option></select></div><ul class="filter_tags"><li><a href="#">All</a></li><li><a href="#">HR</a></li><li><a href="#">IT</a></li></ul></div>
       <section class="news_cards"><div class="topTitle"><h2>Department News</h2><a class="text_link" href="#">View All <img src="img/arrow.svg"></a></div><div class="row">${[1, 2, 3].map(card).join('')}</div></section>
       <nav class="listing_pagination"><ul><li><a href="#">1</a></li><li><a href="#">2</a></li></ul></nav>`),
   },

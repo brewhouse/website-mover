@@ -68,6 +68,14 @@ export interface Component {
   framework: { file: string; block: string | null; share: number } | null;
 }
 
+/** A drop-down in the content ("Filter by Department"): its label and the mockup's options. */
+export interface SelectFilter {
+  id: string | null;
+  name: string | null;
+  label: string;
+  options: string[];
+}
+
 export interface MenuItem {
   label: string;
   href: string;
@@ -81,7 +89,7 @@ export interface DesignModel {
     /** Content root on the pages, e.g. "div.page_main". */
     contentRoot: string;
   };
-  pages: { file: string; frames: string[]; sections: Section[]; framework: { file: string; share: number } | null }[];
+  pages: { file: string; frames: string[]; sections: Section[]; framework: { file: string; share: number } | null; selects?: SelectFilter[] }[];
   components: Component[];
   schema: {
     /** Pages whose name fits an existing post type (single or archive). */
@@ -522,7 +530,19 @@ export function buildModel({ pages, framework, schema }: ModelInput): DesignMode
       .find('[class]')
       .each((_, d) => classesOf(d as unknown as El).forEach((c) => !LAYOUT.test(c) && pageClasses.add(c)));
     const fw = framework?.best([...pageClasses], 0.3, (f) => !f.includes('/')) ?? null;
-    return { file: x.file, frames: x.frames, sections, framework: fw && { file: fw.file, share: fw.share } };
+    // Drop-downs (left out of the sections' values): what they're labelled and what they offer.
+    const selects: SelectFilter[] = x
+      .$(root as never)
+      .find('select')
+      .toArray()
+      .map((d) => {
+        const el = d as unknown as El;
+        const id = el.attribs.id ?? null;
+        const label = (id ? x.$(`label[for="${id}"]`).first().text() : '') || x.$(el as never).closest('label').text() || el.attribs['aria-label'] || '';
+        const options = x.$(el as never).find('option').toArray().map((o) => x.$(o).text().replace(/\s+/g, ' ').trim()).filter(Boolean);
+        return { id, name: el.attribs.name ?? null, label: label.replace(/\s+/g, ' ').trim(), options };
+      });
+    return { file: x.file, frames: x.frames, sections, framework: fw && { file: fw.file, share: fw.share }, selects };
   });
 
   // A section that matches a block's render template nearly as well as anything else restyles that

@@ -19,3 +19,4 @@ export { designState, designHeadline, saveDesignDecisions, saveFrameMatches, des
 export { generateTheme, type ThemeInput, type ThemeChangeSet, type ThemeFile } from './theme/generate.js';
 export { generateThemeChanges, latestThemeChanges, renderThemeReadme, type ThemeManifest, type ThemeRunOptions } from './theme/theme-run.js';
 export { writeZip } from './zip.js';
+export { buildDesign, rollbackDesignBuild, loadBuildState, acfField, groupDefinition, blockData, parseWhen, entryKey, mediaKey, type BuildState, type BuildBefore, type BuildRollbackResult } from './build.js';

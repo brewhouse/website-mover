@@ -74,6 +74,34 @@ export function setText($: cheerio.CheerioAPI, el: El, token: string): void {
 const firstLink = ($: cheerio.CheerioAPI, el: El): El | null => (el.name === 'a' ? el : (($(el as never).find('a').get(0) as unknown as El) ?? null));
 const firstImg = ($: cheerio.CheerioAPI, el: El): El | null => (el.name === 'img' ? el : (($(el as never).find('img').get(0) as unknown as El) ?? null));
 
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+/**
+ * A value worked out from the post rather than stored, recognised by the mockup's sample: part of
+ * a date ("JUL", "6", "Tuesday"), an event's time span, an image count ("12 photos") or initials.
+ * Returns the PHP expression, or null when the sample says nothing.
+ */
+export function derivedValue(sample: string, cls = ''): string | null {
+  const s = sample.toLowerCase();
+  const cased = (fmt: string) => (/^[A-Z]{2,}$/.test(sample) ? `strtoupper( wmd_date( '${fmt}' ) )` : `wmd_date( '${fmt}' )`);
+  const word = (list: string[]) => list.some((m) => s === m || (s.startsWith(m) && /^[a-z]+\.?$/.test(s)));
+  if (word(MONTHS)) return cased(s.replace('.', '').length > 3 ? 'F' : 'M');
+  if (word(DAYS)) return cased(s.replace('.', '').length > 3 ? 'l' : 'D');
+  if (/^\d{1,2}$/.test(sample) && Number(sample) >= 1 && Number(sample) <= 31) return /^0\d$/.test(sample) ? "wmd_date( 'd' )" : "wmd_date( 'j' )";
+  if (/^\d{4}$/.test(sample)) return "wmd_date( 'Y' )";
+  if (/^\d{1,2}(:\d{2})?\s*(am|pm)?\s*[-–]\s*\d{1,2}(:\d{2})?\s*(am|pm)?$/i.test(sample) || /^all\s*day$/i.test(sample)) return 'wmd_time_range()';
+  if (/^\d{1,2}:\d{2}\s*(am|pm)?$/i.test(sample)) return "wmd_date( get_option( 'time_format' ) )";
+  const count = /^\d+\s+([a-z]+)$/i.exec(sample);
+  if (count && /^(photo|image|picture|item|file)s?$/i.test(count[1]!)) {
+    const noun = count[1]!.replace(/s$/i, '');
+    return `sprintf( _n( '%d ${noun}', '%d ${noun}s', wmd_image_count() ), wmd_image_count() )`;
+  }
+  if (/^\d+$/.test(sample) && /count/i.test(cls)) return 'wmd_image_count()';
+  if (/^[A-Z]{1,3}$/.test(sample)) return 'wmd_initials( get_the_title() )';
+  return null;
+}
+
 /** Binds one element to a value. Returns false when it couldn't (nothing to put it in). */
 export function bindValue($: cheerio.CheerioAPI, php: Php, el: El, src: Source): boolean {
   const $el = $(el as never);
@@ -84,7 +112,7 @@ export function bindValue($: cheerio.CheerioAPI, php: Php, el: El, src: Source):
         return true;
       case 'permalink': {
         const a = firstLink($, el) ?? (($el.closest('a').get(0) as unknown as El) ?? null);
-        if (!a) return false;
+        if (!a) return true; // nothing links (an accordion title): nothing to do
         $(a as never).attr('href', php.echo('esc_url( get_permalink() )'));
         return true;
       }
@@ -107,9 +135,15 @@ export function bindValue($: cheerio.CheerioAPI, php: Php, el: El, src: Source):
         setText($, el, php.echo('esc_html( wmd_initials( get_the_title() ) )'));
         return true;
       case 'date':
-        setText($, el, php.echo('esc_html( get_the_date() )'));
-        if (el.name === 'time') $el.attr('datetime', php.echo("esc_attr( get_the_date( 'c' ) )"));
+        setText($, el, php.echo('esc_html( wmd_date() )'));
+        if (el.name === 'time') $el.attr('datetime', php.echo("esc_attr( wmd_date( 'c' ) )"));
         return true;
+      case 'derived': {
+        const expr = derivedValue($el.text().trim(), $el.attr('class') ?? '');
+        if (!expr) return false;
+        setText($, el, php.echo(`esc_html( ${expr} )`));
+        return true;
+      }
       case 'author':
         setText($, el, php.echo('esc_html( get_the_author() )'));
         return true;

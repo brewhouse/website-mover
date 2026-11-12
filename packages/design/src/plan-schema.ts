@@ -44,6 +44,8 @@ const fieldBase = {
   /** Where the mockup shows it: page, component and value path. */
   source: z.object({ page: z.string(), component: z.string(), path: z.string() }).nullable(),
   sample: z.string().nullable(),
+  /** post_object fields: the post type it points at. */
+  relatesTo: z.string().optional(),
 };
 export const PlanSubField = z.object(fieldBase);
 export const PlanField = z.object({ ...fieldBase, subFields: z.array(PlanSubField).default([]) });
@@ -167,6 +169,25 @@ export const PlanEntry = z.object({
 });
 export type PlanEntry = z.infer<typeof PlanEntry>;
 
+/**
+ * Entries linked to another post type's entries by a post_object field ("Filter by Department":
+ * news, events and documents each point at a department). Listing pages filter by it, and lists on
+ * a related entry's own page show only its entries.
+ */
+export const PlanRelation = z.object({
+  /** Field name, the same on every post type (the meta key). */
+  name: z.string(),
+  label: z.string(),
+  relatesTo: z.string(),
+  /** Query string parameter the filter uses (the mockup select's name). */
+  param: z.string(),
+  /** Post types that carry the field, with its key on each. */
+  on: z.array(z.object({ postType: z.string(), field: z.string() })),
+  /** The mockups' drop-downs that filter by it. */
+  filters: z.array(z.object({ page: z.string(), id: z.string().nullable(), name: z.string().nullable(), label: z.string(), postType: z.string(), themed: z.boolean() })),
+});
+export type PlanRelation = z.infer<typeof PlanRelation>;
+
 export const PlanMedia = z.object({ src: z.string(), bytes: z.number().nullable(), usedBy: z.array(z.string()) });
 
 export const DesignPlan = z.object({
@@ -186,6 +207,7 @@ export const DesignPlan = z.object({
   menus: z.array(PlanMenu),
   entries: z.array(PlanEntry),
   media: z.array(PlanMedia),
+  relations: z.array(PlanRelation).default([]),
   expected: z.object({
     templates: z.object({ update: z.number(), create: z.number() }),
     postTypes: z.number(),

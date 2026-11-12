@@ -40,8 +40,9 @@ describe('model', () => {
     const comps = sections('news.html').map((s) => s.component);
     expect(comps).toContain('listing_pagination');
     expect(sections('news.html').find((s) => s.component === 'listing_pagination')!.collections).toEqual([]);
-    // A wrapper around one list is the list: the section is named after it.
-    expect(sections('news.html').find((s) => s.component === 'filter_tags')!.collections[0]!.role).toBe('filters');
+    // The filter bar (a drop-down beside the tags, as on Newport) holds the filter list.
+    expect(sections('news.html').find((s) => s.component === 'listing_filter')!.collections[0]!.role).toBe('filters');
+    expect(m.pages.find((p) => p.file === 'news.html')!.selects).toEqual([{ id: 'newsDept', name: 'department', label: 'Filter by Department', options: ['HR', 'IT'] }]);
     const results = sections('result.html').filter((s) => s.component !== 'page_intro');
     expect(results).toHaveLength(1);
     expect(results[0]!.collections[0]).toMatchObject({ count: 4, item: 'div.result_row' });

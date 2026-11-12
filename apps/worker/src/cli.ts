@@ -37,6 +37,12 @@
  *   wm design theme --job nb [--theme <framework theme folder>]
  *              the theme change set for the approved plan (design/theme-changes/vN/: files, patch,
  *              zip, README). Without --theme, the theme unpacked from the job's upload.
+ *   wm design build --job nb --target env:NEWPORT
+ *              builds the approved plan on the target (B4): ACF post types, taxonomies and field
+ *              groups, the mockup's images, sample pages and entries, menus and the front page.
+ *              Re-runs update what it made. State in design/build/state.json.
+ *   wm design rollback --job nb --target env:NEWPORT
+ *              trashes what the build created and restores the field groups, menus and front page.
  * --target env:NAME reads NAME_URL, NAME_USER and NAME_APP_PASSWORD from .env (a hosted target
  * without the web app's database).
  *
@@ -149,7 +155,18 @@ if (command && (STAGES as string[]).includes(command)) {
         console.log(`Theme change set: data/jobs/${jobId}/design/theme-changes/v${m.planVersion}/README.md`);
         break;
       }
-      if (sub !== 'ingest') fail('wm design ingest | model | plan | approve | theme');
+      if (sub === 'build' || sub === 'rollback') {
+        // Writes to the target: only an explicit --target (never the default local seed by accident).
+        const explicit = process.argv.some((a) => a === '--target' || a.startsWith('--target='));
+        if (!explicit) fail('--target is required (e.g. --target env:NEWPORT)');
+        const { client } = await cliTarget(values.target!);
+        if (sub === 'build') {
+          const s = await design.buildDesign({ jobId, client, log: console.log });
+          console.log(`Build state: data/jobs/${jobId}/design/build/state.json (${s.failures.length} failures)`);
+        } else await design.rollbackDesignBuild({ jobId, client, log: console.log });
+        break;
+      }
+      if (sub !== 'ingest') fail('wm design ingest | model | plan | approve | theme | build | rollback');
       const { ingestDesign } = design;
       const inv = await ingestDesign({
         jobId,

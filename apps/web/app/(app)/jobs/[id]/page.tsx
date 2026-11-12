@@ -20,7 +20,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
   const { id } = await params;
   const job = await getJob(id);
   if (!job) notFound();
-  if (job.kind === 'design') return <DesignJob job={job} />;
+  if (job.kind === 'design') return <DesignJob job={job} canApprove={user.canApprove} />;
   const [runs, events, plan, report, auditTrail, onDisk] = await Promise.all([listRuns(id), recentEvents(id), planState(id), loadReport(id), listAudit(id, 20), stagesOnDisk(id)]);
   const active = runs.find((r) => r.status === 'queued' || r.status === 'running');
   const lastOf = (stage: string) => runs.find((r) => r.stage === stage) ?? null;

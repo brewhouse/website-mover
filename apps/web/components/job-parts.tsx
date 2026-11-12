@@ -43,6 +43,8 @@ function summarize(r: StageRun): string {
   if (r.stage === 'report' && 'failures' in s) return `${s.failures} failures`;
   if (r.stage === 'scan' && 'pages' in s) return `${s.pages} pages`;
   if (r.stage === 'design_plan' && s.version) return `Design plan v${s.version}, ${s.warnings} warnings`;
+  if (r.stage === 'design_build' && s.version) return `Built plan v${s.version}: ${s.entries} pages and entries, ${s.media} images, ${s.menus} menus, ${s.failures} failed, ${s.warnings} warnings`;
+  if (r.stage === 'design_rollback' && s.trashed !== undefined) return `Rolled back: ${s.trashed} trashed, ${s.groupsRestored} field groups restored, ${s.problems} problems`;
   if (r.stage === 'design_theme' && s.version) return `Theme change set v${s.version}: ${s.files} files, lint ${s.lint}, ${s.warnings} warnings`;
   if (r.stage === 'ingest' && 'pages' in s) return `${s.pages} pages, ${s.frames} frames${s.unmatched ? `, ${s.unmatched} unmatched` : ''}`;
   if (r.stage === 'model' && 'components' in s) return `${s.components} components in ${s.sections} sections`;

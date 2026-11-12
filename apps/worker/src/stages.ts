@@ -27,7 +27,7 @@ import { buildReport, executePlan, probeTarget, rollbackJob, runPostLaunch } fro
 import { runQa } from '@wm/qa';
 import type { WpClient } from '@wm/wp-client';
 
-export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa' | 'postlaunch' | 'rollback' | 'ingest' | 'model' | 'design_plan' | 'design_theme';
+export type StageName = 'scan' | 'extract' | 'analyze' | 'plan' | 'execute' | 'report' | 'qa' | 'postlaunch' | 'rollback' | 'ingest' | 'model' | 'design_plan' | 'design_theme' | 'design_build' | 'design_rollback';
 
 export interface StageContext {
   jobId: string;
@@ -186,6 +186,17 @@ export async function runStage(stage: StageName, ctx: StageContext): Promise<Rec
       for (const w of m.warnings) log(`  ! ${w}`);
       for (const f of m.files.filter((x) => x.lint === 'error')) log(`  ! PHP lint: ${f.path}: ${f.lintMessage}`);
       return { version: m.planVersion, files: m.files.length, replaced: m.files.filter((f) => f.action === 'replace').length, lint: m.lint, warnings: m.warnings.length };
+    }
+    case 'design_build': {
+      const design = await import('@wm/design');
+      const s = await design.buildDesign({ jobId, client: target().client, log });
+      const count = (k: 'entry' | 'media') => Object.values(s.entities).filter((e) => e.kind === k).length;
+      return { version: s.planVersion, entries: count('entry'), media: count('media'), menus: Object.keys(s.menus).length, failures: s.failures.length, warnings: s.warnings.length };
+    }
+    case 'design_rollback': {
+      const design = await import('@wm/design');
+      const r = await design.rollbackDesignBuild({ jobId, client: target().client, log });
+      return { ...r, problems: r.problems.length };
     }
     case 'qa': {
       const qa = await runQa({ jobId, baseUrl: target().client.baseUrl, log });

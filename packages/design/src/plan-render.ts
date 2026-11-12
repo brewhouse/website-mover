@@ -36,9 +36,13 @@ export function renderDesignPlan(plan: DesignPlan): string {
     out.push('', '## Taxonomies', '', '| Name | Label | | Post types | Terms (from the mockups) |', '|---|---|---|---|---|');
     for (const t of plan.taxonomies) out.push(`| \`${t.name}\` | ${t.label} | ${t.action === 'create' ? '**new**' : 'existing'} | ${t.postTypes.join(', ')} | ${short(t.terms.join(', '), 80)} |`);
   }
+  if (plan.relations.length) {
+    out.push('', '## Linked entries', '', 'A post-object field on each post type points at an entry of another type. Listing pages filter by it (`?param=slug`), and lists on that entry\'s own page show only its entries.', '', '| Field | Points at | On | Filter drop-downs |', '|---|---|---|---|');
+    for (const r of plan.relations) out.push(`| \`${r.name}\` (${r.label}) | \`${r.relatesTo}\` | ${r.on.map((o) => `\`${o.postType}\``).join(', ')} | ${r.filters.map((f) => `${f.page} "${esc(f.label)}"${f.themed ? '' : ' (plugin view)'}`).join(', ')} |`);
+  }
 
   out.push('', '## Field groups', '');
-  const fieldRow = (f: Omit<PlanField, 'subFields'>, indent = '') => `| ${indent}${f.action === 'add' ? '**new**' : 'existing'} | \`${f.name}\` | ${esc(f.label)} | ${f.type} | ${short(f.sample)} | ${f.source ? `${f.source.page} ${f.source.component}` : ''} |`;
+  const fieldRow = (f: Omit<PlanField, 'subFields'>, indent = '') => `| ${indent}${f.action === 'add' ? '**new**' : 'existing'} | \`${f.name}\` | ${esc(f.label)} | ${f.type}${f.relatesTo ? ` → \`${f.relatesTo}\`` : ''} | ${short(f.sample)} | ${f.source ? `${f.source.page} ${f.source.component}` : ''} |`;
   for (const g of plan.fieldGroups) {
     out.push(`### ${g.title} (\`${g.key}\`, ${g.action === 'create' ? 'new group' : g.action === 'extend' ? 'existing group, fields added' : 'existing, unchanged'})`, '', `Shown where ${g.location.param} = \`${g.location.value}\`.`, '', '| | Name | Label | Type | Mockup sample | From |', '|---|---|---|---|---|---|');
     for (const f of g.fields) {

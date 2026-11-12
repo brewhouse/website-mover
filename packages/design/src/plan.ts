@@ -7,7 +7,7 @@
  */
 import type { Collection, DesignModel, Leaf, MenuItem, Section } from './model.js';
 import { normText } from './pages.js';
-import { DesignPlan, type FieldType, type PageKind, type PlanBlock, type PlanEntry, type PlanField, type PlanFieldGroup, type PlanMenuItemT, type PlanPart, type PlanPostType, type PlanTaxonomy, type PlanTemplate } from './plan-schema.js';
+import { DesignPlan, type FieldType, type PageKind, type PlanBlock, type PlanEntry, type PlanField, type PlanFieldGroup, type PlanMenuItemT, type PlanPart, type PlanPostType, type PlanRelation, type PlanTaxonomy, type PlanTemplate } from './plan-schema.js';
 import { humanize, partKey, type Proposal, type ProposalField, type ProposalPart } from './propose.js';
 import { groupsFor, type AcfField, type TargetSchema } from './schema.js';
 
@@ -356,6 +356,47 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
     if (n > 1) e.slug = `${e.slug}-${n}`;
   }
 
+  // ── Relations: "Filter by Department" drop-downs ──────────────────────────
+  const relations: PlanRelation[] = [];
+  const singularWord = (w: string) => normText(w).replace(/ies$/, 'y').replace(/s$/, '');
+  for (const t of templates) {
+    const listType = t.postType;
+    if (!listType || t.kind === 'single') continue;
+    for (const sel of pageModel.get(t.page)?.selects ?? []) {
+      const word = (/\bby\s+(.+)$/i.exec(sel.label)?.[1] ?? sel.name ?? '').trim();
+      if (!word) continue;
+      const target = Object.entries(schema.post_types).find(([n, pt]) => n !== listType && n !== 'page' && [n, pt.label].some((x) => singularWord(x) === singularWord(word)))?.[0];
+      if (!target) continue;
+      const name = snake(singularWord(word));
+      const label = humanize(name);
+      let rel = relations.find((r) => r.name === name && r.relatesTo === target);
+      if (!rel) relations.push((rel = { name, label, relatesTo: target, param: sel.name ?? name, on: [], filters: [] }));
+      if (!rel.on.some((o) => o.postType === listType)) {
+        useType(listType, t.page);
+        // Its own group ("Department") on each type, not whatever group the type already has.
+        const [param, value] = listType === 'attachment' ? ['attachment', 'all'] : ['post_type', listType];
+        const id = `${param}==${value}#${name}`;
+        const g = groups.get(id) ?? { key: `group_wm_${name}_${snake(listType)}`, title: label, action: 'create' as const, location: { param, value }, fields: [] };
+        groups.set(id, g);
+        const f = addField(g, { name, label, type: 'post_object', source: { page: t.page, component: 'select', path: sel.id ? `select#${sel.id}` : 'select' }, sample: sel.options[0] ?? null });
+        f.relatesTo = target;
+        rel.on.push({ postType: listType, field: f.key });
+      }
+      rel.filters.push({ page: t.page, id: sel.id, name: sel.name, label: sel.label, postType: listType, themed: t.action !== 'plugin' });
+      if (t.action === 'plugin') warnings.push(`${t.page}: "${sel.label}" is in ${listType}'s own views, which the theme doesn't render; entries get the ${label} field, but this drop-down needs the plugin's own filters`);
+    }
+  }
+
+  // Sample entries listed on a related entry's own page (a department's news) belong to it; the
+  // build links them ({ entry: <mockup page> } is that page's sample entry).
+  for (const rel of relations) {
+    for (const e of entries) {
+      const on = rel.on.find((o) => o.postType === e.postType);
+      const host = templates.find((x) => x.page === e.source.page);
+      if (on && e.source.component !== null && host?.kind === 'single' && host.postType === rel.relatesTo) e.fields[on.field] = { entry: e.source.page };
+    }
+  }
+
   // ── Menus ─────────────────────────────────────────────────────────────────
   const targetFor = (href: string): string | null => {
     const file = href.split(/[?#]/)[0]!.split('/').pop() ?? '';
@@ -397,6 +438,7 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
     blocks: [...blocks.values()],
     menus,
     entries,
+    relations,
     media: [...media].map(([src, by]) => ({ src, bytes: input.mediaBytes?.(src) ?? null, usedBy: [...by].sort() })).sort((a, b) => a.src.localeCompare(b.src)),
     expected: {
       templates: { update: templates.filter((t) => t.action === 'update').length, create: templates.filter((t) => t.action === 'create').length },

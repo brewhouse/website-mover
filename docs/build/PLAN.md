@@ -180,7 +180,7 @@ The change set makes these changes:
 | **B1 Ingest** ✅ | Zip intake, screenshots, Figma frames and styles, frame ↔ page matching | Inventory of the 14 pages and 24 frames, with matches |
 | **B2 Model & plan** | Shell detection, collections and fields, reuse of the existing schema, AI proposal, plan schema, review screen | An approvable plan for Newport |
 | **B3 Theme generator** (lint ✅, applies ✅, notices: checked in B4) | Bootstrap 5 port, shell, templates, ACF blocks, assets, change set | PHP lint passes; no notices; it installs cleanly on a copy of the Newport repo |
-| **B4 Execute** | Types, fields, media, pages, events, menus, options, forms, rollback | Newport built on dev |
+| **B4 Execute** (code ✅, Newport dev: not run yet) | Types, fields, media, pages, events, menus, options, forms, rollback | Newport built on dev |
 | **B5 Verify & report** | Visual diff, report, QA | Per-template differences under an agreed threshold |
 
 ## B0 results (2026-11-10)
@@ -391,6 +391,48 @@ assets, 3.8 MB). **PHP lint passes**, and the patch applies cleanly to the Newpo
 - The Events Calendar's views aren't templated (its markup is styled where the class names match).
 
 Not done yet: loading it in WordPress (no notices) — that comes with B4 on Newport dev.
+
+## B3 follow-ups and linked departments (2026-11-11)
+
+- **Derived values:** parts of a date ("JUL", "6"), an event's time span and image counts ("24 Images")
+  are worked out from the entry rather than stored. The proposal marks them `core:derived`; the
+  generator prints `wmd_date()` (an event's start date with The Events Calendar), `wmd_time_range()`
+  and `wmd_image_count()`. Newport: 11 → 8 things to check.
+- **Linked entries (`plan.relations`):** a "Filter by <X>" drop-down on a listing, where X is an
+  existing post type, links the listed post type to it. Newport: posts, events and documents each
+  get a `department` post-object field (its own "Department" group per type) pointing at
+  `departments`. The theme fills the drop-down from the departments (each option is the listing
+  filtered by `?department=<slug>`), `wmd_query()` filters by it, and lists on a department's own page
+  show only that department's entries. Sample entries listed on a department's page are linked to it.
+  The calendar's drop-down is in The Events Calendar's own views, so it's left to its Filter Bar.
+
+## B4: build on the target (2026-11-11)
+
+`wm design build --job … --target env:NEWPORT`, or "Build on <target>" on the job page (approvers
+only). From the approved plan, in order:
+1. ACF post types and taxonomies (new ones), then the taxonomies' terms.
+2. Field groups. The bridge replaces a whole group, so an extended group is sent with all its
+   existing fields plus the plan's.
+3. The mockup's images (media library, tagged `design:media:<path>`).
+4. Pages and entries, tagged `design:<type>:<page>#<component>#<index>`: title, slug, excerpt, date,
+   featured image, terms, template, ACF blocks (page-builder pages) and fields (through the bridge),
+   with image paths turned into media IDs and links into the built pages. Events get their dates
+   through The Events Calendar's REST API. Fields that point at entries are set once all exist.
+5. Menus (rewritten as a whole) and the front page.
+
+Re-runs update what the build made. A page the build didn't make where the plan puts one (Newport's
+front page and `/page-builder-blocks/` from B0) is left as it is and linked to. A template the
+target's theme doesn't have yet is left off with a warning: deploy the theme change set and build
+again.
+
+**Rollback** (`wm design rollback`, or "Roll back the build"): `design/build/before.json`, taken before
+the first write, holds the extended field groups' definitions, the menus' items and the front-page
+settings. Rollback restores those, trashes the pages, entries and images the build made, deletes its
+terms and trashes its ACF items. The theme is reverted with git.
+
+Checked so far: unit tests (ACF definitions, block data, dates) and a read-only probe of Newport dev
+(bridge 0.1.1, TEC REST, the menus and front page it will touch). The first real build on Newport dev
+is the next step.
 
 ## Status (2026-11-09)
 

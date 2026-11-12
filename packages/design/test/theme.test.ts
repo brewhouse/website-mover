@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildDesignPlan, buildModel, draftProposal, generateTheme, parsePage, readZip, vocabulary, writeZip, type TargetSchema } from '../src/index.js';
+import { derivedValue } from '../src/theme/markup.js';
 import { framework, pages, schema as baseSchema } from './fixture.js';
 
 const schema: TargetSchema = {
@@ -117,5 +118,31 @@ describe('zip writer', () => {
     expect(entries[0]!.read().toString()).toBe('hello');
     expect(entries[1]!.read().equals(big)).toBe(true);
     expect(entries[2]!.read().length).toBe(0);
+  });
+});
+
+describe('derived values', () => {
+  it('recognises date parts, event times, image counts and initials from the mockup sample', () => {
+    expect(derivedValue('JUL')).toBe("strtoupper( wmd_date( 'M' ) )");
+    expect(derivedValue('Jul')).toBe("wmd_date( 'M' )");
+    expect(derivedValue('September')).toBe("wmd_date( 'F' )");
+    expect(derivedValue('6')).toBe("wmd_date( 'j' )");
+    expect(derivedValue('Tue')).toBe("wmd_date( 'D' )");
+    expect(derivedValue('2:00 PM - 3:00 PM')).toBe('wmd_time_range()');
+    expect(derivedValue('24 Images')).toContain('wmd_image_count()');
+    expect(derivedValue('JD')).toBe('wmd_initials( get_the_title() )');
+    expect(derivedValue('Category')).toBeNull();
+  });
+});
+
+describe('linked entries (Filter by Department)', () => {
+  it('puts a department field on the listed post type and turns the drop-down into the departments', () => {
+    expect(plan.relations).toEqual([expect.objectContaining({ name: 'department', relatesTo: 'departments', param: 'department', on: [expect.objectContaining({ postType: 'post' })] })]);
+    const g = plan.fieldGroups.find((x) => x.key === 'group_wm_department_post')!;
+    expect(g.fields[0]).toMatchObject({ name: 'department', type: 'post_object', relatesTo: 'departments' });
+    const t = changes.files.find((f) => f.path.startsWith('template-') && f.data.toString().includes('newsDept'))!.data.toString();
+    expect(t).toContain("foreach ( wmd_related_choices( 'department' ) as $wmd_choice )");
+    expect(t).not.toContain('<option value="hr">');
+    expect(file('inc/wm-design.php')).toMatch(/'department' => array\(\s*'param'\s*=> 'department',\s*'post_type' => 'departments',\s*'on'\s*=> array\( 'post' \)/);
   });
 });

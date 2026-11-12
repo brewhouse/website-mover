@@ -1,7 +1,7 @@
 import { stat } from 'node:fs/promises';
 import { jobPath } from '@wm/core';
 import { listAudit, listRuns, recentEvents, type Job } from '@wm/db';
-import { designState, latestThemeManifest, type ThemeManifest } from '@wm/design/review';
+import { designState, latestBuildState, latestThemeManifest, type BuildState, type ThemeManifest } from '@wm/design/review';
 import { ReplaceInput } from '@/components/design-upload';
 import { describe, RunsTable } from '@/components/job-parts';
 import { LiveLog } from '@/components/live-log';
@@ -20,9 +20,9 @@ const STEPS = [
 ] as const;
 
 /** The job page of a build-from-design job (docs/build/PLAN.md). */
-export async function DesignJob({ job }: { job: Job }) {
+export async function DesignJob({ job, canApprove }: { job: Job; canApprove: boolean }) {
   const id = job.id;
-  const [runs, events, state, auditTrail, theme] = await Promise.all([listRuns(id), recentEvents(id), designState(id).catch(() => null), listAudit(id, 20), latestThemeManifest(id)]);
+  const [runs, events, state, auditTrail, theme, build] = await Promise.all([listRuns(id), recentEvents(id), designState(id).catch(() => null), listAudit(id, 20), latestThemeManifest(id), latestBuildState(id)]);
   const inputs = Object.fromEntries(
     await Promise.all(
       (Object.keys(DESIGN_INPUTS) as DesignInput[]).map(async (name) => {
@@ -38,7 +38,12 @@ export async function DesignJob({ job }: { job: Job }) {
       if (!state) return { tone: 'neutral', text: 'no plan yet' };
       return state.approved ? { tone: 'ok', text: `v${state.plan.version} by ${state.approval!.approvedBy}` } : { tone: 'warn', text: `v${state.plan.version} to review` };
     }
-    if (s === 'build') return { tone: 'neutral', text: 'B4, coming' };
+    if (s === 'build') {
+      const run = lastOf('design_build');
+      if (build?.rolledBackAt) return { tone: 'neutral', text: 'rolled back' };
+      if (run?.status === 'done' && build) return { tone: build.failures.length ? 'warn' : 'ok', text: `v${build.planVersion} on target` };
+      return run ? { tone: run.status === 'failed' ? 'bad' : 'info', text: run.status } : { tone: 'neutral', text: 'not run' };
+    }
     if (s === 'design_theme' && lastOf(s)?.status === 'done' && theme) return { tone: theme.lint === 'errors' ? 'warn' : 'ok', text: `v${theme.planVersion}` };
     const run = lastOf(s);
     if (!run) return { tone: 'neutral', text: 'not run' };
@@ -102,10 +107,13 @@ export async function DesignJob({ job }: { job: Job }) {
                 { run: 'model', label: 'Model → plan', help: 'Read the target’s content types again and re-model, then plan.', disabled: lastOf('ingest')?.status === 'done' ? false : 'Ingest first.' },
                 { run: 'plan', label: 'Re-plan', help: 'A new plan version with the reviewers’ decisions (and the AI, when it’s set up).', disabled: lastOf('model')?.status === 'done' ? false : 'Model first.' },
                 { run: 'theme', label: 'Theme change set', help: 'The theme files for the approved plan: templates, blocks, header, sidebar, footer and the mockup’s assets, linted, as a zip and a patch.', disabled: state?.approved ? false : 'Approve the design plan first.' },
+                { run: 'build', label: `Build on ${job.targetName}`, help: 'Creates the post types, taxonomies and fields, uploads the images, and makes the sample pages, entries and menus on the target. Running it again updates what it made.', disabled: !canApprove ? 'Only approvers can build on the target.' : state?.approved ? false : 'Approve the design plan first.' },
+                ...(build && !build.rolledBackAt ? [{ run: 'rollback', label: 'Roll back the build', help: 'Trashes what the build created and puts back the field groups, menus and front page it changed. The theme is reverted with git.', disabled: (!canApprove ? 'Only approvers can roll back.' : false) as string | false }] : []),
               ]}
             />
           </Card>
           <ThemeCard jobId={id} theme={theme} approvedVersion={state?.approved ? state.plan.version : null} />
+          <BuildCard build={build} approvedVersion={state?.approved ? state.plan.version : null} />
           <Card title="Inputs">
             <div className="grid gap-4 p-4">
               {(Object.keys(DESIGN_INPUTS) as DesignInput[]).map((name) => (
@@ -132,6 +140,65 @@ export async function DesignJob({ job }: { job: Job }) {
         </div>
       </div>
     </>
+  );
+}
+
+/** What the last build did on the target. */
+function BuildCard({ build, approvedVersion }: { build: BuildState | null; approvedVersion: number | null }) {
+  if (!build) return null;
+  const targetUrl = build.targetUrl ?? null;
+  const entries = Object.values(build.entities).filter((e) => e.kind === 'entry');
+  const media = Object.values(build.entities).length - entries.length;
+  const pages = entries.filter((e) => e.postType === 'page');
+  return (
+    <Card title={`Build v${build.planVersion}`}>
+      <div className="grid gap-3 p-4 text-sm">
+        {build.rolledBackAt && <Notice tone="info">Rolled back {when(new Date(build.rolledBackAt))}.</Notice>}
+        {!build.rolledBackAt && approvedVersion !== null && approvedVersion !== build.planVersion && <Notice tone="warn">Built from plan v{build.planVersion}; v{approvedVersion} is approved now. Build again.</Notice>}
+        {!build.finishedAt && !build.rolledBackAt && <Notice tone="warn">The last build didn’t finish; run it again to complete it.</Notice>}
+        <div className="flex flex-wrap gap-2">
+          <Badge tone="neutral">{entries.length} pages and entries</Badge>
+          <Badge tone="neutral">{media} images</Badge>
+          <Badge tone="neutral">{Object.keys(build.menus).length} menus</Badge>
+          {build.failures.length > 0 && <Badge tone="bad">{build.failures.length} failed</Badge>}
+          {build.warnings.length > 0 && <Badge tone="warn">{build.warnings.length} to check</Badge>}
+        </div>
+        {targetUrl && pages.length > 0 && !build.rolledBackAt && (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-muted">Pages on the target</summary>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {pages.map((p) => (
+                <li key={p.id}>
+                  <a className="text-brand hover:underline" href={new URL(p.path, targetUrl).toString()} target="_blank" rel="noreferrer">
+                    {p.title}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {build.failures.length > 0 && (
+          <ul className="list-disc pl-5 text-xs text-bad">
+            {build.failures.map((f, i) => (
+              <li key={i}>
+                {f.step}: {f.error}
+              </li>
+            ))}
+          </ul>
+        )}
+        {build.warnings.length > 0 && (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-muted">What to check</summary>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {build.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+        <p className="text-xs text-muted">{build.finishedAt ? `Finished ${when(new Date(build.finishedAt))}` : `Started ${when(new Date(build.startedAt))}`} · approved by {build.approvedBy}.</p>
+      </div>
+    </Card>
   );
 }
 

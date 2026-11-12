@@ -163,4 +163,13 @@ alter table stage_runs add constraint stage_runs_stage_check
   check (stage in ('scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback', 'ingest', 'model', 'design_plan', 'design_theme'));
 `,
   },
+  {
+    name: '009_design_build.sql',
+    sql: `
+-- B4: building a design job's approved plan on its target, and rolling that back.
+alter table stage_runs drop constraint stage_runs_stage_check;
+alter table stage_runs add constraint stage_runs_stage_check
+  check (stage in ('scan', 'extract', 'analyze', 'plan', 'execute', 'report', 'qa', 'postlaunch', 'rollback', 'ingest', 'model', 'design_plan', 'design_theme', 'design_build', 'design_rollback'));
+`,
+  },
 ];

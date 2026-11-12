@@ -17,7 +17,7 @@ import * as cheerio from 'cheerio';
 import path from 'node:path';
 import { elementChildren, selector, type Collection, type DesignModel, type El } from '../model.js';
 import { normText } from '../pages.js';
-import type { DesignPlan, FieldType, PlanPart, PlanTemplate } from '../plan-schema.js';
+import type { DesignPlan, FieldType, PlanPart, PlanRelation, PlanTemplate } from '../plan-schema.js';
 import { helperLibrary, type EnqueueStyle } from './php-lib.js';
 import { bindValue, clearSelected, listItems, loop, Php, resolve, setText, type Source } from './markup.js';
 
@@ -258,6 +258,7 @@ export function generateTheme(input: ThemeInput): ThemeChangeSet {
     }
     const php = new Php();
     bindParts($, php, root, t, 'template', warnings, ctx);
+    bindRelationFilters($, php, root, t.page, plan.relations, warnings);
     const extras = offChain($, root).filter((e) => !common(e) && e.name !== 'script');
     const scope = $('<div></div>');
     scope.append($(root as never));
@@ -456,6 +457,7 @@ export function generateTheme(input: ThemeInput): ThemeChangeSet {
       scripts,
       dequeueStyles: [...new Set(dequeueStyles)],
       dequeueScripts: [...new Set(dequeueScripts)],
+      relations: plan.relations.map((r) => ({ name: r.name, param: r.param, relatesTo: r.relatesTo, on: r.on.map((o) => o.postType) })),
       blocks: plan.blocks.filter((b) => b.action === 'create').map((b) => ({ name: b.name, title: b.title, template: b.template, icon: 'layout' })),
       origin,
     }),
@@ -474,6 +476,35 @@ export function generateTheme(input: ThemeInput): ThemeChangeSet {
  * Applies a template's parts to the page DOM: values become PHP, lists become loops. In "template"
  * mode block sections are left to the_content(); in "block" mode they are the block's markup.
  */
+/**
+ * "Filter by Department": the drop-down offers the related post type's entries, each option the
+ * listing's URL filtered by it, and choosing one goes there.
+ */
+function bindRelationFilters($: cheerio.CheerioAPI, php: Php, root: El, page: string, relations: PlanRelation[], warnings: string[]): void {
+  for (const rel of relations) {
+    for (const f of rel.filters.filter((x) => x.page === page && x.themed)) {
+      const found = $(root as never)
+        .find('select')
+        .toArray()
+        .find((d) => (f.id ? d.attribs.id === f.id : d.attribs.name === f.name));
+      if (!found) {
+        warnings.push(`${page}: the "${f.label}" drop-down wasn't found, so it isn't linked to ${rel.relatesTo}`);
+        continue;
+      }
+      const n = q(rel.name);
+      // Its value is a URL, not a form value: it must not be submitted with a form around it.
+      $(found).removeAttr('name').attr('onchange', 'if ( this.value ) { window.location.href = this.value; }');
+      $(found)
+        .empty()
+        .append(
+          php.token(
+            `<option value="<?php echo esc_url( wmd_related_filter_url( ${n} ) ); ?>"><?php echo esc_html( wmd_related_all_label( ${n} ) ); ?></option><?php $wmd_picked = wmd_related_selected( ${n} ); foreach ( wmd_related_choices( ${n} ) as $wmd_choice ) : ?><option value="<?php echo esc_url( wmd_related_filter_url( ${n}, $wmd_choice ) ); ?>"<?php selected( $wmd_picked && $wmd_picked->ID === $wmd_choice->ID ); ?>><?php echo esc_html( get_the_title( $wmd_choice ) ); ?></option><?php endforeach; ?>`,
+          ),
+        );
+    }
+  }
+}
+
 function bindParts($: cheerio.CheerioAPI, php: Php, root: El, t: PlanTemplate, mode: 'template' | 'block', warnings: string[], ctx: Ctx): void {
   // Everything is found before anything changes, so paths stay valid.
   type Job = () => void;
@@ -543,7 +574,7 @@ function bindParts($: cheerio.CheerioAPI, php: Php, root: El, t: PlanTemplate, m
         values.push(() => {
           select(all, "'' === wmd_current_term()");
           const a = linkIn(all);
-          if (a) $(a as never).attr('href', php.echo('esc_url( get_permalink() )'));
+          if (a) $(a as never).attr('href', php.echo("esc_url( wmd_filter_base_url( 'wmd_term' ) )"));
         });
         items = items.slice(1);
       }

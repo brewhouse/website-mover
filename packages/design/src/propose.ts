@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { Collection, DesignModel, Leaf, Section } from './model.js';
 import { Binding, CoreField, FieldType, PageKind } from './plan-schema.js';
 import type { TargetSchema } from './schema.js';
+import { derivedValue } from './theme/markup.js';
 
 export const ProposalField = z.object({
   /** Value path from the part's root (the section, or one list item). */
@@ -89,6 +90,12 @@ function uniqueNames<T extends { name: string; label: string }>(fields: T[]): T[
   });
 }
 
+/** A sample the entry works out ("JUL", "6", "2:00 PM - 3:00 PM", "24 Images"); bare capitals may be an acronym. */
+const isDerived = (sample: string) => {
+  const v = derivedValue(sample);
+  return v !== null && v !== 'wmd_initials( get_the_title() )';
+};
+
 /** Values a list's entries show, mapped to WordPress fields where they obviously belong. */
 function entryFields(leaves: Leaf[]): ProposalField[] {
   const used = new Set<string>();
@@ -100,7 +107,8 @@ function entryFields(leaves: Leaf[]): ProposalField[] {
       .filter((l) => TYPE_FOR[l.kind] !== null || l.kind === 'initials')
       .map((l): ProposalField | null => {
         let core: z.infer<typeof CoreField> | null = null;
-        if (l.kind === 'initials') core = 'derived';
+        // Worked out from the entry (initials, a date's month or day, an event's time, an image count).
+        if (l.kind === 'initials' || (l.kind === 'text' && isDerived(l.sample))) core = 'derived';
         else if (l.kind === 'link' && !l.sample) core = take('permalink');
         else if (l.path === titlePath) core = take('title');
         else if (l.kind === 'image') core = take('featured_image');

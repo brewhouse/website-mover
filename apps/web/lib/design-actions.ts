@@ -65,7 +65,12 @@ const DESIGN_RUNS: Record<string, Stage[]> = {
   model: ['model', 'design_plan'],
   plan: ['design_plan'],
   theme: ['design_theme'],
+  build: ['design_build'],
+  rollback: ['design_rollback'],
 };
+
+/** Runs that write to the target: approvers only. */
+const APPROVER_RUNS = new Set(['build', 'rollback']);
 
 export async function runDesignStages(_: FormState, form: FormData): Promise<FormState> {
   const user = await requireUser();
@@ -73,6 +78,7 @@ export async function runDesignStages(_: FormState, form: FormData): Promise<For
   const stages = DESIGN_RUNS[text(form, 'run')];
   const job = await getJob(jobId);
   if (!stages || !job || job.kind !== 'design') return { error: 'Unknown job or action.' };
+  if (APPROVER_RUNS.has(text(form, 'run')) && !user.canApprove) return { error: 'Only approvers can build on the target or roll a build back.' };
   return queue(jobId, stages, user.id);
 }
 
