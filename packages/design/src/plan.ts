@@ -561,6 +561,16 @@ export function checkProposal(input: Pick<PlanInput, 'model' | 'schema' | 'propo
       }
       return true;
     });
+    // A value the rules mapped to WordPress's own field (an event's date, the title, the image) stays
+    // there unless the AI maps that field to another value: as an ACF field the entry would lose it
+    // (an event with no date, a post with no featured image).
+    for (const df of d.fields.filter((x) => x.core)) {
+      if (fields.some((x) => x.core === df.core)) continue;
+      const at = fields.findIndex((x) => x.path === df.path);
+      if (at >= 0) fields[at] = df;
+      else fields.push(df);
+      warnings.push(`AI: ${p.page} ${p.component}${p.collection ? ` list ${p.collection}` : ''}: kept ${df.path} as WordPress's ${df.core}`);
+    }
     if (problems.length) {
       warnings.push(`AI: ${p.page} ${p.component}${p.collection ? ` list ${p.collection}` : ''} kept as the rules had it (${problems.join('; ')})`);
       checked.push(d);

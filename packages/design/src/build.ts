@@ -17,6 +17,7 @@ import { acfBlock, htmlToBlocks, serializeBlocks, type Block } from '@wm/blocks'
 import { escapeHtml, jobPath, readJson, writeJson } from '@wm/core';
 import { WpError, type WpClient } from '@wm/wp-client';
 import type { DesignPlan, FieldType, PlanEntry, PlanField, PlanFieldGroup, PlanMenuItemT } from './plan-schema.js';
+import { prepareImage } from './media-prep.js';
 import { loadApprovedDesignPlan } from './plan-run.js';
 
 type AcfItem = Record<string, unknown> & { key: string };
@@ -357,29 +358,52 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
   };
   const source = dir(jobId, 'source');
   const mediaIds = new Map<string, { id: number; url: string }>();
+  const mediaFailed = new Set<string>(); // tried once this run: don't fail (or warn) again per use
+  const uploadMedia = async (data: Buffer, filename: string, contentType: string, key: string) => {
+    const prepared = await prepareImage(data, filename, contentType);
+    if (prepared.resized) log(`  ${filename}: ${prepared.resized.width}×${prepared.resized.height}, ${(prepared.resized.bytes / 1024 / 1024).toFixed(1)} MB → ${(prepared.data.length / 1024 / 1024).toFixed(1)} MB ${prepared.filename}`);
+    try {
+      return await client.upload<{ id: number; source_url: string }>(prepared.data, prepared.filename, prepared.contentType, { 'meta[_wm_source_key]': key, 'meta[_wm_job_id]': jobId });
+    } catch (err) {
+      // Pantheon answers 502 while WordPress is still making thumbnails: the file may have landed.
+      if (err instanceof WpError && ![502, 503, 504].includes(err.status)) throw err;
+      const saved = (await client.get<{ id: number; source_key: string | null; link: string }[]>('/website-mover/v1/entities', { types: 'attachment' })).find((e) => e.source_key === key);
+      if (!saved) throw err;
+      log(`  ${filename}: the upload timed out but arrived`);
+      return client.get<{ id: number; source_url: string }>(`/wp/v2/media/${saved.id}`, { context: 'edit', _fields: 'id,source_url' });
+    }
+  };
   const media = async (src: string): Promise<number | null> => {
     const clean = src.split(/[?#]/)[0]!.replace(/^\.?\//, '');
     if (mediaIds.has(clean)) return mediaIds.get(clean)!.id;
+    if (mediaFailed.has(clean)) return null;
     const key = mediaKey(clean);
-    const had = state.entities[key] ?? (existing.get(key) ? { kind: 'media' as const, id: existing.get(key)!.id, postType: 'attachment', path: new URL(existing.get(key)!.link, client.baseUrl).pathname, title: clean } : undefined);
+    const file = path.resolve(source, clean);
+    const inMockups = file.startsWith(path.resolve(source) + path.sep) && existsSync(file);
+    const onTarget = existing.get(key);
+    // An earlier run's upload that timed out (so this build never recorded it) may be the full-size
+    // original with thumbnails half made: upload it again, smaller, and trash that one.
+    const halfMade = !state.entities[key] && onTarget && inMockups ? onTarget : undefined;
+    const had = state.entities[key] ?? (onTarget && !halfMade ? { kind: 'media' as const, id: onTarget.id, postType: 'attachment', path: new URL(onTarget.link, client.baseUrl).pathname, title: clean } : undefined);
     if (had) {
       mediaIds.set(clean, { id: had.id, url: had.path });
       state.entities[key] = had;
       return had.id;
     }
-    const file = path.resolve(source, clean);
-    if (!file.startsWith(path.resolve(source) + path.sep) || !existsSync(file)) {
+    if (!inMockups) {
+      mediaFailed.add(clean);
       warn(`Image ${clean} isn't in the mockups`);
       return null;
     }
     const ext = path.extname(clean).slice(1).toLowerCase();
-    const up = await attempt(`upload ${clean}`, async () => {
-      const data = new Uint8Array(await readFile(file));
-      return client.upload<{ id: number; source_url: string }>(data, path.basename(clean), MIME[ext] ?? 'application/octet-stream', { 'meta[_wm_source_key]': key, 'meta[_wm_job_id]': jobId });
-    });
-    if (!up) return null;
+    const up = await attempt(`upload ${clean}`, async () => uploadMedia(await readFile(file), path.basename(clean), MIME[ext] ?? 'application/octet-stream', key));
+    if (!up) {
+      mediaFailed.add(clean);
+      return null;
+    }
     mediaIds.set(clean, { id: up.id, url: up.source_url });
     state.entities[key] = { kind: 'media', id: up.id, postType: 'attachment', path: new URL(up.source_url).pathname, title: path.basename(clean) };
+    if (halfMade && halfMade.id !== up.id) await attempt(`trash the earlier upload of ${clean}`, () => client.post('/website-mover/v1/trash', { ids: [halfMade.id] }));
     return up.id;
   };
   for (const m of plan.media) await media(m.src);

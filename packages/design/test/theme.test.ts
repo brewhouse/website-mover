@@ -146,3 +146,19 @@ describe('linked entries (Filter by Department)', () => {
     expect(file('inc/wm-design.php')).toMatch(/'department' => array\(\s*'param'\s*=> 'department',\s*'post_type' => 'departments',\s*'on'\s*=> array\( 'post' \)/);
   });
 });
+
+describe('AI proposal check', () => {
+  it('keeps a value the rules mapped to a WordPress field when the AI makes it an ACF field', async () => {
+    const { checkProposal } = await import('../src/plan.js');
+    const part = draft.parts.find((p) => p.fields.some((f) => f.core === 'title' || f.core === 'date'))!;
+    const core = part.fields.find((f) => f.core === 'title' || f.core === 'date')!;
+    const proposal = structuredClone(draft);
+    const p = proposal.parts.find((x) => x.page === part.page && x.path === part.path && x.collection === part.collection)!;
+    p.fields = p.fields.map((f) => (f.path === core.path ? { ...f, core: null, name: 'custom_value' } : f));
+    const warnings: string[] = [];
+    const checked = checkProposal({ model, schema, proposal, draft, vocabulary: vocab }, warnings).proposal;
+    const kept = checked.parts.find((x) => x.page === part.page && x.path === part.path && x.collection === part.collection)!;
+    expect(kept.fields.find((f) => f.path === core.path)).toMatchObject({ core: core.core });
+    expect(warnings.some((w) => w.includes(`kept ${core.path} as WordPress's ${core.core}`))).toBe(true);
+  });
+});
