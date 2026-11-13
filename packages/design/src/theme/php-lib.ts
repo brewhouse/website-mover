@@ -24,7 +24,33 @@ export interface LibraryInput {
   relations?: { name: string; param: string; relatesTo: string; on: string[] }[];
   /** Where it came from, for the file header. */
   origin: string;
+  /** The theme has tribe-events/default-template.php: route The Events Calendar's pages to it. */
+  events?: boolean;
 }
+
+/**
+ * The Events Calendar renders its pages with its own block templates when the theme counts as a block
+ * theme (a child of Twenty Twenty-Two does), with the parent's header and footer, and hides its
+ * "Events template" setting. This sends those pages to the theme's tribe-events/default-template.php,
+ * which TEC already uses by itself on a classic theme.
+ */
+const EVENTS_HOOK = `
+/** The Events Calendar's pages in the site's own header, sidebar and footer (tribe-events/default-template.php). */
+add_filter(
+	'template_include',
+	function ( $template ) {
+		if ( ! function_exists( 'tec_is_full_site_editor' ) || ! tec_is_full_site_editor() || ! function_exists( 'tribe' ) || ! class_exists( '\\\\Tribe\\\\Events\\\\Views\\\\V2\\\\Template_Bootstrap' ) ) {
+			return $template;
+		}
+		if ( is_404() || is_embed() || ! tribe( '\\\\Tribe\\\\Events\\\\Views\\\\V2\\\\Template_Bootstrap' )->should_load() ) {
+			return $template;
+		}
+		$file = locate_template( 'tribe-events/default-template.php' );
+		return $file ? $file : $template;
+	},
+	50
+);
+`;
 
 const q = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
@@ -137,7 +163,7 @@ add_action(
 ${blocks.replace(/^\t/gm, '\t\t')}
 	}
 );
-
+${x.events ? EVENTS_HOOK : ''}
 /** Whether an ACF value has something to show: not empty text, an empty link or no rows. */
 function wmd_has( $value ) {
 	if ( is_array( $value ) ) {
@@ -170,7 +196,7 @@ function wmd_text( $value ) {
 		if ( isset( $value['label'] ) ) {
 			return (string) $value['label'];
 		}
-		return implode( ', ', array_map( 'wmd_text', $value ) );
+		return implode( ', ', array_filter( array_map( 'wmd_text', $value ), 'strlen' ) );
 	}
 	if ( $value instanceof WP_Post ) {
 		return get_the_title( $value );
@@ -603,15 +629,37 @@ function wmd_menu( $name, $opts = array() ) {
 }
 
 /** Breadcrumb: the front page, the page's ancestors, the current page, with the mockup's classes. */
+/** A post type archive's name: the mockup's heading when a template set one ($GLOBALS['wmd_archive_titles']), else WordPress's. */
+function wmd_archive_title( $post_type ) {
+	if ( is_array( $post_type ) ) {
+		$post_type = reset( $post_type );
+	}
+	if ( ! empty( $GLOBALS['wmd_archive_titles'][ $post_type ] ) ) {
+		return $GLOBALS['wmd_archive_titles'][ $post_type ];
+	}
+	$type = get_post_type_object( (string) $post_type );
+	return $type ? $type->labels->name : '';
+}
+
 function wmd_breadcrumb( $ol_class = 'breadcrumb', $li_class = 'breadcrumb-item' ) {
 	$front  = (int) get_option( 'page_on_front' );
 	$crumbs = array( array( $front ? get_the_title( $front ) : __( 'Home' ), home_url( '/' ) ) );
 	if ( is_singular() && ! is_front_page() ) {
+		$type = get_post_type_object( get_post_type() );
+		if ( $type && $type->has_archive && ! in_array( $type->name, array( 'page', 'post' ), true ) ) {
+			$crumbs[] = array( wmd_archive_title( $type->name ), get_post_type_archive_link( $type->name ) );
+		}
 		foreach ( array_reverse( get_post_ancestors( get_the_ID() ) ) as $ancestor ) {
 			$crumbs[] = array( get_the_title( $ancestor ), get_permalink( $ancestor ) );
 		}
 	}
-	$current = is_search() ? sprintf( __( 'Search results for "%s"' ), get_search_query() ) : wp_strip_all_tags( get_the_title() );
+	if ( is_search() ) {
+		$current = sprintf( __( 'Search results for "%s"' ), get_search_query() );
+	} elseif ( is_post_type_archive() ) {
+		$current = wmd_archive_title( get_query_var( 'post_type' ) );
+	} else {
+		$current = wp_strip_all_tags( get_the_title() );
+	}
 	?>
 	<nav aria-label="breadcrumb">
 		<ol class="<?php echo esc_attr( $ol_class ); ?>">

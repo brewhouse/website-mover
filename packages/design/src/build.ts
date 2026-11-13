@@ -455,7 +455,11 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
     const file = href.split(/[?#]/)[0]!.split('/').pop() ?? '';
     const e = file ? entryByPage(file) : undefined;
     const id = e ? entityPath(state, entryKey(e)) : null;
-    return id ?? '#';
+    if (id) return id;
+    // A list page a plugin renders (calendar.html → the events archive). WordPress redirects the
+    // query to the archive's pretty URL, whatever the plugin's slug is.
+    const t = !e && file ? plan.templates.find((x) => x.page === file && x.kind === 'archive' && x.postType) : undefined;
+    return t ? `/?post_type=${encodeURIComponent(t.postType!)}` : '#';
   };
   const ctx: ValueContext = { media, entry: entryId, link };
   const fieldValues = async (e: PlanEntry) => {

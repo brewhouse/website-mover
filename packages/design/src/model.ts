@@ -119,6 +119,12 @@ export const distinctive = (el: El): string | undefined => classesOf(el).find((c
 export const selector = (el: El): string => `${el.name}${distinctive(el) ? `.${distinctive(el)}` : ''}`;
 const ownText = (el: El): string => el.children.filter((c) => c.type === 'text').map((c) => (c as { data: string }).data).join(' ').replace(/\s+/g, ' ').trim();
 const fullText = ($: cheerio.CheerioAPI, el: El): string => $(el as never).text().replace(/\s+/g, ' ').trim();
+/** Like fullText, but a <br> stays a line break ("123 Main Street<br>City" is two lines). */
+const lineText = ($: cheerio.CheerioAPI, el: El): string => {
+  const c = $(el as never).clone();
+  c.find('br').replaceWith('\uE000');
+  return c.text().replace(/\s+/g, ' ').trim().replace(/\s*\uE000\s*/g, '\n').trim();
+};
 /** Text of an element without a cheerio handle (for structure checks). */
 const textContent = (el: El): string =>
   el.children
@@ -290,7 +296,7 @@ function leavesOf(root: El, $: cheerio.CheerioAPI, exclude: Set<El>): Leaf[] {
       // Inline markup in running text (a link in a paragraph) stays part of the paragraph.
       const inline = el.children.some((c) => c.type === 'tag' && ['a', 'strong', 'em', 'b', 'i', 'span', 'br'].includes((c as El).name)) && own.length > 0;
       if (own || inline) {
-        const text = fullText($, el);
+        const text = lineText($, el);
         if (text && /\p{L}|\d/u.test(text)) {
           const kind = leafKind(el, text);
           out.push({ path, kind, label: label(el), sample: text });

@@ -144,13 +144,16 @@ export function pairedLabels(leaves: Leaf[]): Map<string, string> {
 }
 
 /** A section's (or a repeater row's) own values as ACF fields, named after the component when vague. */
-function ownFields(leaves: Leaf[], component: string): ProposalField[] {
+function ownFields(leaves: Leaf[], component: string, samples: Record<string, string>[] = []): ProposalField[] {
   const prefix = component
     .split('_')
     .filter((w) => w && !PREFIX_DROP.has(w))
     .join('_');
   const words = new Set(component.split('_'));
-  const pairs = pairedLabels(leaves);
+  // A heading that differs between a list's items ("Training Updates", "Classifieds") is a value, not
+  // the label of the link under it.
+  const varies = (path: string) => new Set(samples.map((r) => r[path] ?? '')).size > 1;
+  const pairs = new Map([...pairedLabels(leaves)].filter(([p, label]) => !varies(leaves.find((h) => h.path !== p && label === h.sample.replace(/[:：]\s*$/, ''))?.path ?? '')));
   const labelPaths = new Set([...pairs.keys()].map((p) => leaves.find((h) => h.path !== p && pairs.get(p) === h.sample.replace(/[:：]\s*$/, ''))?.path));
   return uniqueNames(
     leaves
@@ -310,6 +313,6 @@ function listPart(file: string, s: Section, c: Collection, page: Proposal['pages
     return { ...base, binding: 'filter', postType: type, taxonomy, block: null, fields: [] };
   }
   if (fit) return { ...base, binding: 'query', postType: fit, taxonomy: null, block: null, fields: entryFields(c.leaves.filter((l) => l.kind !== 'icon')) };
-  const fields = ownFields(c.leaves.filter((l) => l.kind !== 'icon'), '');
+  const fields = ownFields(c.leaves.filter((l) => l.kind !== 'icon'), '', c.samples);
   return { ...base, binding: block ? 'block' : 'repeater', postType: null, taxonomy: null, block, fields };
 }

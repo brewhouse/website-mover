@@ -292,10 +292,10 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
         // Each item in the mockup list becomes a sample entry of that type.
         coll?.samples.forEach((row, i) => {
           const title = part.fields.find((f) => f.core === 'title') ?? part.fields.find((f) => f.type === 'link' || f.type === 'text');
-          const name = title ? row[title.path] : undefined;
+          const name = title ? rowValue(row, title.path) : undefined;
           // Titles are the mockup's words; an item without one isn't a sample entry.
           if (!name) return;
-          const e: PlanEntry = { postType: part.postType!, title: name, slug: '', template: null, frontPage: false, source: { page: p.page, component: part.component, index: i }, core: {}, fields: {}, blocks: [] };
+          const e: PlanEntry = { postType: part.postType!, title: name.replace(/\s+/g, ' '), slug: '', template: null, frontPage: false, source: { page: p.page, component: part.component, index: i }, core: {}, fields: {}, blocks: [] };
           for (const f of part.fields) {
             if (f.core) setCore(e, f.core, valueOf(f.type, f.path, row), useMedia);
             else e.fields[fieldKeys.get(f)!] = valueOf(f.type, f.path, row, (src) => useMedia(src, `${part.postType} sample`));
@@ -410,6 +410,33 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
     }
     if (fromLists.length) warnings.push(`${fromLists.length} ${t.postType} entries from lists get the sample values of ${t.page} they don't show in the list (the mockup's sample text): replace them in WordPress`);
   }
+  // A type shown by several lists (people in "Welcome Aboard", "Upcoming Birthdays" and a staff list)
+  // would otherwise show each entry with only its own list's values wherever any of them appears:
+  // every entry gets the values the other lists show, from the first entry that has each one.
+  const listTypes = new Set(entries.filter((e) => e.source.component !== null).map((e) => e.postType));
+  for (const type of listTypes) {
+    const listed = entries.filter((e) => e.postType === type && e.source.component !== null);
+    if (new Set(listed.map((e) => `${e.source.page}#${e.source.component}`)).size < 2) continue;
+    let filled = 0;
+    for (const e of listed) {
+      let got = false;
+      for (const other of listed) {
+        if (other === e) continue;
+        for (const [k, v] of Object.entries(other.fields))
+          if (!(k in e.fields) && v !== null && v !== '' && !(v && typeof v === 'object' && 'entry' in (v as object))) {
+            e.fields[k] = structuredClone(v);
+            got = true;
+          }
+        for (const k of ['excerpt', 'featured_image', 'date'] as const)
+          if (other.core[k] !== undefined && e.core[k] === undefined) {
+            e.core[k] = structuredClone(other.core[k]);
+            got = true;
+          }
+      }
+      if (got) filled++;
+    }
+    if (filled) warnings.push(`${filled} ${type} entries get sample values from the other lists that show ${type} (the mockup's sample text), so each shows the same details everywhere: replace them in WordPress`);
+  }
 
   // ── Menus ─────────────────────────────────────────────────────────────────
   const targetFor = (href: string): string | null => {
@@ -517,8 +544,22 @@ function leafRecord(leaves: Leaf[]): Record<string, string> {
   return r;
 }
 
+/**
+ * A sample row's value at path. One list item can carry an extra class the others don't ("Documents &
+ * Forms" is a.has-corner among plain links), which changes its path: then the one value at the same
+ * path without classes is it.
+ */
+export function rowValue(row: Record<string, string>, key: string): string | undefined {
+  if (row[key] !== undefined) return row[key];
+  const bare = (k: string) => k.replace(/\.[\w-]+/g, '');
+  const want = bare(key);
+  const hits = Object.keys(row).filter((k) => bare(k) === want);
+  return hits.length === 1 ? row[hits[0]!] : undefined;
+}
+
 /** A field's sample value: images as the mockup path, links as { title, url }. */
-function valueOf(type: FieldType, path: string, row: Record<string, string>, onMedia?: (src: string) => void): unknown {
+function valueOf(type: FieldType, path: string, row0: Record<string, string>, onMedia?: (src: string) => void): unknown {
+  const row = new Proxy(row0, { get: (r, k) => (typeof k === 'string' ? rowValue(r, k) : undefined) });
   if (type === 'image' || type === 'file') {
     const src = row[`${path}@src`];
     if (src) onMedia?.(src);
@@ -532,7 +573,7 @@ function setCore(e: PlanEntry, core: string, value: unknown, useMedia: (src: str
   if (core === 'permalink' || core === 'derived' || value === null || value === undefined) return;
   if (core === 'title') {
     // A title taken from a link is the link's text.
-    e.title = typeof value === 'object' && value && 'title' in value ? String((value as { title: string }).title) : String(value);
+    e.title = (typeof value === 'object' && value && 'title' in value ? String((value as { title: string }).title) : String(value)).replace(/\s+/g, ' ');
     return;
   }
   if (core === 'term') {

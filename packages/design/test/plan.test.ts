@@ -118,3 +118,13 @@ describe('checking a proposal', () => {
     expect(plan(decided).entries.find((e) => e.source.page === 'news.html' && e.postType === 'page')!.title).toBe('Department News');
   });
 });
+
+describe('sample rows', () => {
+  it('reads an item whose element has an extra class by its path without classes', async () => {
+    const { rowValue } = await import('../src/plan.js');
+    const row = { 'a.has-corner': 'Documents & Forms', 'a.has-corner@href': '#', 'a.has-corner > img@src': 'img/x.svg' };
+    expect(rowValue(row, 'a')).toBe('Documents & Forms');
+    expect(rowValue(row, 'a@href')).toBe('#');
+    expect(rowValue({ 'span.a': 'x', 'span.b': 'y' }, 'span')).toBeUndefined();
+  });
+});

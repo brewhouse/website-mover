@@ -197,8 +197,9 @@ export function bindValue($: cheerio.CheerioAPI, php: Php, el: El, src: Source):
       if (a && scheme) {
         setText($, a, php.echo(`esc_html( ${shown} )`));
         $(a as never).attr('href', php.echo(scheme === 'mailto' ? `esc_url( 'mailto:' . antispambot( wmd_text( ${v} ) ) )` : `esc_url( 'tel:' . wmd_tel( ${v} ) )`));
-      } else setText($, el, php.echo(`esc_html( ${shown} )`));
-      guard($, php, a && scheme ? a : el, `wmd_has( ${v} )`);
+      } else setText($, el, php.echo(`nl2br( esc_html( ${shown} ) )`)); // a <br> in the mockup is a line break in the value
+      // What is shown is the text: a list of empty rows has values but no words.
+      guard($, php, a && scheme ? a : el, `'' !== trim( wmd_text( ${v} ) )`);
       return true;
     }
   }

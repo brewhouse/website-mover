@@ -439,6 +439,23 @@ Other rules from the first Newport builds (2026-11-12/13):
   list has entries or one of its values has something (its heading alone doesn't count).
 - The AI can't move a value the rules mapped to a WordPress field (an event's date) into an ACF field.
 
+After build v6 on Newport dev (2026-11-13):
+- **The Events Calendar:** `planeteriaweb` is a child of Twenty Twenty-Two, so WordPress counts it as a
+  block theme. TEC then renders its pages with its own block templates (the parent's header and
+  footer) and hides its "Events template" setting. The generator writes
+  `tribe-events/default-template.php` from the calendar mockup (its intro and breadcrumb, then TEC's
+  view where the mockup's calendar is), and the helper library sends TEC's pages to it on a block
+  theme (a `template_include` filter); on a classic theme TEC uses it by itself. Links to a list a
+  plugin renders (`calendar.html`) go to the post type's archive.
+- A `<br>` in a mockup value is a line break in the sample value (address, hours); text fields print
+  with `nl2br`, WYSIWYG fields get `<br>` from ACF.
+- A type shown in several lists (people in Welcome Aboard, Birthdays and Staff; events on the home
+  page and the calendar) gives every entry the values the other lists show (plan warning).
+- A list item with an extra class (`a.has-corner`) still gives its value; a heading that differs
+  between a repeater's rows ("Training Updates", "Classifieds") is a sub-field, not a link's label.
+- Text prints only when it has words (`wmd_text`, without empty rows); the breadcrumb names a post type
+  archive, and a single entry's crumb goes through its archive.
+
 **Rollback** (`wm design rollback`, or "Roll back the build"): `design/build/before.json`, taken before
 the first write, holds the extended field groups' definitions, the menus' items and the front-page
 settings. Rollback restores those, trashes the pages, entries and images the build made, deletes its

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildDesignPlan, buildModel, draftProposal, generateTheme, parsePage, readZip, vocabulary, writeZip, type TargetSchema } from '../src/index.js';
 import { derivedValue } from '../src/theme/markup.js';
+import { helperLibrary } from '../src/theme/php-lib.js';
 import { framework, pages, schema as baseSchema } from './fixture.js';
 
 const schema: TargetSchema = {
@@ -72,7 +73,7 @@ describe('theme generator', () => {
     expect(t).toContain("esc_url( 'mailto:' . antispambot(");
     // A list section shows only when the list has entries; an ACF value only when it has one.
     expect(t).toMatch(/\$wmd_q\d = wmd_query\( 'people', 3 \); if \( \$wmd_q\d->have_posts\(\) \) : \?>/);
-    expect(t).toMatch(/<\?php if \( wmd_has\( get_field\( 'email' \) \) \) : \?><a href="<\?php echo esc_url\( 'mailto:'/);
+    expect(t).toMatch(/<\?php if \( '' !== trim\( wmd_text\( get_field\( 'email' \) \) \) \) : \?><a href="<\?php echo esc_url\( 'mailto:'/);
     // One item is the loop's template; the mockup's copies are gone.
     expect(t.match(/class="staff_card"/g)).toHaveLength(1);
   });
@@ -180,5 +181,18 @@ describe('the helper library’s name', () => {
   it('leaves functions.php alone when it already loads it (the team’s own line)', () => {
     const c = run("<?php\nrequire_once get_stylesheet_directory() . '/inc/newport.php';\nfunction a() {}\n");
     expect(c.files.some((f) => f.path === 'functions.php')).toBe(false);
+  });
+});
+
+describe('The Events Calendar on a block theme', () => {
+  const lib = (events: boolean) => helperLibrary({ assetDir: 'assets/t', styles: [], scripts: [], dequeueStyles: [], dequeueScripts: [], blocks: [], origin: 'test', events });
+  it('sends TEC pages to tribe-events/default-template.php only when the change set has one', () => {
+    expect(lib(true)).toContain("locate_template( 'tribe-events/default-template.php' )");
+    expect(lib(true)).toContain("tribe( '\\\\Tribe\\\\Events\\\\Views\\\\V2\\\\Template_Bootstrap' )->should_load()");
+    expect(lib(false)).not.toContain('tribe-events/default-template.php');
+  });
+  it('names a post type archive in the breadcrumb, and leaves empty rows out of text', () => {
+    expect(lib(false)).toContain('} elseif ( is_post_type_archive() ) {');
+    expect(lib(false)).toContain("array_filter( array_map( 'wmd_text', $value ), 'strlen' )");
   });
 });
