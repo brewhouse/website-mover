@@ -87,13 +87,14 @@ export async function latestThemeManifest(jobId: string): Promise<ThemeManifest 
   return v ? readJson<ThemeManifest>(jobPath(jobId, 'design', 'theme-changes', `v${v}`, 'manifest.json')).catch(() => null) : null;
 }
 
-/** Downloads of a theme change set: the zip, the patch and the README. */
+/** Downloads of a theme change set: the zip, the patch, the README and the design plan it was made from. */
 export function themeDownload(jobId: string, version: number, name: string): { file: string; type: string; filename: string } | null {
   if (!Number.isInteger(version) || version < 1) return null;
   const dir = (f: string) => jobPath(jobId, 'design', 'theme-changes', `v${version}`, f);
   if (name === 'zip') return { file: dir(`theme-changes-v${version}.zip`), type: 'application/zip', filename: `${jobId}-theme-changes-v${version}.zip` };
   if (name === 'patch') return { file: dir('changes.patch'), type: 'text/x-diff; charset=utf-8', filename: `${jobId}-theme-changes-v${version}.patch` };
   if (name === 'readme') return { file: dir('README.md'), type: 'text/markdown; charset=utf-8', filename: `${jobId}-theme-changes-v${version}-README.md` };
+  if (name === 'plan') return { file: jobPath(jobId, 'design', 'plan', `plan.v${version}.json`), type: 'application/json; charset=utf-8', filename: `${jobId}-design-plan-v${version}.json` };
   return null;
 }
 

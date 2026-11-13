@@ -236,6 +236,9 @@ function ThemeCard({ jobId, theme, approvedVersion }: { jobId: string; theme: Th
           <a href={href('readme')} download className="rounded-md border border-line bg-panel px-3 py-1.5 text-sm font-medium hover:bg-canvas">
             README
           </a>
+          <a href={href('plan')} download className="rounded-md border border-line bg-panel px-3 py-1.5 text-sm font-medium hover:bg-canvas">
+            Plan JSON
+          </a>
         </div>
         <p className="text-xs text-muted">For the team to review and commit to the site’s repo ({theme.theme}); the README says how. Copy the files over the theme, never replace a folder. Made {when(new Date(theme.createdAt))}.</p>
         {lintErrors.length > 0 && (

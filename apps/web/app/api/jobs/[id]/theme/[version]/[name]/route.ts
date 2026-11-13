@@ -5,7 +5,7 @@ import { currentUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
-/** A design job's theme change set: the zip, the patch or the README (B3). */
+/** A design job's theme change set: the zip, the patch, the README or its design plan (B3). */
 export async function GET(_: Request, { params }: { params: Promise<{ id: string; version: string; name: string }> }) {
   const user = await currentUser();
   if (!user) return new Response('Log in first', { status: 401 });
