@@ -494,6 +494,10 @@ the change set's. Now:
   And the build drops what an earlier build added to an existing group that the plan no longer has
   (build-made `field_wm_…` keys and invalid ones, against `before.json`'s copy of the group: the
   group's own fields and an editor's stay), and writes a reused group when there's something to drop.
+- **After build v10:** the data and field definitions were right, but the site still ran an older
+  change set (its files have the same names, so the 404 check passed). The library now prints
+  `<meta name="wm-design" content="<job> vN">` in `<head>`, and the build warns when the home page's
+  stamp isn't the latest change set's.
 
 **Rollback** (`wm design rollback`, or "Roll back the build"): `design/build/before.json`, taken before
 the first write, holds the extended field groups' definitions, the menus' items and the front-page

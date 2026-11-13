@@ -26,6 +26,8 @@ export interface LibraryInput {
   origin: string;
   /** The theme has tribe-events/default-template.php: route The Events Calendar's pages to it. */
   events?: boolean;
+  /** Which change set this is ("newport v10"): printed in <head> so the build can tell what the target runs. */
+  stamp?: string;
 }
 
 /**
@@ -102,7 +104,16 @@ export function helperLibrary(x: LibraryInput): string {
  */
 
 defined( 'ABSPATH' ) || exit;
-
+${x.stamp ? `
+/** The theme change set the site runs (the build reads it to tell whether it's deployed). */
+add_action(
+	'wp_head',
+	function () {
+		echo '<meta name="wm-design" content="${x.stamp.replace(/[^\w .-]/g, '')}">' . PHP_EOL;
+	},
+	1
+);
+` : ''}
 /** URL of a file in the design's asset folder (the mockup's css/, js/, img/ and fonts/). */
 function wmd_asset( $path ) {
 	return get_stylesheet_directory_uri() . '/${x.assetDir}/' . ltrim( $path, '/' );

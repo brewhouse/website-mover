@@ -236,6 +236,13 @@ describe('after theme change set v7 on Newport dev', () => {
   });
 });
 
+describe('the change set stamp', () => {
+  it('prints which change set the site runs in <head>', () => {
+    const lib = changes.files.find((f) => f.path === 'inc/test.php')!.data.toString();
+    expect(lib).toContain(`<meta name="wm-design" content="test v${plan.version}">`);
+  });
+});
+
 describe('the helper library’s name', () => {
   const run = (functionsPhp: string) =>
     generateTheme({ plan, model, pages: new Map(pages.map((p) => [p.file, p.html])), slug: 'newport', readSource: () => null, readTheme: (rel) => (rel === 'functions.php' ? functionsPhp : (theme[rel] ?? null)) });

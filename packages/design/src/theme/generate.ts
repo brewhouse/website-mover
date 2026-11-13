@@ -510,6 +510,7 @@ export function generateTheme(input: ThemeInput): ThemeChangeSet {
       blocks: plan.blocks.filter((b) => b.action === 'create').map((b) => ({ name: b.name, title: b.title, template: b.template, icon: 'layout' })),
       origin,
       events,
+      stamp: `${slug} v${plan.version}`,
     }),
     'generated',
   );

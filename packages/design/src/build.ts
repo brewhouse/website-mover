@@ -316,6 +316,9 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
     if (missing === null) log(`Theme change set v${theme.planVersion}: couldn't check the target's theme files`);
     else if (missing.length) warn(`Theme change set v${theme.planVersion} isn't fully on the target: ${missing.slice(0, 6).join(', ')}${missing.length > 6 ? ` and ${missing.length - 6} more` : ''} not found (404). Deploy it before checking the pages${missing.some((f) => f.startsWith('inc/')) ? '; a missing inc/ file the theme loads stops every page' : ''}`);
     else log(`Theme change set v${theme.planVersion}: its library and assets are on the target`);
+    const runs = await deployedChangeSet(client.baseUrl);
+    if (runs && runs !== `${jobId.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()} v${theme.planVersion}`) warn(`The target's theme is change set ${runs.replace(/^.* /, '')}, not v${theme.planVersion}: deploy theme change set v${theme.planVersion} before checking the pages (its files keep their names, so the check above can't tell versions apart)`);
+    else if (runs) log(`The target runs theme change set v${theme.planVersion}`);
     if (theme.planVersion !== plan.version) warn(`The latest theme change set is v${theme.planVersion}, but plan v${plan.version} is approved: run "Theme change set" and deploy it`);
   }
 
@@ -672,6 +675,13 @@ export async function missingThemeFiles(baseUrl: string, m: ThemeManifest): Prom
     if (res.status === 404) missing.push(p);
   }
   return reached || !files.length ? missing : null;
+}
+
+/** The change set the target's theme says it is (<meta name="wm-design"> on the home page); null before v11 or unreachable. */
+export async function deployedChangeSet(baseUrl: string): Promise<string | null> {
+  const res = await safeFetch(new URL('/', baseUrl), { signal: AbortSignal.timeout(30_000) }).catch(() => null);
+  if (!res?.ok) return null;
+  return /<meta name="wm-design" content="([^"]+)"/.exec(await res.text())?.[1] ?? null;
 }
 
 const rank = (e: PlanEntry) => (e.postType === 'page' ? 0 : Object.values(e.fields).some((v) => v && typeof v === 'object' && 'entry' in (v as object)) ? 2 : 1);
