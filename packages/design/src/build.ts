@@ -351,6 +351,12 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
   // ── Media ──
   const onSite = await client.get<{ id: number; type: string; slug: string; template: string | null; front_page: boolean; source_key: string | null; link: string }[]>('/website-mover/v1/entities');
   const existing = new Map(onSite.filter((e) => e.source_key).map((e) => [e.source_key!, e]));
+  // What an earlier run made but the site no longer has (trashed by hand, or the database was
+  // restored or cloned from another environment): make it again rather than update a missing ID.
+  const ids = new Set(onSite.map((e) => e.id));
+  const gone = Object.entries(state.entities).filter(([key, e]) => !ids.has(e.id) || (existing.has(key) && existing.get(key)!.id !== e.id));
+  for (const [key] of gone) delete state.entities[key];
+  if (gone.length) warn(`${gone.length} of the pages, entries and images an earlier build made aren't on the target any more (database restored or cloned?): made again`);
   /** A page someone else made (B0, the seed, an editor) where the plan puts one: the build leaves it as it is. */
   const othersPage = (e: PlanEntry) => {
     if (e.postType !== 'page' || existing.has(entryKey(e)) || state.entities[entryKey(e)]) return undefined;
@@ -544,6 +550,9 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
           const created = await client.post<{ id: number }>('/wp/v2/menu-items', { title: item.label, menus: id, menu_order: ++n, parent, status: 'publish', ...menuTarget(item, (page) => {
             const id = entryId(page);
             return id ? { id, postType: entryByPage(page)!.postType } : null;
+          }, (postType, title) => {
+            const e = Object.values(state.entities).find((x) => x.kind === 'entry' && x.postType === postType && x.title === title);
+            return e ? { id: e.id, postType } : null;
           }, client.baseUrl) });
           await add(item.children, created.id);
         }
@@ -587,9 +596,19 @@ function menuItemsOf(client: WpClient, menu: number) {
 }
 
 /** Where a menu item goes: an entry or page, a post type's archive, the home page, or the mockup's own link. */
-function menuTarget(item: PlanMenuItemT, entryOf: (page: string) => { id: number; postType: string } | null, baseUrl: string): Record<string, unknown> {
+export function menuTarget(
+  item: PlanMenuItemT,
+  entryOf: (page: string) => { id: number; postType: string } | null,
+  entryTitled: (postType: string, title: string) => { id: number; postType: string } | null,
+  baseUrl: string,
+): Record<string, unknown> {
   const [kind, ref] = (item.target ?? '').split(/:(.*)/);
   if (kind === 'front') return { type: 'custom', url: new URL('/', baseUrl).toString() };
+  if (kind === 'title' && ref) {
+    const [postType, title] = ref.split(/:(.*)/);
+    const e = postType && title ? entryTitled(postType, title) : null;
+    if (e) return { type: 'post_type', object: e.postType, object_id: e.id };
+  }
   if ((kind === 'page' || kind === 'entry') && ref) {
     const e = entryOf(ref);
     if (e) return { type: 'post_type', object: e.postType, object_id: e.id };

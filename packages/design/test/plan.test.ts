@@ -59,7 +59,7 @@ describe('design plan', () => {
       ['email', 'reuse'],
     ]);
     expect(people.fields.find((f) => f.name === 'email')!.key).toBe('field_people_email');
-    expect(p.warnings).toEqual([]);
+    expect(p.warnings.filter((w) => !/links to nothing in the mockups|goes to the sample/.test(w))).toEqual([]);
   });
 
   it('reuses taxonomies with the mockup filter terms', () => {
@@ -81,9 +81,11 @@ describe('design plan', () => {
     const main = p.menus.find((m) => m.name === 'Main Menu')!;
     expect(main.items.map((i) => [i.label, i.target])).toEqual([
       ['Dashboard', null],
-      ['Departments', null],
+      ['Departments', 'archive:departments'],
       ['News', 'page:news.html'],
     ]);
+    // "#" links: named like nothing the mockups have, so they're left for review.
+    expect(p.warnings).toContain('Footer Menu: "Privacy" links to nothing in the mockups (#); set its link on review or in WordPress');
     expect(main.items[1]!.children[0]).toMatchObject({ label: 'Finance', target: 'entry:dept.html' });
   });
 });

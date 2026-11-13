@@ -43,3 +43,16 @@ describe('build: plan → ACF', () => {
     expect(parseWhen('Date/Timestamp')).toBeNull();
   });
 });
+
+describe('menu targets', () => {
+  it('links an item to the entry its label names, else the page or archive', async () => {
+    const { menuTarget } = await import('../src/build.js');
+    const item = (target: string | null, href = '#') => ({ label: 'x', href, target, children: [] });
+    const titled = (pt: string, title: string) => (pt === 'departments' && title === 'Finance' ? { id: 7, postType: pt } : null);
+    const byPage = (page: string) => (page === 'news.html' ? { id: 3, postType: 'page' } : null);
+    expect(menuTarget(item('title:departments:Finance'), byPage, titled, 'https://x.test')).toEqual({ type: 'post_type', object: 'departments', object_id: 7 });
+    expect(menuTarget(item('page:news.html'), byPage, titled, 'https://x.test')).toEqual({ type: 'post_type', object: 'page', object_id: 3 });
+    expect(menuTarget(item('archive:tribe_events'), byPage, titled, 'https://x.test')).toEqual({ type: 'post_type_archive', object: 'tribe_events' });
+    expect(menuTarget(item('title:departments:Gone'), byPage, titled, 'https://x.test')).toEqual({ type: 'custom', url: '#' });
+  });
+});

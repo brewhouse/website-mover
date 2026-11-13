@@ -408,9 +408,42 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
     if (t.kind === 'search' || t.kind === '404' || t.kind === '403') return null;
     return `page:${file}`;
   };
-  const menuItems = (items: MenuItem[]): PlanMenuItemT[] => items.map((i) => ({ label: i.label, href: i.href, target: targetFor(i.href), children: menuItems(i.children) }));
+  // A label names what the item opens when the mockup's link doesn't ("#"): a page, a post type, or
+  // an entry with that title. A link to a single entry's mockup page goes to the entry the label names.
+  const norm = (s: string) => s.toLowerCase().replace(/&amp;/g, '&').replace(/[^a-z0-9&]+/g, ' ').trim();
+  const sameName = (a: string, b: string) => {
+    const x = norm(a);
+    const y = norm(b);
+    return x === y || x.replace(/s$/, '') === y.replace(/s$/, '') || x === y.replace(/ department$/, '') || y === x.replace(/ department$/, '');
+  };
+  const byLabel = (label: string, type: string | null = null): string | null => {
+    if (!type) {
+      const page = entries.find((e) => e.postType === 'page' && e.source.component === null && sameName(e.title, label));
+      if (page) return page.frontPage ? 'front' : `page:${page.source.page}`;
+      for (const [name, pt] of Object.entries(schema.post_types)) if (pt.has_archive && (sameName(pt.label, label) || sameName(name, label))) return `archive:${name}`;
+    }
+    const entry = entries.find((e) => e.postType !== 'page' && (!type || e.postType === type) && sameName(e.title, label));
+    return entry ? `title:${entry.postType}:${entry.title}` : null;
+  };
+  const isHome = (href: string) => /^(index|home\d*)\.html$/i.test(href.split(/[?#]/)[0]!.split('/').pop() ?? '');
+  const menuTargetFor = (label: string, href: string): string | null => {
+    const t = targetFor(href) ?? (isHome(href) && templates.some((x) => x.kind === 'front-page') ? 'front' : null);
+    if (t?.startsWith('entry:')) {
+      const type = templates.find((x) => x.page === t.slice(6))?.postType ?? null;
+      const named = byLabel(label, type);
+      if (!named) warnings.push(`Menu item "${label}" goes to the sample ${type ?? 'entry'} of ${t.slice(6)}: the mockups have no entry by that name; point it at the right one in WordPress`);
+      return named ?? t;
+    }
+    return t ?? byLabel(label);
+  };
+  const menuItems = (items: MenuItem[], menu: string): PlanMenuItemT[] =>
+    items.map((i) => {
+      const target = menuTargetFor(i.label, i.href);
+      if (!target && !/^(https?:|mailto:|tel:)/i.test(i.href) && !i.children.length) warnings.push(`${menu}: "${i.label}" links to nothing in the mockups (${i.href || 'no link'}); set its link on review or in WordPress`);
+      return { label: i.label, href: i.href, target, children: menuItems(i.children, menu) };
+    });
   const MENU_NAMES: Record<string, string> = { aside: 'Main Menu', footer: 'Footer Menu', header: 'Header Menu' };
-  const menus = model.shell.menus.map((m) => ({ name: MENU_NAMES[m.location] ?? `${humanize(m.location)} Menu`, source: m.signature, items: menuItems(m.items) }));
+  const menus = model.shell.menus.map((m) => ({ name: MENU_NAMES[m.location] ?? `${humanize(m.location)} Menu`, source: m.signature, items: menuItems(m.items, MENU_NAMES[m.location] ?? `${humanize(m.location)} Menu`) }));
 
   // ── Checks ────────────────────────────────────────────────────────────────
   for (const g of groups.values()) {
