@@ -5,7 +5,9 @@
  *   - assets: the mockup's stylesheets, scripts, fonts and the images the CSS and the templates use,
  *     under assets/<job>/ with their relative paths kept (so the CSS's url()s still work)
  *   - inc/<job>.php (inc/wm-design.php before 2026-11-13): enqueues (Bootstrap 5 replaces the theme's Bootstrap 4), new blocks, helpers
- *   - functions.php: one line that loads it
+ *   - functions.php: one line that loads it. Hand-made design files an earlier step loaded from
+ *     functions.php (Newport's B0 inc/newport.php) are retired when nothing left in the theme uses
+ *     them: their line goes and they're listed for deletion (`removals`)
  *   - header.php, sidebar.php, footer.php: the mockup's shell, with WordPress menus, the signed-in
  *     user's card and the search form. The theme's own <head> and everything from wp_footer() on are
  *     kept
@@ -30,6 +32,8 @@ export interface ThemeInput {
   readSource: (rel: string) => Buffer | null;
   /** Reads a file of the original theme by its path in the theme; null when missing. */
   readTheme: (rel: string) => string | null;
+  /** The theme's PHP files (paths in the theme). Without it, earlier hand-made design files are kept. */
+  listTheme?: () => string[];
   /** Short name for the asset folder and the file headers, e.g. "newport". */
   slug: string;
 }
@@ -45,6 +49,8 @@ export interface ThemeFile {
 
 export interface ThemeChangeSet {
   files: ThemeFile[];
+  /** Theme files to delete (git rm), with why. They may be missing from the team's copy. */
+  removals: { path: string; why: string }[];
   /** Images and files the mockup CSS refers to that aren't in the mockups. */
   missingAssets: string[];
   /** Parts the generator couldn't bind, pages it skipped, and similar. */
@@ -477,14 +483,20 @@ export function generateTheme(input: ThemeInput): ThemeChangeSet {
   // Named after the job (inc/newport.php), like assets/<slug>/; a theme file of that name that isn't
   // ours keeps the generic name.
   const ours = (rel: string) => /Website Mover design build/.test(input.readTheme(rel) ?? 'Website Mover design build');
-  const libPath = /^[a-z0-9][a-z0-9_-]*$/i.test(slug) && ours(`inc/${slug}.php`) ? `inc/${slug}.php` : 'inc/wm-design.php';
+  const legacy = retireLegacy(input, functions, new Set(files.map((f) => f.path)), warnings);
+  const removals = legacy.removals;
+  const libPath = /^[a-z0-9][a-z0-9_-]*$/i.test(slug) && (ours(`inc/${slug}.php`) || removals.some((r) => r.path === `inc/${slug}.php`)) ? `inc/${slug}.php` : 'inc/wm-design.php';
+  if (libPath !== 'inc/wm-design.php' && legacy.retired.length) removals.push({ path: 'inc/wm-design.php', why: `the library's earlier name; it's ${libPath} now` });
   const enqueued = (fn: 'style' | 'script') => [...(functions ?? '').matchAll(new RegExp(`wp_enqueue_${fn}\\(\\s*['"]([^'"]+)['"]\\s*,\\s*[^;]*?['"]([^'"]+\\.${fn === 'style' ? 'css' : 'js'})['"]`, 'g'))].map((m) => ({ handle: m[1]!, file: m[2]! }));
   const mockupScripts = new Set(scripts.map((s) => path.posix.basename(s.src)));
+  // The theme's Bootstrap 4 and old stylesheets, and anything an earlier design step put under
+  // css/<slug>/ or js/<slug>/ (B0's Bootstrap 5 and newport.css): assets/<slug>/ replaces them.
+  const earlier = (dirName: string, file: string) => new RegExp(`/${dirName}/${slug.replace(/[^\w-]/g, '')}/`).test(file);
   const dequeueStyles = enqueued('style')
-    .filter((s) => /\/css\/(bootstrap|custom|responsive|style)[\w.-]*\.css$/.test(s.file))
+    .filter((s) => /\/css\/(bootstrap|custom|responsive|style)[\w.-]*\.css$/.test(s.file) || earlier('css', s.file))
     .map((s) => s.handle);
   const dequeueScripts = enqueued('script')
-    .filter((s) => /\/js\/(popper|bootstrap)[\w.-]*\.js$/.test(s.file) || mockupScripts.has(path.posix.basename(s.file)))
+    .filter((s) => /\/js\/(popper|bootstrap)[\w.-]*\.js$/.test(s.file) || mockupScripts.has(path.posix.basename(s.file)) || earlier('js', s.file))
     .map((s) => s.handle);
   add(
     libPath,
@@ -507,16 +519,61 @@ export function generateTheme(input: ThemeInput): ThemeChangeSet {
   if (functions === null) warnings.push(`The theme has no functions.php: load ${libPath} from it by hand`);
   else {
     const lines = functions.split('\n');
-    const isLoader = (l: string) => /\brequire(_once)?\b/.test(l) && (l.includes('Website Mover design build') || l.includes("/inc/wm-design.php'") || l.includes(`/${libPath}'`));
+    const isLoader = (l: string) => /\brequire(_once)?\b/.test(l) && (l.includes('Website Mover design build') || l.includes("/inc/wm-design.php'") || l.includes(`/${libPath}'`) || legacy.retired.some((r) => l.includes(`/${r}'`)));
     const loaders = lines.filter(isLoader);
-    if (!(loaders.length === 1 && loaders[0]!.includes(`/${libPath}'`))) {
-      if (libPath !== 'inc/wm-design.php' && functions.includes("/inc/wm-design.php'")) warnings.push(`functions.php loaded inc/wm-design.php; the library is ${libPath} now: delete inc/wm-design.php from the theme`);
+    if (!(loaders.length === 1 && loaders[0]!.includes(`/${libPath}'`) && !legacy.retired.some((r) => loaders[0]!.includes(`/${r}'`)))) {
+      if (libPath !== 'inc/wm-design.php' && functions.includes("/inc/wm-design.php'") && !removals.some((r) => r.path === 'inc/wm-design.php')) removals.push({ path: 'inc/wm-design.php', why: `the library's earlier name; it's ${libPath} now` });
       const kept = lines.filter((l) => !isLoader(l)).join('\n');
       add('functions.php', kept.replace(/^<\?php[^\n]*\n/, (m) => `${m}${line}\n`), loaders.length ? 'the line loading the library updated' : 'one line added');
     }
   }
 
-  return { files, missingAssets: [...missingAssets].sort(), warnings, templates };
+  // A retired file whose path the library now takes is replaced, not deleted.
+  const kept = new Set(files.map((f) => f.path));
+  return { files, removals: removals.filter((r) => !kept.has(r.path)), missingAssets: [...missingAssets].sort(), warnings, templates };
+}
+
+/**
+ * Design files an earlier step made by hand and loaded from functions.php (Newport's B0
+ * inc/newport.php, which loads inc/newport-home.php). They're retired when no theme file the change
+ * set leaves in place calls a function they define; otherwise they stay and a warning says which
+ * file still uses them.
+ */
+function retireLegacy(input: ThemeInput, functions: string | null, changed: Set<string>, warnings: string[]): { retired: string[]; removals: { path: string; why: string }[] } {
+  const none = { retired: [], removals: [] };
+  if (!functions || !input.listTheme) return none;
+  const roots = [...functions.matchAll(/\brequire(?:_once)?\s*\(?\s*get_(?:stylesheet|template)_directory\(\)\s*\.\s*'\/(inc\/[\w./-]+\.php)'/g)]
+    .map((m) => m[1]!)
+    .filter((rel) => {
+      const src = input.readTheme(rel);
+      return src !== null && !/Website Mover design build/.test(src) && /Website Mover|design \(B\d/.test(src);
+    });
+  if (!roots.length) return none;
+  // Each root with the files it loads from its own folder.
+  const group = new Set<string>();
+  const queue = [...roots];
+  while (queue.length) {
+    const rel = queue.shift()!;
+    if (group.has(rel)) continue;
+    group.add(rel);
+    for (const m of (input.readTheme(rel) ?? '').matchAll(/\brequire(?:_once)?\s*\(?\s*__DIR__\s*\.\s*'\/([\w.-]+\.php)'/g)) {
+      const child = path.posix.join(path.posix.dirname(rel), m[1]!);
+      if (input.readTheme(child) !== null) queue.push(child);
+    }
+  }
+  const defined = new Set([...group].flatMap((rel) => [...(input.readTheme(rel) ?? '').matchAll(/^\s*function\s+([A-Za-z_]\w*)\s*\(/gm)].map((m) => m[1]!)));
+  const users: string[] = [];
+  for (const rel of input.listTheme()) {
+    if (group.has(rel) || changed.has(rel) || rel === 'functions.php' || !rel.endsWith('.php')) continue;
+    const src = input.readTheme(rel) ?? '';
+    const call = [...defined].find((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(src));
+    if (call) users.push(`${rel} (${call}())`);
+  }
+  if (users.length) {
+    warnings.push(`Kept ${[...group].join(', ')} from an earlier design step: ${users.slice(0, 5).join(', ')} still use it. Retire it by hand once nothing does`);
+    return none;
+  }
+  return { retired: roots, removals: [...group].map((rel) => ({ path: rel, why: 'an earlier design step (B0); the generated templates replace it' })) };
 }
 
 /**

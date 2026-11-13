@@ -5,12 +5,12 @@
  *   changes.patch                       git diff against the uploaded theme (git apply from the repo root)
  *   theme-changes-v<N>.zip              files/ zipped
  *   README.md                           what changes, how to install it, what to check
- *   manifest.json                       files, lint results, warnings
+ *   manifest.json                       files, files to delete, lint results, warnings
  * The team reviews and commits it; nothing is pushed anywhere (docs/build/PLAN.md "Decisions").
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { jobPath, readJson, writeJson } from '@wm/core';
@@ -33,6 +33,8 @@ export interface ThemeManifest {
   createdAt: string;
   theme: string;
   files: { path: string; action: 'replace' | 'create'; bytes: number; from: string; lint: 'ok' | 'error' | 'skipped'; lintMessage?: string }[];
+  /** Theme files to delete (git rm --ignore-unmatch); missing in manifests before 2026-11-13. */
+  removals?: { path: string; why: string }[];
   templates: ThemeChangeSet['templates'];
   missingAssets: string[];
   warnings: string[];
@@ -85,6 +87,7 @@ export async function generateThemeChanges(opts: ThemeRunOptions): Promise<Theme
       const full = inside(themeRoot, rel);
       return full && existsSync(full) ? readFileSync(full, 'utf8') : null;
     },
+    listTheme: () => phpFiles(themeRoot),
   });
 
   const out = dir(jobId, 'theme-changes', `v${plan.version}`);
@@ -120,6 +123,12 @@ export async function generateThemeChanges(opts: ThemeRunOptions): Promise<Theme
       await writeFile(path.join(work, 'old', repoPath(f.path)), readFileSync(orig));
     }
   }
+  for (const r of changes.removals) {
+    const orig = inside(themeRoot, r.path);
+    if (!orig || !existsSync(orig)) continue;
+    await mkdir(path.dirname(path.join(work, 'old', repoPath(r.path))), { recursive: true });
+    await writeFile(path.join(work, 'old', repoPath(r.path)), readFileSync(orig));
+  }
   await mkdir(path.join(work, 'old'), { recursive: true });
   const diff = spawnSync('git', ['diff', '--no-index', '--binary', 'old', 'new'], { cwd: work, encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024 });
   const patch = diff.status === 1 ? diff.stdout.replace(/(^|[\s])([ab])\/(old|new)\//gm, '$1$2/') : null;
@@ -139,6 +148,7 @@ export async function generateThemeChanges(opts: ThemeRunOptions): Promise<Theme
       const l = lint.get(f.path);
       return { path: f.path, action: f.action, bytes: f.data.length, from: f.from, lint: l ? (l.ok ? 'ok' : 'error') : 'skipped', ...(l && !l.ok ? { lintMessage: l.message } : {}) };
     }),
+    removals: changes.removals,
     templates: changes.templates,
     missingAssets: changes.missingAssets,
     warnings: changes.warnings,
@@ -148,8 +158,20 @@ export async function generateThemeChanges(opts: ThemeRunOptions): Promise<Theme
   await writeJson(path.join(out, 'manifest.json'), manifest);
   await writeFile(path.join(out, 'README.md'), renderThemeReadme(manifest, plan));
   const php = manifest.files.filter((f) => f.path.endsWith('.php'));
-  log(`Theme change set v${plan.version}: ${manifest.files.filter((f) => f.action === 'replace').length} files replaced, ${manifest.files.filter((f) => f.action === 'create').length} new (${php.length} PHP), ${manifest.templates.length} templates, ${plan.blocks.length} blocks; lint ${manifest.lint}; ${manifest.warnings.length} warnings`);
+  log(`Theme change set v${plan.version}: ${manifest.files.filter((f) => f.action === 'replace').length} files replaced, ${manifest.files.filter((f) => f.action === 'create').length} new (${php.length} PHP)${changes.removals.length ? `, ${changes.removals.length} to delete` : ''}, ${manifest.templates.length} templates, ${plan.blocks.length} blocks; lint ${manifest.lint}; ${manifest.warnings.length} warnings`);
   return manifest;
+}
+
+/** The theme's PHP files, as paths in the theme (no vendor or node_modules). */
+function phpFiles(root: string, rel = ''): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(path.join(root, rel), { withFileTypes: true })) {
+    const p = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) {
+      if (!/^(\.|node_modules$|vendor$)/.test(e.name)) out.push(...phpFiles(root, p));
+    } else if (e.name.endsWith('.php')) out.push(p);
+  }
+  return out;
 }
 
 /** Plans made before B3 don't say where each value sits in the mockup. */
@@ -170,6 +192,8 @@ export function renderThemeReadme(m: ThemeManifest, plan: DesignPlan): string {
   const code = m.files.filter((f) => !f.path.startsWith('assets/'));
   const assets = m.files.filter((f) => f.path.startsWith('assets/'));
   const newTypes = plan.postTypes.filter((t) => t.action === 'create');
+  const removals = m.removals ?? [];
+  const rm = removals.length ? [`git rm --ignore-unmatch -- ${removals.map((r) => `${root}/${r.path}`).join(' ')}`] : [];
   const lines = [
     `# Theme change set v${m.planVersion}: ${m.jobId} (${m.theme})`,
     '',
@@ -180,12 +204,15 @@ export function renderThemeReadme(m: ThemeManifest, plan: DesignPlan): string {
     'From the root of a clone of the site\'s repo, on the branch that deploys to **dev**:',
     '',
     '```',
-    m.patch ? 'git apply --whitespace=nowarn /path/to/changes.patch' : `unzip /path/to/theme-changes-v${m.planVersion}.zip`,
+    m.patch ? 'git apply --whitespace=nowarn /path/to/changes.patch' : `unzip -o /path/to/theme-changes-v${m.planVersion}.zip`,
+    ...rm,
     `git add ${root}`,
     `git commit -m "Design build: theme change set v${m.planVersion}"`,
     '```',
     '',
-    `Or unzip \`theme-changes-v${m.planVersion}.zip\` over the repo root: it has the same paths. Don't merge to test or live until the build (B4) has created the content types, fields and menus these templates read.`,
+    `Or unzip \`theme-changes-v${m.planVersion}.zip\` over the repo root: it has the same paths${removals.length ? ', then run the `git rm` line (the zip can\'t delete files)' : ''}. Don't merge to test or live until the build (B4) has created the content types, fields and menus these templates read.`,
+    '',
+    '**Copy files over the theme, never replace a folder.** Theme files this change set doesn\'t list stay as they are, and some are still loaded (a missing `inc/` file stops every page with a fatal error). Before pushing, `git status` should show only the files below as changed, new or deleted. After pushing, open the home page signed out and check it loads.',
     '',
     `**PHP lint:** ${m.lint === 'ok' ? 'every PHP file passes `php -l`' : m.lint === 'errors' ? `${m.files.filter((f) => f.lint === 'error').length} files fail \`php -l\` (below)` : 'not run (PHP isn\'t installed where this was generated)'}.`,
     '',
@@ -194,6 +221,7 @@ export function renderThemeReadme(m: ThemeManifest, plan: DesignPlan): string {
     '| File | Change | From |',
     '|---|---|---|',
     ...code.map((f) => `| \`${f.path}\` | ${f.action === 'replace' ? 'Replaced' : '**New**'}${f.lint === 'error' ? ' ⚠ lint' : ''} | ${f.from} |`),
+    ...removals.map((r) => `| \`${r.path}\` | **Delete** | ${r.why} |`),
     `| \`assets/${m.jobId}/\` | **New** | ${assets.length} files from the mockups (${kb(assets.reduce((n, f) => n + f.bytes, 0))}): stylesheets, scripts, fonts and the images the CSS and templates use |`,
     '',
     '## How it works',

@@ -19,6 +19,8 @@ import { WpError, type WpClient } from '@wm/wp-client';
 import type { DesignPlan, FieldType, PlanEntry, PlanField, PlanFieldGroup, PlanMenuItemT } from './plan-schema.js';
 import { prepareImage } from './media-prep.js';
 import { loadApprovedDesignPlan } from './plan-run.js';
+import { safeFetch } from '@wm/net';
+import { latestThemeChanges, type ThemeManifest } from './theme/theme-run.js';
 
 type AcfItem = Record<string, unknown> & { key: string };
 type SchemaGroup = AcfItem & { title: string; fields: AcfItem[] };
@@ -296,6 +298,15 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
       return null;
     }
   };
+
+  const theme = await latestThemeChanges(jobId);
+  if (theme) {
+    const missing = await missingThemeFiles(client.baseUrl, theme);
+    if (missing === null) log(`Theme change set v${theme.planVersion}: couldn't check the target's theme files`);
+    else if (missing.length) warn(`Theme change set v${theme.planVersion} isn't fully on the target: ${missing.slice(0, 6).join(', ')}${missing.length > 6 ? ` and ${missing.length - 6} more` : ''} not found (404). Deploy it before checking the pages${missing.some((f) => f.startsWith('inc/')) ? '; a missing inc/ file the theme loads stops every page' : ''}`);
+    else log(`Theme change set v${theme.planVersion}: its library and assets are on the target`);
+    if (theme.planVersion !== plan.version) warn(`The latest theme change set is v${theme.planVersion}, but plan v${plan.version} is approved: run "Theme change set" and deploy it`);
+  }
 
   let schema = await client.get<LiveSchema>('/website-mover/v1/schema');
   if (!schema.acf) throw new Error('ACF is not active on the target');
@@ -627,6 +638,25 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
   await save();
   log(`Built: ${Object.values(state.entities).filter((x) => x.kind === 'entry').length} pages and entries, ${Object.values(state.entities).filter((x) => x.kind === 'media').length} images, ${state.failures.length} failures, ${state.warnings.length} warnings`);
   return state;
+}
+
+/**
+ * The change set's files that the target doesn't serve: its inc/ library (which exits at once when
+ * opened directly) and its stylesheets and scripts. Templates aren't requested, since opening one
+ * outside WordPress is a PHP error. null when the target can't be reached.
+ */
+export async function missingThemeFiles(baseUrl: string, m: ThemeManifest): Promise<string[] | null> {
+  const files = m.files.map((f) => f.path).filter((p) => /^inc\/[\w-]+\.php$/.test(p) || /^assets\/[^/]+\/(css|js)\/[\w.-]+\.(css|js)$/.test(p));
+  const missing: string[] = [];
+  let reached = false;
+  for (const p of files.slice(0, 40)) {
+    const url = new URL(`/wp-content/themes/${m.theme}/${p}`, baseUrl);
+    const res = await safeFetch(url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(15_000) }).catch(() => null);
+    if (!res) continue;
+    reached = true;
+    if (res.status === 404) missing.push(p);
+  }
+  return reached || !files.length ? missing : null;
 }
 
 const rank = (e: PlanEntry) => (e.postType === 'page' ? 0 : Object.values(e.fields).some((v) => v && typeof v === 'object' && 'entry' in (v as object)) ? 2 : 1);

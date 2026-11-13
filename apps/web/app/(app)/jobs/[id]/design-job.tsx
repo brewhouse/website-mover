@@ -215,8 +215,14 @@ function ThemeCard({ jobId, theme, approvedVersion }: { jobId: string; theme: Th
         <div className="flex flex-wrap gap-2">
           <Badge tone={theme.lint === 'ok' ? 'ok' : theme.lint === 'errors' ? 'bad' : 'neutral'}>{theme.lint === 'ok' ? 'PHP lint passes' : theme.lint === 'errors' ? `${lintErrors.length} lint errors` : 'not linted'}</Badge>
           <Badge tone="neutral">{replaced} replaced, {theme.files.length - replaced} new</Badge>
+          {(theme.removals?.length ?? 0) > 0 && <Badge tone="warn">{theme.removals!.length} to delete</Badge>}
           {theme.warnings.length > 0 && <Badge tone="warn">{theme.warnings.length} to check</Badge>}
         </div>
+        {(theme.removals?.length ?? 0) > 0 && (
+          <p className="text-xs text-muted">
+            Delete with git (the zip can’t): {theme.removals!.map((r) => r.path).join(', ')}. The README has the command.
+          </p>
+        )}
         <div className="flex flex-wrap gap-2">
           {/* Plain links: these are file downloads, not pages. */}
           <a href={href('zip')} download className="rounded-md border border-brand bg-brand px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
@@ -231,7 +237,7 @@ function ThemeCard({ jobId, theme, approvedVersion }: { jobId: string; theme: Th
             README
           </a>
         </div>
-        <p className="text-xs text-muted">For the team to review and commit to the site’s repo ({theme.theme}); the README says how. Made {when(new Date(theme.createdAt))}.</p>
+        <p className="text-xs text-muted">For the team to review and commit to the site’s repo ({theme.theme}); the README says how. Copy the files over the theme, never replace a folder. Made {when(new Date(theme.createdAt))}.</p>
         {lintErrors.length > 0 && (
           <ul className="list-disc pl-5 text-xs text-bad">
             {lintErrors.map((f) => (

@@ -456,6 +456,26 @@ After build v6 on Newport dev (2026-11-13):
 - Text prints only when it has words (`wmd_text`, without empty rows); the breadcrumb names a post type
   archive, and a single entry's crumb goes through its archive.
 
+After deploying theme change set v7 on Newport dev (2026-11-13): the deploy replaced `inc/` with the
+zip's, deleting B0's `inc/newport.php`, which `functions.php` still loaded, and every page stopped
+with a fatal error until it was restored. The live site also loaded B0's Bootstrap and scripts next to
+the change set's. Now:
+- **B0 is retired:** a library an earlier step loaded from `functions.php` (a non-generated
+  `inc/*.php` that says "Website Mover" or "design (B0)", plus what it loads with `__DIR__`) is retired
+  when no theme file the change set leaves alone calls one of its functions. Its line goes, its files
+  are listed for deletion (`removals` in the manifest, "Delete" in the README, `git rm
+  --ignore-unmatch` in the install steps, deletions in the patch), and the library takes back
+  `inc/<job>.php` (deleting `inc/wm-design.php`). Otherwise it stays, with a warning naming the file
+  that still uses it.
+- Styles and scripts under `css/<job>/` and `js/<job>/` (B0's) are dequeued: `assets/<job>/` replaces
+  them.
+- The README and the job page say to copy files over the theme, never replace a folder.
+- **The build checks the deploy:** before building, it requests the latest change set's `inc/` library
+  and stylesheets and scripts on the target (templates aren't requested: opened directly they're a PHP
+  error) and warns about any 404, and when the change set isn't for the approved plan. No load-line
+  guard in `functions.php`: the header and templates call the library, so a missing library would
+  still stop every page, only with a less clear error.
+
 **Rollback** (`wm design rollback`, or "Roll back the build"): `design/build/before.json`, taken before
 the first write, holds the extended field groups' definitions, the menus' items and the front-page
 settings. Rollback restores those, trashes the pages, entries and images the build made, deletes its
