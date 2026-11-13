@@ -482,6 +482,12 @@ the change set's. Now:
   Resources was). The AI's block names lose their namespace (`acf/acf/buttons_list` →
   `buttons-list`): the build wrote `acf/acf/acf/buttons-list`, a block nothing renders, so Resources
   didn't show even on the mockup's own department.
+- **From Render's plan v8** (the home page's Quick Links and Follow Us empty, every hero slide "More
+  About This"): the AI made values repeaters, the list item itself (`path: ""`, a nested repeater
+  named like its list) and the banner's `h1` (as the existing `main_banner` repeater). A value is
+  never a repeater now: the rules' field for that path stands in, or it's left out (plan warning).
+  And sub-fields a list adds to a field another part made first get keys (they had `""`, so each
+  slide's row held only its link).
 
 **Rollback** (`wm design rollback`, or "Roll back the build"): `design/build/before.json`, taken before
 the first write, holds the extended field groups' definitions, the menus' items and the front-page

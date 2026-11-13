@@ -188,6 +188,37 @@ describe('after theme change set v7 on Newport dev', () => {
     const out = c.files.find((f) => f.path === t.file)!.data.toString();
     expect(out.match(/<\?php the_content\(\); \?>/g)).toHaveLength(1);
   });
+  it('never takes a repeater as a value (the list item, or a heading over a list) from the AI', async () => {
+    const { checkProposal } = await import('../src/plan.js');
+    const list = draft.parts.find((p) => p.collection !== null && p.fields.length)!;
+    const proposal = structuredClone(draft);
+    const p = proposal.parts.find((x) => x.page === list.page && x.path === list.path && x.collection === list.collection)!;
+    p.fields.unshift({ ...p.fields[0]!, path: '', name: 'items', label: 'Items', type: 'repeater', core: null });
+    const warnings: string[] = [];
+    const checked = checkProposal({ model, schema, proposal, draft, vocabulary: vocab }, warnings).proposal;
+    const kept = checked.parts.find((x) => x.page === list.page && x.path === list.path && x.collection === list.collection)!;
+    expect(kept.fields.some((f) => f.type === 'repeater')).toBe(false);
+    expect(kept.fields.length).toBe(list.fields.length);
+    expect(warnings.some((w) => w.includes("isn't a repeater"))).toBe(true);
+  });
+  it('gives keys to sub-fields a list adds to a field another part made first', () => {
+    const run = (proposal: typeof draft) => buildDesignPlan({ jobId: 'test', version: 4, model, schema, proposal, draft, vocabulary: vocab, themeFiles: ['page.php', 'single-departments.php', 'search.php'], inputs: { modelSha256: 'm', inventorySha256: 'i', schemaReadAt: '2026-11-10T00:00:00Z', targetUrl: 'https://example.test', theme: 'planeteriaweb' }, ai: null, now: new Date('2026-11-10T00:00:00Z') });
+    // The staff list as a repeater, and the section's heading as a field of the same name (made first).
+    const proposal = structuredClone(draft);
+    const lp = proposal.parts.find((x) => x.page === 'dept.html' && x.component === 'staff' && x.collection !== null)!;
+    lp.binding = 'repeater';
+    lp.postType = null;
+    lp.fields = lp.fields.map((f) => ({ ...f, core: null }));
+    const before = run(proposal);
+    const repeater = before.fieldGroups.flatMap((g) => g.fields).find((f) => f.type === 'repeater' && f.source.component === 'staff')!;
+    const hp = proposal.parts.find((x) => x.page === 'dept.html' && x.component === 'staff' && x.collection === null)!;
+    hp.binding = 'fields';
+    hp.fields = [{ path: '', name: repeater.name, label: 'Staff', type: 'text', core: null }];
+    const after = run(proposal);
+    const subs = after.fieldGroups.flatMap((g) => g.fields).filter((f) => f.name === repeater.name).flatMap((f) => f.subFields);
+    expect(subs.length).toBeGreaterThan(0);
+    for (const sf of subs) expect(sf.key).not.toBe('');
+  });
   it('keeps a linked image when the link is empty: only the tags go', async () => {
     const { Php } = await import('../src/theme/markup.js');
     const php = new Php();

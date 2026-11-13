@@ -177,7 +177,8 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
   const addField = (g: PlanFieldGroup, f: { name: string; label: string; type: FieldType; source: PlanField['source']; sample: string | null; subFields?: PlanField[] }): PlanField => {
     const already = g.fields.find((x) => x.name === f.name);
     if (already) {
-      for (const sf of f.subFields ?? []) if (!already.subFields.some((x) => x.name === sf.name)) already.subFields.push(sf);
+      // Sub-fields a later part adds (a list under a heading the same field holds) get keys like the field's own.
+      for (const sf of f.subFields ?? []) if (!already.subFields.some((x) => x.name === sf.name)) already.subFields.push({ ...sf, key: sf.key || `${already.key}_${sf.name}`.slice(0, 64) });
       return already;
     }
     const match = existingFields(g).find((x) => sameField(x, f.name, f.label));
@@ -642,7 +643,16 @@ export function checkProposal(input: Pick<PlanInput, 'model' | 'schema' | 'propo
     if (p.block) p.block = p.block.replace(/^(?:acf\/)+/i, '').replace(/_/g, '-');
     if (p.binding === 'block' && !p.block) problems.push('a block without a name');
     else if (p.block && !/^[a-z0-9][a-z0-9-]*$/.test(p.block)) problems.push(`block name "${p.block}"`);
-    const fields = p.fields.filter((f) => {
+    const fields = p.fields.flatMap((f) => {
+      // A value is never a repeater: a list is a part of its own (the AI has made the list item, or
+      // a heading over a list, a nested repeater). The rules' field for that value stands in.
+      if (f.type === 'repeater') {
+        const df = d.fields.find((x) => x.path === f.path && x.type !== 'repeater');
+        warnings.push(`AI: ${p.page} ${p.component}${p.collection ? ` list ${p.collection}` : ''}: "${f.name}" at "${f.path || 'the item'}" isn't a repeater; ${df ? `kept the rules' "${df.name}"` : 'left out'}`);
+        return df && !p.fields.some((x) => x !== f && x.path === df.path) ? [df] : [];
+      }
+      return [f];
+    }).filter((f) => {
       if (!paths.has(f.path)) return problems.push(`no value at ${f.path}`), false;
       f.name = snake(f.name) || 'value';
       const asDrafted = d.fields.some((x) => x.path === f.path && x.label === f.label);
