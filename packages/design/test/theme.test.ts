@@ -210,7 +210,7 @@ describe('after theme change set v7 on Newport dev', () => {
     lp.postType = null;
     lp.fields = lp.fields.map((f) => ({ ...f, core: null }));
     const before = run(proposal);
-    const repeater = before.fieldGroups.flatMap((g) => g.fields).find((f) => f.type === 'repeater' && f.source.component === 'staff')!;
+    const repeater = before.fieldGroups.flatMap((g) => g.fields).find((f) => f.type === 'repeater' && f.source?.component === 'staff')!;
     const hp = proposal.parts.find((x) => x.page === 'dept.html' && x.component === 'staff' && x.collection === null)!;
     hp.binding = 'fields';
     hp.fields = [{ path: '', name: repeater.name, label: 'Staff', type: 'text', core: null }];
@@ -218,6 +218,15 @@ describe('after theme change set v7 on Newport dev', () => {
     const subs = after.fieldGroups.flatMap((g) => g.fields).filter((f) => f.name === repeater.name).flatMap((f) => f.subFields);
     expect(subs.length).toBeGreaterThan(0);
     for (const sf of subs) expect(sf.key).not.toBe('');
+  });
+  it('doesn\u2019t reuse a repeater on the target for a single value (one an earlier build left)', () => {
+    const left: TargetSchema = { ...schema, acf: { post_types: [], taxonomies: [], field_groups: [{ ...schema.acf!.field_groups[0]!, fields: [{ key: 'field_people_email', name: 'email', label: 'Email', type: 'repeater' }] }] } };
+    const m2 = buildModel({ pages, framework, schema: left });
+    const d2 = draftProposal(m2, left, { '1:1': 'Department Detail' });
+    const p2 = buildDesignPlan({ jobId: 'test', version: 5, model: m2, schema: left, proposal: d2, draft: d2, vocabulary: vocab, themeFiles: ['page.php', 'single-departments.php', 'search.php'], inputs: { modelSha256: 'm', inventorySha256: 'i', schemaReadAt: '2026-11-10T00:00:00Z', targetUrl: 'https://example.test', theme: 'planeteriaweb' }, ai: null, now: new Date('2026-11-10T00:00:00Z') });
+    const email = p2.fieldGroups.flatMap((g) => g.fields).find((f) => f.source?.path?.includes('a') && f.type === 'email');
+    expect(email).toBeTruthy();
+    expect(p2.fieldGroups.flatMap((g) => g.fields).some((f) => f.key === 'field_people_email')).toBe(false);
   });
   it('keeps a linked image when the link is empty: only the tags go', async () => {
     const { Php } = await import('../src/theme/markup.js');

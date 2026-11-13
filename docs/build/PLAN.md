@@ -488,6 +488,12 @@ the change set's. Now:
   never a repeater now: the rules' field for that path stands in, or it's left out (plan warning).
   And sub-fields a list adds to a field another part made first get keys (they had `""`, so each
   slide's row held only its link).
+- **After build v9:** the values were right, but build v8 had left nested repeaters (and a sub-field
+  keyed `main_banner`) in Homepage Details, and plan v9 reused them by name, so a link became a loop
+  over an empty list. An existing field is reused only when both are repeaters or both are values.
+  And the build drops what an earlier build added to an existing group that the plan no longer has
+  (build-made `field_wm_…` keys and invalid ones, against `before.json`'s copy of the group: the
+  group's own fields and an editor's stay), and writes a reused group when there's something to drop.
 
 **Rollback** (`wm design rollback`, or "Roll back the build"): `design/build/before.json`, taken before
 the first write, holds the extended field groups' definitions, the menus' items and the front-page

@@ -122,12 +122,23 @@ export function acfField(f: Omit<PlanField, 'subFields'> & { subFields?: PlanFie
   }
 }
 
-/** A new group, or an existing one with the plan's fields added (all its own fields kept: the bridge replaces the whole group). */
-export function groupDefinition(g: PlanFieldGroup, current: SchemaGroup | undefined): AcfItem {
+/**
+ * A new group, or an existing one with the plan's fields added (all its own fields kept: the bridge
+ * replaces the whole group). With `original` (the group before this job's first build), fields and
+ * sub-fields an earlier build added that the plan no longer has are dropped: build-made keys
+ * (field_wm_…) and invalid ones, never a field the group had or an editor's.
+ */
+export function groupDefinition(g: PlanFieldGroup, current: SchemaGroup | undefined, original?: SchemaGroup): AcfItem {
   if (g.action === 'create' || !current) {
     return { key: g.key, title: g.title, location: [[{ param: g.location.param, operator: '==', value: g.location.value }]], fields: g.fields.map((f) => acfField(f)), active: true, show_in_rest: 1, position: 'normal', style: 'default' };
   }
-  const fields = current.fields.map((f) => ({ ...f }));
+  const subsOf = (f: object) => ((f as { sub_fields?: AcfItem[] }).sub_fields ?? []) as AcfItem[];
+  const planKeys = new Set(g.fields.flatMap((f) => [f.key, ...f.subFields.map((x) => x.key)]));
+  const hadKeys = new Set((original?.fields ?? []).flatMap((f) => [f.key, ...subsOf(f).map((x) => String(x.key))]));
+  const leftover = (key: string) => !!original && (key.startsWith('field_wm_') || !key.startsWith('field_')) && !planKeys.has(key) && !hadKeys.has(key);
+  const fields = current.fields
+    .filter((f) => !leftover(f.key))
+    .map((f) => (subsOf(f).length ? { ...f, sub_fields: subsOf(f).filter((x) => !leftover(String(x.key))) } : { ...f }));
   for (const f of g.fields) {
     const have = fields.find((x) => x.key === f.key);
     if (!have) {
@@ -311,6 +322,7 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
   let schema = await client.get<LiveSchema>('/website-mover/v1/schema');
   if (!schema.acf) throw new Error('ACF is not active on the target');
   await snapshotBefore(jobId, plan, schema, client);
+  const before = await readJson<BuildBefore>(dir(jobId, 'build', 'before.json')).catch(() => null);
   await save();
 
   // ── ACF post types and taxonomies ──
@@ -348,9 +360,12 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
 
   // ── Field groups ──
   const current = new Map(schema.acf!.field_groups.map((g) => [g.key, g]));
+  const size = (fields: object[]) => fields.reduce<number>((n, f) => n + 1 + (((f as { sub_fields?: object[] }).sub_fields ?? []).length), 0);
   for (const g of plan.fieldGroups) {
-    if (g.action === 'reuse' && g.fields.every((f) => f.action === 'reuse' && f.subFields.every((s) => s.action === 'reuse'))) continue;
     const existing = current.get(g.key);
+    // Nothing to add and nothing an earlier build left to drop: the group stays as it is.
+    const allReused = g.action === 'reuse' && g.fields.every((f) => f.action === 'reuse' && f.subFields.every((s) => s.action === 'reuse'));
+    if (allReused && (!existing || size(groupDefinition(g, existing, before?.groups[g.key]).fields as object[]) === size(existing.fields))) continue;
     if (g.action !== 'create' && !existing) {
       warn(`Field group "${g.title}" (${g.key}) isn't on the target any more: skipped`);
       continue;
@@ -359,7 +374,7 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
       warn(`Field group "${g.title}" is defined in code on the target: add its new fields there`);
       continue;
     }
-    const ok = await attempt(`field group ${g.title}`, () => client.post('/website-mover/v1/acf/field-groups', groupDefinition(g, existing)));
+    const ok = await attempt(`field group ${g.title}`, () => client.post('/website-mover/v1/acf/field-groups', groupDefinition(g, existing, before?.groups[g.key])));
     if (ok !== null && !existing && !state.acf.some((a) => a.key === g.key)) state.acf.push({ type: 'acf-field-group', key: g.key });
   }
   log(`Field groups: ${plan.fieldGroups.length}`);

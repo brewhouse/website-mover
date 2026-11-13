@@ -171,7 +171,10 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
     return g;
   };
   const existingFields = (g: PlanFieldGroup): AcfField[] => (schema.acf?.field_groups.find((x) => x.key === g.key)?.fields ?? []).filter((f) => f.type !== 'tab');
-  const sameField = (f: AcfField, name: string, label: string) => f.name === name || normText(f.label) === normText(label) || f.name.replace(/_/g, '') === name.replace(/_/g, '');
+  // A list reuses only a list and a value only a value: an existing repeater (one an earlier build
+  // left, say) never turns a link or a heading into a loop.
+  const sameField = (f: AcfField, name: string, label: string, type: FieldType) =>
+    (f.type === 'repeater') === (type === 'repeater') && (f.name === name || normText(f.label) === normText(label) || f.name.replace(/_/g, '') === name.replace(/_/g, ''));
 
   /** Adds (or reuses) a field in a group and returns its key. */
   const addField = (g: PlanFieldGroup, f: { name: string; label: string; type: FieldType; source: PlanField['source']; sample: string | null; subFields?: PlanField[] }): PlanField => {
@@ -181,7 +184,7 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
       for (const sf of f.subFields ?? []) if (!already.subFields.some((x) => x.name === sf.name)) already.subFields.push({ ...sf, key: sf.key || `${already.key}_${sf.name}`.slice(0, 64) });
       return already;
     }
-    const match = existingFields(g).find((x) => sameField(x, f.name, f.label));
+    const match = existingFields(g).find((x) => sameField(x, f.name, f.label, f.type));
     const field: PlanField = match
       ? { key: match.key, name: match.name, label: match.label, type: (match.type as FieldType) ?? f.type, action: 'reuse', labelFrom: 'existing', source: f.source, sample: f.sample, subFields: reuseSubFields(match, f.subFields ?? []) }
       : { key: `field_wm_${g.key.replace(/^group_(wm_)?/, '')}_${f.name}`.slice(0, 64), name: f.name, label: f.label, type: f.type, action: 'add', labelFrom: labelSource(f.label, vocab) ?? 'class-name', source: f.source, sample: f.sample, subFields: (f.subFields ?? []).map((sf) => ({ ...sf, key: `field_wm_${g.key.replace(/^group_(wm_)?/, '')}_${f.name}_${sf.name}`.slice(0, 64) })) };
@@ -191,7 +194,7 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
   };
   const reuseSubFields = (parent: AcfField, subs: PlanField[]): PlanField[] =>
     subs.map((sf) => {
-      const m = (parent.sub_fields ?? []).find((x) => sameField(x, sf.name, sf.label));
+      const m = (parent.sub_fields ?? []).find((x) => sameField(x, sf.name, sf.label, sf.type));
       return m ? { ...sf, key: m.key, name: m.name, label: m.label, action: 'reuse' as const, labelFrom: 'existing' as const } : { ...sf, key: `${parent.key}_${sf.name}`.slice(0, 64) };
     });
 
@@ -232,7 +235,7 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
       /** Sub-field keys of a list field, in the proposal's order (reused sub-fields keep their names). */
       const bindSubs = (list: PlanField, fields: ProposalField[]) => {
         for (const f of fields.filter((x) => !x.core)) {
-          const sub = list.subFields.find((x) => x.name === f.name) ?? list.subFields.find((x) => x.label === f.label) ?? list.subFields.find((x) => sameField(x as unknown as AcfField, f.name, f.label));
+          const sub = list.subFields.find((x) => x.name === f.name) ?? list.subFields.find((x) => x.label === f.label) ?? list.subFields.find((x) => sameField(x as unknown as AcfField, f.name, f.label, f.type));
           if (sub) bind(sub.key, f);
         }
       };
