@@ -18,9 +18,18 @@ export class Php {
   echo(expr: string): string {
     return this.token(`<?php echo ${expr}; ?>`);
   }
-  /** Serialized markup with the PHP in place (an attribute named "wmdattr" holds a whole attribute). */
+  /**
+   * Serialized markup with the PHP in place (an attribute named "wmdattr" holds a whole attribute;
+   * a link with "wmdwrap" keeps its contents and loses only its tags when the condition is false).
+   */
   render(html: string): string {
-    return html.replace(/\s?wmdattr="(WMPHP\d+X)"/g, '$1').replace(/WMPHP(\d+)X/g, (_, i: string) => this.code[Number(i)]!);
+    return html
+      .replace(/<a\b([^>]*?)\swmdwrap="WMPHP(\d+)X"([^>]*)>([\s\S]*?)<\/a>/g, (_, pre: string, i: string, post: string, inner: string) => {
+        const cond = this.code[Number(i)]!;
+        return `<?php if ( ${cond} ) : ?><a${pre}${post}><?php endif; ?>${inner}<?php if ( ${cond} ) : ?></a><?php endif; ?>`;
+      })
+      .replace(/\s?wmdattr="(WMPHP\d+X)"/g, '$1')
+      .replace(/WMPHP(\d+)X/g, (_, i: string) => this.code[Number(i)]!);
   }
 }
 
@@ -182,7 +191,9 @@ export function bindValue($: cheerio.CheerioAPI, php: Php, el: El, src: Source):
         // The link's words, unless it wraps a card (its words are other fields).
         const own = !elementChildren(a).some((k) => !['img', 'span', 'svg', 'i', 'strong', 'em'].includes(k.name));
         if (src.type === 'link' && own) setText($, a, php.echo(`esc_html( wmd_link_title( ${v} ) )`));
-        if (own) guard($, php, a, `wmd_has( ${v} )`);
+        // A link around an image (Follow Us): without a link the image still shows.
+        if (own && $(a as never).find('img, svg').length) $(a as never).attr('wmdwrap', php.token(`wmd_has( ${v} )`));
+        else if (own) guard($, php, a, `wmd_has( ${v} )`);
         return true;
       }
       setText($, el, php.echo(`esc_html( wmd_text( ${v} ) )`));

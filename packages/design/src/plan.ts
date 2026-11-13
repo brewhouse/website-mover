@@ -638,7 +638,10 @@ export function checkProposal(input: Pick<PlanInput, 'model' | 'schema' | 'propo
     if (!typeOk(p.postType)) problems.push(`unknown post type ${p.postType}`);
     if (!taxOk(p.taxonomy)) problems.push(`unknown taxonomy ${p.taxonomy}`);
     if (p.binding === 'query' && !p.postType) problems.push('a list without a post type');
+    // A block's name without its namespace ("acf/buttons-list" → "buttons-list"): the build adds "acf/".
+    if (p.block) p.block = p.block.replace(/^(?:acf\/)+/i, '').replace(/_/g, '-');
     if (p.binding === 'block' && !p.block) problems.push('a block without a name');
+    else if (p.block && !/^[a-z0-9][a-z0-9-]*$/.test(p.block)) problems.push(`block name "${p.block}"`);
     const fields = p.fields.filter((f) => {
       if (!paths.has(f.path)) return problems.push(`no value at ${f.path}`), false;
       f.name = snake(f.name) || 'value';

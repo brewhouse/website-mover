@@ -167,6 +167,35 @@ describe('AI proposal check', () => {
   });
 });
 
+describe('after theme change set v7 on Newport dev', () => {
+  it('takes a block name the AI gives with its namespace without it', async () => {
+    const { checkProposal } = await import('../src/plan.js');
+    const proposal = structuredClone(draft);
+    const p = proposal.parts[0]!;
+    p.block = 'acf/acf/buttons_list';
+    checkProposal({ model, schema, proposal, draft, vocabulary: vocab }, []);
+    expect(p.block).toBe('buttons-list');
+  });
+  it('prints the content once when the AI binds it as fields and leaves a section to blocks', () => {
+    const p2 = structuredClone(plan);
+    const t = p2.templates.find((x) => x.parts.some((pt) => pt.values.some((v) => v.field === 'core:content')))!;
+    const content = t.parts.find((pt) => pt.values.some((v) => v.field === 'core:content'))!;
+    content.binding = 'fields';
+    const other = t.parts.find((pt) => pt !== content && pt.collection === null && !pt.path.startsWith(content.path) && !content.path.startsWith(pt.path))!;
+    other.binding = 'block';
+    other.block = 'buttons-list';
+    const c = generateTheme({ plan: p2, model, pages: new Map(pages.map((x) => [x.file, x.html])), slug: 'test', readSource: () => null, readTheme: (rel) => theme[rel] ?? null });
+    const out = c.files.find((f) => f.path === t.file)!.data.toString();
+    expect(out.match(/<\?php the_content\(\); \?>/g)).toHaveLength(1);
+  });
+  it('keeps a linked image when the link is empty: only the tags go', async () => {
+    const { Php } = await import('../src/theme/markup.js');
+    const php = new Php();
+    const html = `<li><a href="${php.echo('esc_url( x )')}" wmdwrap="${php.token("wmd_has( get_sub_field( 'link' ) )")}"><img src="a.jpg"></a></li>`;
+    expect(php.render(html)).toBe(`<li><?php if ( wmd_has( get_sub_field( 'link' ) ) ) : ?><a href="<?php echo esc_url( x ); ?>"><?php endif; ?><img src="a.jpg"><?php if ( wmd_has( get_sub_field( 'link' ) ) ) : ?></a><?php endif; ?></li>`);
+  });
+});
+
 describe('the helper library’s name', () => {
   const run = (functionsPhp: string) =>
     generateTheme({ plan, model, pages: new Map(pages.map((p) => [p.file, p.html])), slug: 'newport', readSource: () => null, readTheme: (rel) => (rel === 'functions.php' ? functionsPhp : (theme[rel] ?? null)) });

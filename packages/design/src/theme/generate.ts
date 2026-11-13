@@ -639,7 +639,8 @@ function bindParts($: cheerio.CheerioAPI, php: Php, root: El, t: PlanTemplate, m
       if (!blockSections.includes(section)) blockSections.push(section);
       continue;
     }
-    if (part.binding === 'core' && part.values.some((v) => v.field === 'core:content')) hasContent = true;
+    // Any part that prints the content (the AI may bind it as 'fields'): blocks render inside it.
+    if (part.values.some((v) => v.field === 'core:content')) hasContent = true;
     const where = `${t.page} ${part.component}${part.collection ? ` (${part.collection || 'list'})` : ''}`;
 
     if (part.collection === null) {

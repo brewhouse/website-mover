@@ -475,6 +475,13 @@ the change set's. Now:
   error) and warns about any 404, and when the change set isn't for the approved plan. No load-line
   guard in `functions.php`: the header and templates call the library, so a missing library would
   still stop every page, only with a less clear error.
+- **From Render's change set v7** (the AI's plan): a link around an image (Follow Us) loses only its
+  tags when its field is empty, so the image still shows (it hid the whole item, and the build leaves
+  `#` links empty). A template prints `the_content()` once even when the AI binds the content as
+  `fields`: a section left to blocks printed it a second time (Finance's Overview twice, where
+  Resources was). The AI's block names lose their namespace (`acf/acf/buttons_list` →
+  `buttons-list`): the build wrote `acf/acf/acf/buttons-list`, a block nothing renders, so Resources
+  didn't show even on the mockup's own department.
 
 **Rollback** (`wm design rollback`, or "Roll back the build"): `design/build/before.json`, taken before
 the first write, holds the extended field groups' definitions, the menus' items and the front-page
