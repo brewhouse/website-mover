@@ -371,12 +371,13 @@ Design jobs now run in the web app and worker (on Render too).
     theme's assets;
   - a content-root class named after another mockup page is left out (page-builder1's "classifieds").
 - **Blocks:** render templates for the restyled and new ACF blocks; new ones are registered in
-  `inc/wm-design.php`.
+  the helper library, `inc/<job>.php` (`inc/newport.php`; `inc/wm-design.php` before 2026-11-13; the
+  generator replaces a `functions.php` line loading the old name, so it's never loaded twice).
 - **Shell:** `header.php` keeps the theme's `<head>` (minus its Google Fonts) and prints the mockup's
   header; `sidebar.php` (menu with the mockup's classes and icons, the signed-in user's card);
   `footer.php` keeps everything from `wp_footer()` on.
 - **Assets:** the mockup's stylesheets, scripts, fonts and the images the CSS and templates use, under
-  `assets/<job>/` with their layout kept. `inc/wm-design.php` drops the theme's Bootstrap 4, `custom.css`
+  `assets/<job>/` with their layout kept. The helper library drops the theme's Bootstrap 4, `custom.css`
   and `responsive.css` (and scripts the mockup replaces), enqueues the mockup's in its order (after
   the theme's footer scripts), and turns off `wp-block-styles`. `functions.php` gets one `require_once`.
 - **Checks:** `php -l` on every PHP file (the Docker image now has `php-cli` and `git`), and the patch
@@ -420,19 +421,30 @@ only). From the approved plan, in order:
    through The Events Calendar's REST API. Fields that point at entries are set once all exist.
 5. Menus (rewritten as a whole) and the front page.
 
-Re-runs update what the build made. A page the build didn't make where the plan puts one (Newport's
-front page and `/page-builder-blocks/` from B0) is left as it is and linked to. A template the
-target's theme doesn't have yet is left off with a warning: deploy the theme change set and build
-again.
+Re-runs update what the build made, after checking its record against the target: what's gone
+(trashed, or the database restored or cloned) is made again. A page the build didn't make where the
+plan puts one (`/page-builder-blocks/` from B0) is left as it is and linked to; the site's own front
+page keeps its content, but its **empty** fields get the mockup's values (recorded in
+`state.filled`, emptied on rollback). A template the target's theme doesn't have yet is left off with
+a warning: deploy the theme change set and build again.
+
+Other rules from the first Newport builds (2026-11-12/13):
+- Images over 2560 px or 1.5 MB are scaled down before upload (Pantheon answers 502 while WordPress
+  makes thumbnails of 4096 px exports); after a 502 the build looks for the tagged attachment.
+- A sample event whose date is past moves on in 52-week steps (same weekday and time).
+- Entries made from a list get the detail mockup's sample values they don't show (plan warning).
+- Menus: the sidebar is merged across every mockup page; a "#" item links to the page, archive or
+  entry with that name; items that match nothing are plan warnings.
+- Theme: an ACF value prints only when it has one (`wmd_has`), and a section shows only when its
+  list has entries or one of its values has something (its heading alone doesn't count).
+- The AI can't move a value the rules mapped to a WordPress field (an event's date) into an ACF field.
 
 **Rollback** (`wm design rollback`, or "Roll back the build"): `design/build/before.json`, taken before
 the first write, holds the extended field groups' definitions, the menus' items and the front-page
 settings. Rollback restores those, trashes the pages, entries and images the build made, deletes its
 terms and trashes its ACF items. The theme is reverted with git.
 
-Checked so far: unit tests (ACF definitions, block data, dates) and a read-only probe of Newport dev
-(bridge 0.1.1, TEC REST, the menus and front page it will touch). The first real build on Newport dev
-is the next step.
+Run on Newport dev since 2026-11-12 (from the web app); B5 Verify is next.
 
 ## Status (2026-11-09)
 

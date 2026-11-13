@@ -4,8 +4,8 @@
  *
  *   - assets: the mockup's stylesheets, scripts, fonts and the images the CSS and the templates use,
  *     under assets/<job>/ with their relative paths kept (so the CSS's url()s still work)
- *   - inc/wm-design.php: enqueues (Bootstrap 5 replaces the theme's Bootstrap 4), new blocks, helpers
- *   - functions.php: one line that loads inc/wm-design.php
+ *   - inc/<job>.php (inc/wm-design.php before 2026-11-13): enqueues (Bootstrap 5 replaces the theme's Bootstrap 4), new blocks, helpers
+ *   - functions.php: one line that loads it
  *   - header.php, sidebar.php, footer.php: the mockup's shell, with WordPress menus, the signed-in
  *     user's card and the search form. The theme's own <head> and everything from wp_footer() on are
  *     kept
@@ -19,7 +19,7 @@ import { elementChildren, selector, type Collection, type DesignModel, type El }
 import { normText } from '../pages.js';
 import type { DesignPlan, FieldType, PlanPart, PlanRelation, PlanTemplate } from '../plan-schema.js';
 import { helperLibrary, type EnqueueStyle } from './php-lib.js';
-import { bindValue, clearSelected, listItems, loop, Php, resolve, setText, type Source } from './markup.js';
+import { bindValue, clearSelected, getter, listItems, loop, Php, resolve, setText, type Source } from './markup.js';
 
 export interface ThemeInput {
   plan: DesignPlan;
@@ -439,8 +439,12 @@ export function generateTheme(input: ThemeInput): ThemeChangeSet {
     }
   }
 
-  // ── inc/wm-design.php and functions.php ───────────────────────────────────
+  // ── The helper library (inc/<slug>.php) and functions.php ──────────────────
   const functions = input.readTheme('functions.php');
+  // Named after the job (inc/newport.php), like assets/<slug>/; a theme file of that name that isn't
+  // ours keeps the generic name.
+  const ours = (rel: string) => /Website Mover design build/.test(input.readTheme(rel) ?? 'Website Mover design build');
+  const libPath = /^[a-z0-9][a-z0-9_-]*$/i.test(slug) && ours(`inc/${slug}.php`) ? `inc/${slug}.php` : 'inc/wm-design.php';
   const enqueued = (fn: 'style' | 'script') => [...(functions ?? '').matchAll(new RegExp(`wp_enqueue_${fn}\\(\\s*['"]([^'"]+)['"]\\s*,\\s*[^;]*?['"]([^'"]+\\.${fn === 'style' ? 'css' : 'js'})['"]`, 'g'))].map((m) => ({ handle: m[1]!, file: m[2]! }));
   const mockupScripts = new Set(scripts.map((s) => path.posix.basename(s.src)));
   const dequeueStyles = enqueued('style')
@@ -450,7 +454,7 @@ export function generateTheme(input: ThemeInput): ThemeChangeSet {
     .filter((s) => /\/js\/(popper|bootstrap)[\w.-]*\.js$/.test(s.file) || mockupScripts.has(path.posix.basename(s.file)))
     .map((s) => s.handle);
   add(
-    'inc/wm-design.php',
+    libPath,
     helperLibrary({
       assetDir,
       styles,
@@ -463,10 +467,19 @@ export function generateTheme(input: ThemeInput): ThemeChangeSet {
     }),
     'generated',
   );
-  if (functions === null) warnings.push('The theme has no functions.php: load inc/wm-design.php from it by hand');
-  else if (!functions.includes('inc/wm-design.php')) {
-    const line = "require_once get_stylesheet_directory() . '/inc/wm-design.php'; // Website Mover design build";
-    add('functions.php', functions.replace(/^<\?php[^\n]*\n/, (m) => `${m}${line}\n`), 'one line added');
+  // One line loads it. A line for an earlier name of the library (inc/wm-design.php, or a line we
+  // added) is replaced, so the library is never loaded twice.
+  const line = `require_once get_stylesheet_directory() . '/${libPath}'; // Website Mover design build`;
+  if (functions === null) warnings.push(`The theme has no functions.php: load ${libPath} from it by hand`);
+  else {
+    const lines = functions.split('\n');
+    const isLoader = (l: string) => /\brequire(_once)?\b/.test(l) && (l.includes('Website Mover design build') || l.includes("/inc/wm-design.php'") || l.includes(`/${libPath}'`));
+    const loaders = lines.filter(isLoader);
+    if (!(loaders.length === 1 && loaders[0]!.includes(`/${libPath}'`))) {
+      if (libPath !== 'inc/wm-design.php' && functions.includes("/inc/wm-design.php'")) warnings.push(`functions.php loaded inc/wm-design.php; the library is ${libPath} now: delete inc/wm-design.php from the theme`);
+      const kept = lines.filter((l) => !isLoader(l)).join('\n');
+      add('functions.php', kept.replace(/^<\?php[^\n]*\n/, (m) => `${m}${line}\n`), loaders.length ? 'the line loading the library updated' : 'one line added');
+    }
   }
 
   return { files, missingAssets: [...missingAssets].sort(), warnings, templates };
@@ -514,12 +527,23 @@ function bindParts($: cheerio.CheerioAPI, php: Php, root: El, t: PlanTemplate, m
   const blockSections: El[] = [];
   let hasContent = false;
   let q = 0;
+  // A section shows only when one of its values does (an empty list, a heading over nothing):
+  // conditions per section; null means something in it always shows.
+  const shows = new Map<El, (string | null)[]>();
+  const when = (section: El, cond: string | null) => shows.set(section, [...(shows.get(section) ?? []), cond]);
+  // A section with a list shows when the list has entries (its heading and "View all" link alone don't count).
+  const lists = new Map<El, string[]>();
+  const whenList = (section: El, cond: string) => (when(section, cond), lists.set(section, [...(lists.get(section) ?? []), cond]));
+  const wrapped = new Set<El>();
+  const queries = new Map<El, string[]>(); // section → its lists' queries, run before it when it's wrapped
   for (const part of t.parts) {
     const section = resolve(root, part.path);
     if (!section) {
       warnings.push(`${t.page}: section ${part.path} isn't in the mockup any more`);
       continue;
     }
+    // The section's own words (its heading) show with its values; other kept markup always shows.
+    if (!['fields', 'core', 'query', 'repeater'].includes(part.binding) && !(part.binding === 'theme' && part.collection === null)) when(section, null);
     if (part.binding === 'block' && mode === 'template') {
       if (!blockSections.includes(section)) blockSections.push(section);
       continue;
@@ -536,6 +560,7 @@ function bindParts($: cheerio.CheerioAPI, php: Php, root: El, t: PlanTemplate, m
           warnings.push(`${where}: ${v.field} at "${v.path}" not bound`);
           continue;
         }
+        when(section, showsWhen(v.field, src));
         (v.field === 'core:content' ? later : values).push(() => {
           if (!bindValue($, php, el, src)) warnings.push(`${where}: ${v.field} at "${v.path}" not bound`);
         });
@@ -545,6 +570,7 @@ function bindParts($: cheerio.CheerioAPI, php: Php, root: El, t: PlanTemplate, m
 
     const coll = ctx.collection(t.page, part);
     const search = t.kind === 'search' && part.binding === 'theme' && coll?.role === 'items' && coll.count >= 2;
+    if (search) when(section, null);
     if (!['repeater', 'query', 'filter', 'block'].includes(part.binding) && !search) continue;
     if (!coll) {
       warnings.push(`${where}: list not in the model`);
@@ -613,6 +639,17 @@ function bindParts($: cheerio.CheerioAPI, php: Php, root: El, t: PlanTemplate, m
     const inList = part.binding !== 'query' && !search;
     const main = part.binding === 'query' && (t.kind === 'page-template' || t.kind === 'archive') && part.postType === t.postType && !t.parts.some((o) => o !== part && o.binding === 'query' && o.postType === t.postType && (ctx.collection(t.page, o)?.count ?? 0) > coll.count);
     const qv = main ? '$wmd_main' : `$wmd_q${++q}`;
+    if (part.binding === 'query') {
+      if (main) when(section, null);
+      else {
+        whenList(section, `${qv}->have_posts()`);
+        queries.set(section, [...(queries.get(section) ?? []), `${qv} = wmd_query( '${part.postType}', ${coll.count} );`]);
+      }
+    } else if (part.binding === 'repeater') {
+      const name = ctx.listName(part);
+      if (name) whenList(section, `wmd_has( get_field( '${name}' ) )`);
+      else when(section, null);
+    }
     // A carousel's first slide is the active one: the first row gets the class.
     const isActive = (e: El) => /(^|\s)active(\s|$)/.test(e.attribs.class ?? '');
     const firstActive = items.length > 1 && isActive(items[0]!) && !items.slice(1).some(isActive);
@@ -635,7 +672,7 @@ function bindParts($: cheerio.CheerioAPI, php: Php, root: El, t: PlanTemplate, m
     if (search) {
       loops.push(() => loop($, php, items, '<?php if ( have_posts() ) : while ( have_posts() ) : the_post(); ?>', '<?php endwhile; endif; ?>'));
     } else if (part.binding === 'query') {
-      loops.push(() => loop($, php, items, `<?php ${qv} = wmd_query( '${part.postType}', ${coll.count}${main ? ', true' : ''} ); while ( ${qv}->have_posts() ) : ${qv}->the_post(); ?>`, '<?php endwhile; wp_reset_postdata(); ?>'));
+      loops.push(() => loop($, php, items, `<?php ${wrapped.has(section) ? '' : `${qv} = wmd_query( '${part.postType}', ${coll.count}${main ? ', true' : ''} ); `}while ( ${qv}->have_posts() ) : ${qv}->the_post(); ?>`, '<?php endwhile; wp_reset_postdata(); ?>'));
     } else {
       const name = ctx.listName(part);
       if (!name) {
@@ -645,14 +682,41 @@ function bindParts($: cheerio.CheerioAPI, php: Php, root: El, t: PlanTemplate, m
       loops.push(() => loop($, php, items, `<?php if ( have_rows( '${name}' ) ) : while ( have_rows( '${name}' ) ) : the_row(); ?>`, '<?php endwhile; endif; ?>'));
     }
   }
+  // A section that holds other sections, or is the whole page, always shows (they decide for themselves).
+  if (mode === 'template') {
+    const inside = (outer: El, inner: El) => {
+      for (let p = inner.parent as El | null; p; p = p.parent as El | null) if (p === outer) return true;
+      return false;
+    };
+    const all = [...shows.keys()];
+    for (const [section, conds] of shows) {
+      if (section === root || conds.includes(null) || !conds.length || all.some((o) => o !== section && inside(section, o))) continue;
+      wrapped.add(section);
+    }
+  }
   values.forEach((j) => j());
   loops.forEach((j) => j());
   later.forEach((j) => j());
+  for (const section of wrapped) {
+    const conds = [...new Set(lists.get(section) ?? (shows.get(section) as string[]))];
+    $(section as never)
+      .before(php.token(`<?php ${(queries.get(section) ?? []).join(' ')}${queries.has(section) ? ' ' : ''}if ( ${conds.join(' || ')} ) : ?>`))
+      .after(php.token('<?php endif; ?>'));
+  }
   if (blockSections.length) {
     // Blocks render inside the_content(); a page without a content section gets it where the first block was.
     if (!hasContent) $(blockSections[0] as never).replaceWith(php.token('<?php the_content(); ?>'));
     for (const s of blockSections.slice(hasContent ? 0 : 1)) $(s as never).remove();
   }
+}
+
+/** When a value has something to show (null: always, like a title or a date). */
+function showsWhen(field: string, src: Source): string | null {
+  if (src.kind === 'acf') return `wmd_has( ${getter(src)} )`;
+  if (field === 'core:content') return "'' !== trim( wp_strip_all_tags( get_the_content() ) )";
+  if (field === 'core:featured_image') return 'has_post_thumbnail()';
+  if (field === 'core:excerpt') return 'has_excerpt()';
+  return null;
 }
 
 /** Search results: title, link, image, date and excerpt read from the result's markup. */

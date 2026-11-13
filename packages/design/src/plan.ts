@@ -397,6 +397,20 @@ export function buildDesignPlan(input: PlanInput): DesignPlan {
     }
   }
 
+  // Entries made from a list have only what the list shows (a department's name and phone). Each
+  // gets the values its detail mockup shows for the sample entry, where it has none of its own, so
+  // the detail template shows them filled (still the mockup's own sample text).
+  for (const t of templates.filter((x) => x.kind === 'single' && x.postType)) {
+    const sample = entries.find((e) => e.source.page === t.page && e.source.component === null && e.postType === t.postType);
+    if (!sample || templates.find((x) => x.kind === 'single' && x.postType === t.postType) !== t) continue;
+    const fromLists = entries.filter((e) => e !== sample && e.postType === t.postType && e.source.component !== null);
+    for (const e of fromLists) {
+      for (const [k, v] of Object.entries(sample.fields)) if (!(k in e.fields) && !(v && typeof v === 'object' && 'entry' in (v as object))) e.fields[k] = structuredClone(v);
+      for (const k of ['content', 'excerpt', 'featured_image'] as const) if (sample.core[k] !== undefined && e.core[k] === undefined) e.core[k] = structuredClone(sample.core[k]);
+    }
+    if (fromLists.length) warnings.push(`${fromLists.length} ${t.postType} entries from lists get the sample values of ${t.page} they don't show in the list (the mockup's sample text): replace them in WordPress`);
+  }
+
   // ── Menus ─────────────────────────────────────────────────────────────────
   const targetFor = (href: string): string | null => {
     const file = href.split(/[?#]/)[0]!.split('/').pop() ?? '';

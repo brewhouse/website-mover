@@ -39,10 +39,10 @@ const file = (p: string) => changes.files.find((f) => f.path === p)?.data.toStri
 describe('theme generator', () => {
   it('writes a template per mockup page, the shell, the helpers and one line in functions.php', () => {
     const paths = changes.files.map((f) => f.path);
-    expect(paths).toEqual(expect.arrayContaining(['single-departments.php', 'search.php', 'header.php', 'sidebar.php', 'footer.php', 'inc/wm-design.php', 'functions.php']));
+    expect(paths).toEqual(expect.arrayContaining(['single-departments.php', 'search.php', 'header.php', 'sidebar.php', 'footer.php', 'inc/test.php', 'functions.php']));
     expect(changes.files.find((f) => f.path === 'single-departments.php')!.action).toBe('replace');
     expect(changes.files.find((f) => f.path === 'sidebar.php')!.action).toBe('create');
-    expect(file('functions.php')).toMatch(/^<\?php\nrequire_once get_stylesheet_directory\(\) \. '\/inc\/wm-design\.php';/);
+    expect(file('functions.php')).toMatch(/^<\?php\nrequire_once get_stylesheet_directory\(\) \. '\/inc\/test\.php';/);
   });
 
   it('keeps the theme’s <head> (without its fonts) and everything from wp_footer() on', () => {
@@ -70,6 +70,9 @@ describe('theme generator', () => {
     expect(t).toMatch(/\$wmd_q\d = wmd_query\( 'people', 3 \)/);
     expect(t).toContain('wmd_initials( get_the_title() )');
     expect(t).toContain("esc_url( 'mailto:' . antispambot(");
+    // A list section shows only when the list has entries; an ACF value only when it has one.
+    expect(t).toMatch(/\$wmd_q\d = wmd_query\( 'people', 3 \); if \( \$wmd_q\d->have_posts\(\) \) : \?>/);
+    expect(t).toMatch(/<\?php if \( wmd_has\( get_field\( 'email' \) \) \) : \?><a href="<\?php echo esc_url\( 'mailto:'/);
     // One item is the loop's template; the mockup's copies are gone.
     expect(t.match(/class="staff_card"/g)).toHaveLength(1);
   });
@@ -83,7 +86,7 @@ describe('theme generator', () => {
   });
 
   it('enqueues the mockup assets in place of Bootstrap 4 and copies what the CSS uses', () => {
-    const lib = file('inc/wm-design.php');
+    const lib = file('inc/test.php');
     expect(lib).toContain("wp_enqueue_style( 'wmd-site', wmd_asset( 'css/site.css' )");
     expect(lib).toContain("wp_enqueue_script( 'wmd-site', wmd_asset( 'js/site.js' )");
     expect(lib).not.toContain('jquery.js');
@@ -143,7 +146,7 @@ describe('linked entries (Filter by Department)', () => {
     const t = changes.files.find((f) => f.path.startsWith('template-') && f.data.toString().includes('newsDept'))!.data.toString();
     expect(t).toContain("foreach ( wmd_related_choices( 'department' ) as $wmd_choice )");
     expect(t).not.toContain('<option value="hr">');
-    expect(file('inc/wm-design.php')).toMatch(/'department' => array\(\s*'param'\s*=> 'department',\s*'post_type' => 'departments',\s*'on'\s*=> array\( 'post' \)/);
+    expect(file('inc/test.php')).toMatch(/'department' => array\(\s*'param'\s*=> 'department',\s*'post_type' => 'departments',\s*'on'\s*=> array\( 'post' \)/);
   });
 });
 
@@ -160,5 +163,22 @@ describe('AI proposal check', () => {
     const kept = checked.parts.find((x) => x.page === part.page && x.path === part.path && x.collection === part.collection)!;
     expect(kept.fields.find((f) => f.path === core.path)).toMatchObject({ core: core.core });
     expect(warnings.some((w) => w.includes(`kept ${core.path} as WordPress's ${core.core}`))).toBe(true);
+  });
+});
+
+describe('the helper library’s name', () => {
+  const run = (functionsPhp: string) =>
+    generateTheme({ plan, model, pages: new Map(pages.map((p) => [p.file, p.html])), slug: 'newport', readSource: () => null, readTheme: (rel) => (rel === 'functions.php' ? functionsPhp : (theme[rel] ?? null)) });
+  it('is named after the job and replaces a line loading an earlier name', () => {
+    const c = run("<?php\nrequire_once get_stylesheet_directory() . '/inc/wm-design.php'; // Website Mover design build\nfunction a() {}\n");
+    expect(c.files.map((f) => f.path)).toContain('inc/newport.php');
+    const fn = c.files.find((f) => f.path === 'functions.php')!.data.toString();
+    expect(fn.match(/require_once/g)).toHaveLength(1);
+    expect(fn).toContain("'/inc/newport.php'; // Website Mover design build");
+    expect(c.warnings.some((w) => w.includes('delete inc/wm-design.php'))).toBe(true);
+  });
+  it('leaves functions.php alone when it already loads it (the team’s own line)', () => {
+    const c = run("<?php\nrequire_once get_stylesheet_directory() . '/inc/newport.php';\nfunction a() {}\n");
+    expect(c.files.some((f) => f.path === 'functions.php')).toBe(false);
   });
 });

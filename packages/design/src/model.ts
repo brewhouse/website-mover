@@ -432,7 +432,23 @@ export function buildModel({ pages, framework, schema }: ModelInput): DesignMode
       });
     }
     const chosen = best as { items: MenuItem[]; size: number; navSig: string } | null;
-    if (chosen) menus.push({ location: signature.split('.')[0]!, signature: chosen.navSig, items: chosen.items });
+    if (!chosen) continue;
+    // Each page opens its own part of the menu (Departments on one, News on another): the same menu
+    // on every page, merged, has all of them.
+    const items = structuredClone(chosen.items);
+    for (const p of parsed) {
+      p.$('body header, body aside, body footer').each((_, el) => {
+        if (selector(el as unknown as El) !== signature) return;
+        p.$(el)
+          .find('nav ul, ul.menu, ul.nav')
+          .each((__, ul) => {
+            if (p.$(ul).parents('ul').length) return;
+            const nav = (p.$(ul).closest('nav').get(0) ?? ul) as unknown as El;
+            if (selector(nav) === chosen.navSig) mergeMenu(items, menuFrom(ul as unknown as El, p.$));
+          });
+      });
+    }
+    menus.push({ location: signature.split('.')[0]!, signature: chosen.navSig, items });
   }
 
   // Sections and components.
@@ -629,4 +645,20 @@ function schemaCandidates(pages: DesignModel['pages'], schema: TargetSchema): De
     out.pages.push({ file: p.file, postType: type, label, as });
   }
   return out;
+}
+
+/** Adds another page's copy of a menu: items by label, children merged, a real link over "#". */
+function mergeMenu(into: MenuItem[], from: MenuItem[]): void {
+  const key = (i: MenuItem) => normText(i.label).toLowerCase();
+  for (const [n, f] of from.entries()) {
+    const same = into.find((i) => key(i) === key(f));
+    if (!same) {
+      // After the item it follows on that page (or first).
+      const prev = n > 0 ? into.findIndex((i) => key(i) === key(from[n - 1]!)) : -1;
+      into.splice(prev + 1 || (n === 0 ? 0 : into.length), 0, structuredClone(f));
+      continue;
+    }
+    if ((!same.href || same.href === '#') && f.href && f.href !== '#') same.href = f.href;
+    mergeMenu(same.children, f.children);
+  }
 }

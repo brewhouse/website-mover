@@ -76,6 +76,8 @@ export interface BuildState {
   /** By source key. */
   entities: Record<string, BuildEntity>;
   menus: Record<string, number>;
+  /** Fields the build filled on a page it didn't make (the site's front page): emptied on rollback. */
+  filled?: { id: number; title: string; keys: string[] }[];
   frontPage: number | null;
   failures: { step: string; error: string }[];
   warnings: string[];
@@ -156,6 +158,27 @@ export function parseWhen(text: string): { start: string; end: string | null } |
   const start = time(m[2]) ?? '09:00:00';
   const end = time(m[3]);
   return { start: `${ymd}T${start}`, end: end ? `${ymd}T${end}` : null };
+}
+
+/** The same weekday and time, 52 weeks on at a time, until it's not past. */
+export function upcoming(when: { start: string; end: string | null }, now: Date): { start: string; end: string | null } {
+  const at = (s: string) => new Date(`${s}Z`).getTime();
+  const shift = (s: string, weeks: number) => new Date(at(s) + weeks * 7 * 86_400_000).toISOString().slice(0, 19);
+  let weeks = 0;
+  while (at(shift(when.start, weeks)) < now.getTime() && weeks < 52 * 50) weeks += 52;
+  return weeks ? { start: shift(when.start, weeks), end: when.end ? shift(when.end, weeks) : null } : when;
+}
+
+/** Whether a field's stored value has something in it (a link with a title or address, rows, text). */
+export function hasValue(v: unknown): boolean {
+  if (v === null || v === undefined || v === false) return false;
+  if (Array.isArray(v)) return v.some(hasValue);
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if ('url' in o || 'title' in o) return String(o.title ?? '').trim() !== '' || !['', '#'].includes(String(o.url ?? '').trim());
+    return Object.values(o).some(hasValue);
+  }
+  return String(v).replace(/<[^>]*>/g, '').trim() !== '' || /<img/i.test(String(v));
 }
 
 interface ValueContext {
@@ -251,6 +274,7 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
     acf: previous && !previous.rolledBackAt ? previous.acf : [],
     terms: previous && !previous.rolledBackAt ? previous.terms : [],
     entities: previous && !previous.rolledBackAt ? previous.entities : {},
+    filled: previous && !previous.rolledBackAt ? (previous.filled ?? []) : [],
     menus: {},
     frontPage: null,
     failures: [],
@@ -434,6 +458,16 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
     return id ?? '#';
   };
   const ctx: ValueContext = { media, entry: entryId, link };
+  const fieldValues = async (e: PlanEntry) => {
+    const values: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(e.fields)) {
+      const f = fieldByKey.get(k);
+      if (!f) continue;
+      const val = await acfValue(f.type, v, f.subTypes, ctx);
+      if (val !== null) values[k] = val;
+    }
+    return values;
+  };
   const restBase = (pt: string) => (pt === 'page' ? 'pages' : pt === 'post' ? 'posts' : schema.post_types[pt]?.rest_base ?? null);
   const termTaxonomy = (pt: string) => plan.taxonomies.find((t) => t.postTypes.includes(pt))?.name ?? (schema.post_types[pt]?.taxonomies ?? []).find((t) => schema.taxonomies[t]?.hierarchical && !['post_format'].includes(t)) ?? null;
 
@@ -449,7 +483,24 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
     const theirs = othersPage(e);
     if (theirs) {
       entryIds.set(key, theirs.id);
-      warn(`${e.title}: ${e.frontPage ? 'the site’s front page' : `/${e.slug}/`} is already there (page ${theirs.id}${theirs.template ? `, ${theirs.template}` : ''}), not made by this build; it's left as it is and linked to`);
+      if (!e.frontPage) {
+        warn(`${e.title}: /${e.slug}/ is already there (page ${theirs.id}${theirs.template ? `, ${theirs.template}` : ''}), not made by this build; it's left as it is and linked to`);
+        continue;
+      }
+      // The site's front page: its template is the mockup's home page, so its empty fields get the
+      // mockup's values. Fields that have a value (an editor's, or the seed's) are left as they are.
+      await attempt(`front page fields`, async () => {
+        const values = await fieldValues(e);
+        const keys = Object.keys(values);
+        if (!keys.length) return;
+        const mine = state.filled!.find((f) => f.id === theirs.id);
+        const current = await client.get<Record<string, unknown>>(`/website-mover/v1/acf/posts/${theirs.id}/fields`, { names: keys.join(',') });
+        const fill = keys.filter((k) => mine?.keys.includes(k) || !hasValue(current[k]));
+        if (fill.length) await client.post(`/website-mover/v1/acf/posts/${theirs.id}/fields`, { values: Object.fromEntries(fill.map((k) => [k, values[k]])) });
+        if (mine) mine.keys = [...new Set([...mine.keys, ...fill])];
+        else if (fill.length) state.filled!.push({ id: theirs.id, title: e.title, keys: fill });
+        warn(`${e.title}: the site’s front page (page ${theirs.id}) isn't made by this build; ${fill.length} of its ${keys.length} fields were empty and got the mockup's values, the rest and its content are left as they are`);
+      });
       continue;
     }
     if (e.postType === 'page' && e.slug && status.reserved_slugs?.includes(e.slug)) warn(`${e.title}: /${e.slug}/ is a post type's archive URL on the target, so the page there can't be reached; rename it on review`);
@@ -502,13 +553,7 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
       state.entities[key] = { kind: 'entry', id: post.id, postType: e.postType, path: new URL(post.link, client.baseUrl).pathname, title: e.title };
 
       // Fields (through the bridge, whatever the group's REST setting).
-      const values: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(e.fields)) {
-        const f = fieldByKey.get(k);
-        if (!f) continue;
-        const val = await acfValue(f.type, v, f.subTypes, ctx);
-        if (val !== null) values[k] = val;
-      }
+      const values = await fieldValues(e);
       if (Object.keys(values).length) {
         const r = await client.post<Record<string, string>>(`/website-mover/v1/acf/posts/${post.id}/fields`, { values });
         const unknown = Object.entries(r).filter(([, s]) => s === 'unknown field').map(([k]) => k);
@@ -519,9 +564,12 @@ export async function buildDesign({ jobId, client, log = () => {} }: BuildOption
       if (e.postType === 'tribe_events') {
         if (!when) warn(`${e.title}: "${String(e.core.date ?? '')}" isn't a date, so the event has none`);
         else {
+          // A sample event whose date is past moves on by whole years of weeks (same weekday and
+          // time), so lists of upcoming events show it.
+          const next = upcoming(when, new Date());
           const fmt = (s: string) => s.replace('T', ' ');
-          await client.post(`/tribe/events/v1/events/${post.id}`, { start_date: fmt(when.start), end_date: fmt(when.end ?? when.start) }).catch((err: unknown) => warn(`${e.title}: The Events Calendar didn't take its dates (${err instanceof Error ? err.message : String(err)})`));
-          if (new Date(when.start) < new Date()) warn(`${e.title}: the mockup's date (${e.core.date}) is past, so lists of upcoming events won't show it`);
+          await client.post(`/tribe/events/v1/events/${post.id}`, { start_date: fmt(next.start), end_date: fmt(next.end ?? next.start) }).catch((err: unknown) => warn(`${e.title}: The Events Calendar didn't take its dates (${err instanceof Error ? err.message : String(err)})`));
+          if (next.start !== when.start) warn(`${e.title}: the mockup's date (${e.core.date}) is past; the event is on ${next.start.slice(0, 10)} instead (same weekday and time)`);
         }
       }
     });
@@ -687,6 +735,10 @@ export async function rollbackDesignBuild({ jobId, client, log = () => {} }: Bui
       r.menus++;
     });
   }
+
+  for (const f of state.filled ?? []) await step(`fields of ${f.title}`, async () => {
+    await client.post(`/website-mover/v1/acf/posts/${f.id}/fields`, { values: Object.fromEntries(f.keys.map((k) => [k, null])) });
+  });
 
   const ids = Object.values(state.entities).map((e) => e.id);
   if (ids.length) await step('trash', async () => {

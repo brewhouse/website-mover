@@ -160,11 +160,13 @@ export function bindValue($: cheerio.CheerioAPI, php: Php, el: El, src: Source):
   switch (src.type) {
     case 'wysiwyg':
       $el.html(php.echo(`wp_kses_post( ${v} )`));
+      guard($, php, el, `wmd_has( ${v} )`);
       return true;
     case 'image': {
       const img = firstImg($, el);
       if (!img) return false;
       $(img as never).attr('src', php.echo(`esc_url( wmd_image_url( ${v} ) )`)).attr('alt', php.echo(`esc_attr( wmd_image_alt( ${v} ) )`)).removeAttr('srcset').removeAttr('sizes');
+      guard($, php, img, `wmd_has( ${v} )`);
       return true;
     }
     case 'gallery':
@@ -178,10 +180,13 @@ export function bindValue($: cheerio.CheerioAPI, php: Php, el: El, src: Source):
         $(a as never).attr('href', php.echo(`esc_url( ${url} )`));
         if (src.type === 'link') $(a as never).attr('wmdattr', php.echo(`wmd_link_target( ${v} )`)).removeAttr('target');
         // The link's words, unless it wraps a card (its words are other fields).
-        if (src.type === 'link' && !elementChildren(a).some((k) => !['img', 'span', 'svg', 'i', 'strong', 'em'].includes(k.name))) setText($, a, php.echo(`esc_html( wmd_link_title( ${v} ) )`));
+        const own = !elementChildren(a).some((k) => !['img', 'span', 'svg', 'i', 'strong', 'em'].includes(k.name));
+        if (src.type === 'link' && own) setText($, a, php.echo(`esc_html( wmd_link_title( ${v} ) )`));
+        if (own) guard($, php, a, `wmd_has( ${v} )`);
         return true;
       }
       setText($, el, php.echo(`esc_html( wmd_text( ${v} ) )`));
+      guard($, php, el, `wmd_has( ${v} )`);
       return true;
     }
     default: {
@@ -193,9 +198,15 @@ export function bindValue($: cheerio.CheerioAPI, php: Php, el: El, src: Source):
         setText($, a, php.echo(`esc_html( ${shown} )`));
         $(a as never).attr('href', php.echo(scheme === 'mailto' ? `esc_url( 'mailto:' . antispambot( wmd_text( ${v} ) ) )` : `esc_url( 'tel:' . wmd_tel( ${v} ) )`));
       } else setText($, el, php.echo(`esc_html( ${shown} )`));
+      guard($, php, a && scheme ? a : el, `wmd_has( ${v} )`);
       return true;
     }
   }
+}
+
+/** Prints the element only when the condition holds (an empty field shows nothing, not an empty tag). */
+export function guard($: cheerio.CheerioAPI, php: Php, el: El, cond: string): void {
+  $(el as never).before(php.token(`<?php if ( ${cond} ) : ?>`)).after(php.token('<?php endif; ?>'));
 }
 
 /** The items of a list: the holder's children with the item's selector (or the run of siblings a section starts). */

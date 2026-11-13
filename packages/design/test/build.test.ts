@@ -56,3 +56,20 @@ describe('menu targets', () => {
     expect(menuTarget(item('title:departments:Gone'), byPage, titled, 'https://x.test')).toEqual({ type: 'custom', url: '#' });
   });
 });
+
+describe('sample events and front page fields', () => {
+  it('moves a past sample event on by 52-week steps, keeping its weekday and time', async () => {
+    const { upcoming } = await import('../src/build.js');
+    const when = { start: '2026-07-02T18:00:00', end: '2026-07-02T21:00:00' };
+    const next = upcoming(when, new Date('2026-11-13T00:00:00Z'));
+    expect(next).toEqual({ start: '2027-07-01T18:00:00', end: '2027-07-01T21:00:00' });
+    expect(new Date(`${next.start}Z`).getUTCDay()).toBe(new Date(`${when.start}Z`).getUTCDay());
+    expect(upcoming(when, new Date('2026-01-01T00:00:00Z'))).toBe(when);
+  });
+
+  it('counts a field as empty when it has no text, no rows and no link', async () => {
+    const { hasValue } = await import('../src/build.js');
+    for (const v of [null, '', ' ', false, [], { title: '', url: '#' }, [{ a: '' }], '<p></p>']) expect(hasValue(v), JSON.stringify(v)).toBe(false);
+    for (const v of ['Quick Links', 12, { title: 'View all', url: '#' }, [{ a: 'x' }], '<img src="a.png">']) expect(hasValue(v), JSON.stringify(v)).toBe(true);
+  });
+});

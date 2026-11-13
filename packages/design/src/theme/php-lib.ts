@@ -1,5 +1,5 @@
 /**
- * The PHP the generated theme files share (inc/wm-design.php): asset URLs and enqueues, block
+ * The PHP the generated theme files share (inc/<job>.php, e.g. inc/newport.php): asset URLs and enqueues, block
  * registration, and small helpers the templates call. Field values can be stored in any of ACF's
  * return formats (an existing field may return an array, an ID or a URL), so the helpers accept all.
  */
@@ -137,6 +137,29 @@ add_action(
 ${blocks.replace(/^\t/gm, '\t\t')}
 	}
 );
+
+/** Whether an ACF value has something to show: not empty text, an empty link or no rows. */
+function wmd_has( $value ) {
+	if ( is_array( $value ) ) {
+		if ( array_key_exists( 'url', $value ) || array_key_exists( 'title', $value ) ) {
+			return '' !== trim( (string) ( $value['title'] ?? '' ) ) || ! in_array( trim( (string) ( $value['url'] ?? '' ) ), array( '', '#' ), true );
+		}
+		foreach ( $value as $item ) {
+			if ( wmd_has( $item ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+	if ( is_object( $value ) ) {
+		return true;
+	}
+	if ( null === $value || false === $value ) {
+		return false;
+	}
+	$text = (string) $value;
+	return '' !== trim( wp_strip_all_tags( $text ) ) || false !== stripos( $text, '<img' );
+}
 
 /** An ACF field's value as text: arrays and objects (links, posts, terms) by their title. */
 function wmd_text( $value ) {
